@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="DnnToDotCms.Tests/DnnToDotCms.Tests.csproj" />
+  <Project Path="DnnToDotCms/DnnToDotCms.csproj" />
+</Solution>
