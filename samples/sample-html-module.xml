@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Sample DNN IPortable module-content export for an HTML module.
+  This format is produced when exporting a module instance from a DNN page.
+  Example: DnnToDotCms samples/sample-html-module.xml -pretty
+-->
+<module type="HTML" version="1.0.0">
+  <moduleTitle>Welcome Banner</moduleTitle>
+  <moduleContent>
+    <![CDATA[
+    <h1>Welcome to Our Company</h1>
+    <p>We are a leading provider of enterprise software solutions.</p>
+    <p>Our products help businesses streamline operations and improve productivity.</p>
+    ]]>
+  </moduleContent>
+  <metadata>
+    <created>2026-01-15</created>
+    <lastModified>2026-03-10</lastModified>
+    <createdByUserID>1</createdByUserID>
+  </metadata>
+</module>
