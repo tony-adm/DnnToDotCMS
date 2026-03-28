@@ -1,0 +1,27 @@
+# Build output
+**/bin/
+**/obj/
+
+# Publish output
+publish/
+output/
+
+# .NET user-specific files
+*.user
+*.suo
+.vs/
+*.DotSettings.user
+
+# NuGet
+*.nupkg
+*.snupkg
+**/packages/
+!**/packages/build/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+*.swp
