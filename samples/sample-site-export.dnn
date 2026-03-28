@@ -1,0 +1,208 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Sample DNN package manifest (.dnn) containing multiple module types.
+  Use this file to test the DNN to DotCMS converter.
+  Example: DnnToDotCms samples/sample-site-export.dnn -output output/content-types.json
+-->
+<dotnetnuke type="Package" version="5.0">
+  <packages>
+
+    <!-- HTML Module -->
+    <package name="DNN_HTML" type="Module" version="9.3.2">
+      <friendlyName>HTML</friendlyName>
+      <description>
+        The HTML module renders static HTML content on the page. It supports
+        basic formatting, images, and hyperlinks.
+      </description>
+      <iconFile>DesktopModules/HTML/icon.png</iconFile>
+      <owner>
+        <name>DNN Corp</name>
+        <organization>DNN Corp</organization>
+        <url>https://www.dnnsoftware.com</url>
+        <email>support@dnnsoftware.com</email>
+      </owner>
+      <components>
+        <component type="Module">
+          <desktopModule>
+            <moduleName>DNN_HTML</moduleName>
+            <foldername>HTML</foldername>
+            <businessControllerClass>DotNetNuke.Modules.Html.HtmlTextController, DotNetNuke.Modules.Html</businessControllerClass>
+            <supportedFeatures>
+              <supportedFeature type="Portable">Y</supportedFeature>
+            </supportedFeatures>
+            <moduleDefinitions>
+              <moduleDefinition>
+                <friendlyName>HTML</friendlyName>
+                <defaultCacheTime>0</defaultCacheTime>
+                <moduleControls>
+                  <moduleControl>
+                    <controlKey/>
+                    <controlSrc>DesktopModules/HTML/HtmlModule.ascx</controlSrc>
+                    <controlType>View</controlType>
+                    <helpUrl/>
+                  </moduleControl>
+                  <moduleControl>
+                    <controlKey>Edit</controlKey>
+                    <controlSrc>DesktopModules/HTML/EditHtml.ascx</controlSrc>
+                    <controlType>Edit</controlType>
+                    <helpUrl/>
+                  </moduleControl>
+                </moduleControls>
+              </moduleDefinition>
+            </moduleDefinitions>
+          </desktopModule>
+        </component>
+      </components>
+    </package>
+
+    <!-- Events Module -->
+    <package name="DNNEvents" type="Module" version="6.0.0">
+      <friendlyName>Events</friendlyName>
+      <description>
+        The Events module allows you to display and manage a calendar of events,
+        including start/end dates, locations, and recurrence.
+      </description>
+      <iconFile>DesktopModules/Events/icon.png</iconFile>
+      <owner>
+        <name>Events Team</name>
+        <organization>DNN Corp</organization>
+        <url>https://www.dnnsoftware.com</url>
+        <email>events@dnnsoftware.com</email>
+      </owner>
+      <components>
+        <component type="Module">
+          <desktopModule>
+            <moduleName>DNNEvents</moduleName>
+            <foldername>Events</foldername>
+            <businessControllerClass>DotNetNuke.Modules.Events.EventsController, DotNetNuke.Modules.Events</businessControllerClass>
+            <moduleDefinitions>
+              <moduleDefinition>
+                <friendlyName>Events</friendlyName>
+                <defaultCacheTime>0</defaultCacheTime>
+                <moduleControls>
+                  <moduleControl>
+                    <controlKey/>
+                    <controlSrc>DesktopModules/Events/EventsView.ascx</controlSrc>
+                    <controlType>View</controlType>
+                    <helpUrl/>
+                  </moduleControl>
+                  <moduleControl>
+                    <controlKey>Edit</controlKey>
+                    <controlSrc>DesktopModules/Events/EventsEdit.ascx</controlSrc>
+                    <controlType>Edit</controlType>
+                    <helpUrl/>
+                  </moduleControl>
+                </moduleControls>
+              </moduleDefinition>
+            </moduleDefinitions>
+          </desktopModule>
+        </component>
+      </components>
+    </package>
+
+    <!-- FAQs Module -->
+    <package name="DNN_FAQs" type="Module" version="5.0.0">
+      <friendlyName>FAQs</friendlyName>
+      <description>
+        The FAQs module lets you create a searchable Frequently Asked Questions
+        list with categorised question/answer pairs.
+      </description>
+      <components>
+        <component type="Module">
+          <desktopModule>
+            <moduleName>FAQs</moduleName>
+            <foldername>FAQs</foldername>
+            <businessControllerClass>DotNetNuke.Modules.FAQs.FAQsController, DotNetNuke.Modules.FAQs</businessControllerClass>
+            <moduleDefinitions>
+              <moduleDefinition>
+                <friendlyName>FAQs</friendlyName>
+                <defaultCacheTime>60</defaultCacheTime>
+                <moduleControls>
+                  <moduleControl>
+                    <controlKey/>
+                    <controlSrc>DesktopModules/FAQs/ViewFAQs.ascx</controlSrc>
+                    <controlType>View</controlType>
+                  </moduleControl>
+                </moduleControls>
+              </moduleDefinition>
+            </moduleDefinitions>
+          </desktopModule>
+        </component>
+      </components>
+    </package>
+
+    <!-- Blog Module -->
+    <package name="DNN_Blog" type="Module" version="6.1.0">
+      <friendlyName>Blog</friendlyName>
+      <description>
+        The Blog module provides a complete blogging platform with posts,
+        categories, tags, comments, and author management.
+      </description>
+      <components>
+        <component type="Module">
+          <desktopModule>
+            <moduleName>Blog</moduleName>
+            <foldername>Blog</foldername>
+            <businessControllerClass>DotNetNuke.Modules.Blog.BlogController, DotNetNuke.Modules.Blog</businessControllerClass>
+            <moduleDefinitions>
+              <moduleDefinition>
+                <friendlyName>Blog</friendlyName>
+                <defaultCacheTime>0</defaultCacheTime>
+                <moduleControls>
+                  <moduleControl>
+                    <controlKey/>
+                    <controlSrc>DesktopModules/Blog/BlogView.ascx</controlSrc>
+                    <controlType>View</controlType>
+                  </moduleControl>
+                  <moduleControl>
+                    <controlKey>Edit</controlKey>
+                    <controlSrc>DesktopModules/Blog/BlogEdit.ascx</controlSrc>
+                    <controlType>Edit</controlType>
+                  </moduleControl>
+                </moduleControls>
+              </moduleDefinition>
+            </moduleDefinitions>
+          </desktopModule>
+        </component>
+      </components>
+    </package>
+
+    <!-- Document Library Module -->
+    <package name="DNN_Documents" type="Module" version="5.0.0">
+      <friendlyName>Documents</friendlyName>
+      <description>
+        The Documents module provides a document repository with categories,
+        file metadata, and download tracking.
+      </description>
+      <components>
+        <component type="Module">
+          <desktopModule>
+            <moduleName>Documents</moduleName>
+            <foldername>Documents</foldername>
+            <businessControllerClass>DotNetNuke.Modules.Documents.DocumentsController, DotNetNuke.Modules.Documents</businessControllerClass>
+            <moduleDefinitions>
+              <moduleDefinition>
+                <friendlyName>Documents</friendlyName>
+                <defaultCacheTime>0</defaultCacheTime>
+                <moduleControls>
+                  <moduleControl>
+                    <controlKey/>
+                    <controlSrc>DesktopModules/Documents/ViewDocuments.ascx</controlSrc>
+                    <controlType>View</controlType>
+                  </moduleControl>
+                </moduleControls>
+              </moduleDefinition>
+            </moduleDefinitions>
+          </desktopModule>
+        </component>
+      </components>
+    </package>
+
+    <!-- Non-module package (should be skipped) -->
+    <package name="DNN_SkinObject" type="SkinObject" version="1.0.0">
+      <friendlyName>Sample Skin Object</friendlyName>
+      <description>This is not a module and should be ignored by the converter.</description>
+    </package>
+
+  </packages>
+</dotnetnuke>
