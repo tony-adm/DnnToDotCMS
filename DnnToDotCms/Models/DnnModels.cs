@@ -16,6 +16,16 @@ public sealed record DnnModuleDefinition(
 }
 
 /// <summary>
+/// Represents the HTML content of a single DNN HTML/Text module instance,
+/// extracted from the LiteDB database in <c>export_db.zip</c>.
+/// </summary>
+public sealed record DnnHtmlContent(
+    /// <summary>Display title for the content item (from the module title or tab name).</summary>
+    string Title,
+    /// <summary>Decoded HTML body text.</summary>
+    string HtmlBody);
+
+/// <summary>
 /// Represents a DNN module parsed from either a .dnn package manifest or an
 /// IPortable serialised module-content export.
 /// </summary>

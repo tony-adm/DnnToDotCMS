@@ -520,4 +520,73 @@ public class DnnXmlParserTests
             File.Delete(path);
         }
     }
+
+    // ------------------------------------------------------------------
+    // ParseHtmlContents / ExtractHtmlBodyFromDnnXml tests
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void ExtractHtmlBodyFromDnnXml_DecodesHtmlEntities()
+    {
+        const string xmlContent = """
+            <htmltext><content><![CDATA[&lt;h1&gt;Hello&lt;/h1&gt;]]></content></htmltext>
+            """;
+
+        string? result = DnnXmlParser.ExtractHtmlBodyFromDnnXml(xmlContent);
+
+        Assert.NotNull(result);
+        Assert.Equal("<h1>Hello</h1>", result);
+    }
+
+    [Fact]
+    public void ExtractHtmlBodyFromDnnXml_ReturnsNullOnEmptyContent()
+    {
+        const string xmlContent = """
+            <htmltext><content><![CDATA[   ]]></content></htmltext>
+            """;
+
+        string? result = DnnXmlParser.ExtractHtmlBodyFromDnnXml(xmlContent);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void ExtractHtmlBodyFromDnnXml_ReturnsNullOnInvalidXml()
+    {
+        string? result = DnnXmlParser.ExtractHtmlBodyFromDnnXml("not-valid-xml");
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void ExtractHtmlBodyFromDnnXml_DecodesQuotesAndAmpersands()
+    {
+        const string xmlContent = """
+            <htmltext><content><![CDATA[&lt;p class=&quot;x&quot;&gt;a &amp; b&lt;/p&gt;]]></content></htmltext>
+            """;
+
+        string? result = DnnXmlParser.ExtractHtmlBodyFromDnnXml(xmlContent);
+
+        Assert.NotNull(result);
+        Assert.Equal("<p class=\"x\">a & b</p>", result);
+    }
+
+    [Fact]
+    public void ParseHtmlContents_ReturnsEmptyWhenNoExportDb()
+    {
+        string tempDir = Path.GetTempFileName();
+        File.Delete(tempDir);
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            // No export_db.zip in the folder → should return empty list, not throw.
+            IReadOnlyList<DnnHtmlContent> result =
+                DnnXmlParser.ParseHtmlContents(tempDir);
+            Assert.Empty(result);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
 }
