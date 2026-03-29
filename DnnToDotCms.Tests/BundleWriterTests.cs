@@ -390,4 +390,360 @@ public class BundleWriterTests
 
         Assert.Equal(2, ids.Distinct().Count());
     }
+
+    // ------------------------------------------------------------------
+    // Themes ZIP helper — builds an in-memory export_themes.zip with
+    // a skin and a container ASCX, matching the DNN export layout.
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Creates a minimal in-memory themes ZIP that contains one container and
+    /// one skin ASCX, replicating the <c>_default/Containers/</c> and
+    /// <c>_default/Skins/</c> structure produced by DNN Export.
+    /// </summary>
+    private static string BuildThemesZip(
+        string containerAscx = """
+            <%@ Control Inherits="DotNetNuke.UI.Containers.Container" %>
+            <%@ Register TagPrefix="dnn" TagName="TITLE" Src="~/Admin/Containers/Title.ascx" %>
+            <div class="DNNContainer_Boxed">
+                <h2><dnn:TITLE runat="server" id="dnnTITLE" /></h2>
+                <div id="ContentPane" runat="server"></div>
+            </div>
+            """,
+        string skinAscx = """
+            <%@ Control Inherits="DotNetNuke.UI.Skins.Skin" %>
+            <%@ Register TagPrefix="dnn" TagName="LOGO" Src="~/Admin/Skins/Logo.ascx" %>
+            <%@ Register TagPrefix="dnn" TagName="MENU" Src="~/DesktopModules/DDRMenu/Menu.ascx" %>
+            <div id="siteWrapper">
+                <dnn:LOGO runat="server" id="dnnLOGO" />
+                <dnn:MENU runat="server" id="dnnMENU" />
+                <div id="ContentPane" runat="server"></div>
+            </div>
+            """)
+    {
+        string path = Path.GetTempFileName() + ".zip";
+        using (var zip = ZipFile.Open(path, ZipArchiveMode.Create))
+        {
+            ZipArchiveEntry containerEntry =
+                zip.CreateEntry("_default/Containers/TestTheme/Boxed.ascx");
+            using (var w = new StreamWriter(containerEntry.Open()))
+                w.Write(containerAscx);
+
+            ZipArchiveEntry skinEntry =
+                zip.CreateEntry("_default/Skins/TestTheme/Home.ascx");
+            using (var w = new StreamWriter(skinEntry.Open()))
+                w.Write(skinAscx);
+        }
+        return path;
+    }
+
+    // ------------------------------------------------------------------
+    // Container bundle entry tests
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Write_WithThemesZip_IncludesContainerXmlEntry()
+    {
+        string zipPath = BuildThemesZip();
+        try
+        {
+            var (_, names) = WriteBundleToMemory([MakeHtmlContentType()], zipPath);
+
+            Assert.Contains(names,
+                n => n.StartsWith("working/System Host/") &&
+                     n.EndsWith(".containers.container.xml"));
+        }
+        finally { File.Delete(zipPath); }
+    }
+
+    [Fact]
+    public void Write_WithThemesZip_ContainerXmlHasCorrectRootElement()
+    {
+        string zipPath = BuildThemesZip();
+        try
+        {
+            var (ms, names) = WriteBundleToMemory([MakeHtmlContentType()], zipPath);
+            string entryName = names.First(
+                n => n.EndsWith(".containers.container.xml"));
+            string xml = ReadTarEntry(ms, entryName)!;
+
+            Assert.Contains("<com.dotcms.publisher.pusher.wrapper.ContainerWrapper>", xml);
+            Assert.Contains("<operation>PUBLISH</operation>", xml);
+            Assert.Contains("<assetType>containers</assetType>", xml);
+        }
+        finally { File.Delete(zipPath); }
+    }
+
+    [Fact]
+    public void Write_WithThemesZip_ContainerXmlIncludesConvertedCode()
+    {
+        string zipPath = BuildThemesZip();
+        try
+        {
+            var (ms, names) = WriteBundleToMemory([MakeHtmlContentType()], zipPath);
+            string entryName = names.First(n => n.EndsWith(".containers.container.xml"));
+            string xml = ReadTarEntry(ms, entryName)!;
+
+            // <dnn:TITLE> should have been converted to $dotContent.title
+            Assert.Contains("$dotContent.title", xml);
+            // ContentPane div should have been replaced with $!{dotContent.body}
+            Assert.Contains("$!{dotContent.body}", xml);
+        }
+        finally { File.Delete(zipPath); }
+    }
+
+    [Fact]
+    public void Write_WithThemesZip_ManifestIncludesContainersRow()
+    {
+        string zipPath = BuildThemesZip();
+        try
+        {
+            var (ms, names) = WriteBundleToMemory([MakeHtmlContentType()], zipPath);
+            string manifest = ReadTarEntry(ms, "manifest.csv")!;
+
+            Assert.Contains("INCLUDED,containers,", manifest);
+        }
+        finally { File.Delete(zipPath); }
+    }
+
+    // ------------------------------------------------------------------
+    // Template bundle entry tests
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Write_WithThemesZip_IncludesTemplateXmlEntry()
+    {
+        string zipPath = BuildThemesZip();
+        try
+        {
+            var (_, names) = WriteBundleToMemory([MakeHtmlContentType()], zipPath);
+
+            Assert.Contains(names,
+                n => n.StartsWith("working/System Host/") &&
+                     n.EndsWith(".template.template.xml"));
+        }
+        finally { File.Delete(zipPath); }
+    }
+
+    [Fact]
+    public void Write_WithThemesZip_TemplateXmlHasCorrectRootElement()
+    {
+        string zipPath = BuildThemesZip();
+        try
+        {
+            var (ms, names) = WriteBundleToMemory([MakeHtmlContentType()], zipPath);
+            string entryName = names.First(n => n.EndsWith(".template.template.xml"));
+            string xml = ReadTarEntry(ms, entryName)!;
+
+            Assert.Contains("<com.dotcms.publisher.pusher.wrapper.TemplateWrapper>", xml);
+            Assert.Contains("<operation>PUBLISH</operation>", xml);
+            Assert.Contains("<assetType>template</assetType>", xml);
+        }
+        finally { File.Delete(zipPath); }
+    }
+
+    [Fact]
+    public void Write_WithThemesZip_TemplateXmlBodyContainsConvertedHtml()
+    {
+        string zipPath = BuildThemesZip();
+        try
+        {
+            var (ms, names) = WriteBundleToMemory([MakeHtmlContentType()], zipPath);
+            string entryName = names.First(n => n.EndsWith(".template.template.xml"));
+            string xml = ReadTarEntry(ms, entryName)!;
+
+            // Structural HTML (siteWrapper div) should be present
+            Assert.Contains("siteWrapper", xml);
+            // DNN directives should have been removed
+            Assert.DoesNotContain("<%@", xml);
+        }
+        finally { File.Delete(zipPath); }
+    }
+
+    [Fact]
+    public void Write_WithThemesZip_ManifestIncludesTemplateRow()
+    {
+        string zipPath = BuildThemesZip();
+        try
+        {
+            var (ms, names) = WriteBundleToMemory([MakeHtmlContentType()], zipPath);
+            string manifest = ReadTarEntry(ms, "manifest.csv")!;
+
+            Assert.Contains("INCLUDED,template,", manifest);
+        }
+        finally { File.Delete(zipPath); }
+    }
+
+    // ------------------------------------------------------------------
+    // ASCX → HTML conversion tests
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void ConvertAscxToContainerHtml_RemovesDirectives()
+    {
+        const string ascx = """
+            <%@ Control AutoEventWireup="false" Inherits="DotNetNuke.UI.Containers.Container" %>
+            <%@ Register TagPrefix="dnn" TagName="TITLE" Src="~/Admin/Containers/Title.ascx" %>
+            <div class="container"></div>
+            """;
+
+        string result = BundleWriter.ConvertAscxToContainerHtml(ascx);
+
+        Assert.DoesNotContain("<%@", result);
+    }
+
+    [Fact]
+    public void ConvertAscxToContainerHtml_ReplacesTitleControl()
+    {
+        const string ascx = """
+            <div>
+                <h2><dnn:TITLE runat="server" id="dnnTITLE" CssClass="Title" /></h2>
+                <div id="ContentPane" runat="server"></div>
+            </div>
+            """;
+
+        string result = BundleWriter.ConvertAscxToContainerHtml(ascx);
+
+        Assert.Contains("$dotContent.title", result);
+        Assert.DoesNotContain("dnn:TITLE", result);
+    }
+
+    [Fact]
+    public void ConvertAscxToContainerHtml_ReplacesContentPane()
+    {
+        const string ascx = """
+            <div class="wrapper">
+                <div id="ContentPane" runat="server"></div>
+            </div>
+            """;
+
+        string result = BundleWriter.ConvertAscxToContainerHtml(ascx);
+
+        Assert.Contains("$!{dotContent.body}", result);
+        Assert.DoesNotContain("ContentPane", result);
+    }
+
+    [Fact]
+    public void ConvertAscxToContainerHtml_RemovesRunatServer()
+    {
+        const string ascx = """<div id="Wrapper" runat="server"><p>text</p></div>""";
+
+        string result = BundleWriter.ConvertAscxToContainerHtml(ascx);
+
+        Assert.DoesNotContain("runat=\"server\"", result);
+        Assert.Contains("<div id=\"Wrapper\">", result);
+    }
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_RemovesDirectives()
+    {
+        const string ascx = """
+            <%@ Control Language="vb" Inherits="DotNetNuke.UI.Skins.Skin" %>
+            <%@ Register TagPrefix="dnn" TagName="LOGO" Src="~/Admin/Skins/Logo.ascx" %>
+            <div id="siteWrapper"></div>
+            """;
+
+        string result = BundleWriter.ConvertAscxToTemplateHtml(ascx);
+
+        Assert.DoesNotContain("<%@", result);
+    }
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_ReplacesLogoControl()
+    {
+        const string ascx = """
+            <div><dnn:LOGO runat="server" id="dnnLogo" /></div>
+            """;
+
+        string result = BundleWriter.ConvertAscxToTemplateHtml(ascx);
+
+        Assert.Contains("<img", result);
+        Assert.DoesNotContain("dnn:LOGO", result);
+    }
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_ReplacesMenuControl()
+    {
+        const string ascx = """
+            <nav><dnn:MENU runat="server" MenuStyle="Suckerfish" /></nav>
+            """;
+
+        string result = BundleWriter.ConvertAscxToTemplateHtml(ascx);
+
+        Assert.Contains("<!-- Navigation -->", result);
+        Assert.DoesNotContain("dnn:MENU", result);
+    }
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_RemovesStylesAndJquery()
+    {
+        const string ascx = """
+            <dnn:STYLES runat="server" id="styles" />
+            <dnn:jQuery runat="server" id="jquery" />
+            <div id="body"></div>
+            """;
+
+        string result = BundleWriter.ConvertAscxToTemplateHtml(ascx);
+
+        Assert.DoesNotContain("dnn:STYLES", result);
+        Assert.DoesNotContain("dnn:jQuery", result);
+        Assert.Contains("id=\"body\"", result);
+    }
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_PreservesStructuralHtml()
+    {
+        const string ascx = """
+            <%@ Control Inherits="DotNetNuke.UI.Skins.Skin" %>
+            <div id="siteWrapper">
+                <div id="header"><dnn:LOGO runat="server" id="dnnLogo" /></div>
+                <div id="ContentPane" runat="server"></div>
+                <div id="footer"><!-- footer --></div>
+            </div>
+            """;
+
+        string result = BundleWriter.ConvertAscxToTemplateHtml(ascx);
+
+        Assert.Contains("id=\"siteWrapper\"", result);
+        Assert.Contains("id=\"header\"", result);
+        Assert.Contains("id=\"footer\"", result);
+    }
+
+    // ------------------------------------------------------------------
+    // Sub-folder ASCX files are excluded from conversion
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Write_WithThemesZip_SubFolderAscxIsNotConvertedToEntry()
+    {
+        // Build a themes zip that contains a sub-folder ASCX (Common/AddFiles.ascx)
+        // — these should be skipped; only top-level ThemeName/*.ascx are converted.
+        string path = Path.GetTempFileName() + ".zip";
+        try
+        {
+            using (var zip = ZipFile.Open(path, ZipArchiveMode.Create))
+            {
+                // Top-level container — should produce an entry
+                ZipArchiveEntry top = zip.CreateEntry(
+                    "_default/Containers/TestTheme/Boxed.ascx");
+                using (var w = new StreamWriter(top.Open()))
+                    w.Write("""<div id="ContentPane" runat="server"></div>""");
+
+                // Sub-folder helper — should be skipped
+                ZipArchiveEntry sub = zip.CreateEntry(
+                    "_default/Skins/TestTheme/Common/AddFiles.ascx");
+                using (var w = new StreamWriter(sub.Open()))
+                    w.Write("""<div>helper</div>""");
+            }
+
+            var (_, names) = WriteBundleToMemory([MakeHtmlContentType()], path);
+
+            int containerCount = names.Count(n => n.EndsWith(".containers.container.xml"));
+            int templateCount  = names.Count(n => n.EndsWith(".template.template.xml"));
+
+            Assert.Equal(1, containerCount);  // only the top-level container
+            Assert.Equal(0, templateCount);   // no top-level skins
+        }
+        finally { File.Delete(path); }
+    }
 }

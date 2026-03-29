@@ -4,7 +4,12 @@ A C# (.NET 8) command-line tool that converts **DNN (DotNetNuke)** site exports 
 
 ## Overview
 
-DNN organises content in *modules* placed on pages. DotCMS organises content in *Content Types* with structured fields. This tool reads a DNN export and produces a DotCMS-compatible push-publish bundle containing the converted content types and, when available, the static theme assets from the DNN skin.
+DNN organises content in *modules* placed on pages. DotCMS organises content in *Content Types* with structured fields. This tool reads a DNN export and produces a DotCMS-compatible push-publish bundle containing:
+
+- **Content types** — converted from DNN module definitions
+- **Containers** — converted from DNN container ASCX templates (`.containers.container.xml`)
+- **Templates/Layouts** — converted from DNN skin ASCX templates (`.template.template.xml`)
+- **Static theme assets** — CSS, JS, images and fonts from the DNN skin
 
 ## Features
 
@@ -15,10 +20,14 @@ DNN organises content in *modules* placed on pages. DotCMS organises content in 
 - Maps 14 common DNN module types to DotCMS content types out of the box (see table below)
 - De-duplicates: multiple DNN modules of the same type produce a single content type definition
 - Falls back to a generic two-field content type for unrecognised module types
+- Converts DNN **container** ASCX templates to DotCMS container XML bundle entries
+- Converts DNN **skin** ASCX templates to DotCMS template XML bundle entries
 - Outputs a DotCMS push-publish bundle (`.tar.gz`) containing:
   - `working/System Host/{uuid}.contentType.json` — one file per converted content type
-  - `manifest.csv` — bundle manifest listing all content types
-  - `themes/{ThemeName}/…` — static theme assets (CSS, JS, images, fonts) extracted from `export_themes.zip` when the input is a DNN export folder
+  - `working/System Host/{uuid}.containers.container.xml` — one file per DNN container
+  - `working/System Host/{uuid}.template.template.xml` — one file per DNN skin
+  - `manifest.csv` — bundle manifest listing all items
+  - `themes/{ThemeName}/…` — static theme assets (CSS, JS, images, fonts) from `export_themes.zip`
 
 ## Supported Module Mappings
 
@@ -101,7 +110,7 @@ dotnet publish DnnToDotCms -c Release -o ./publish
 
 1. Run the tool to produce `site.tar.gz`.
 2. In DotCMS, go to **Dev Tools → Push & Publish → Bundle Import** (or use the Push Publish REST endpoint).
-3. Upload `site.tar.gz`. DotCMS will import all content types listed in the bundle.
+3. Upload `site.tar.gz`. DotCMS will import all content types, containers, and templates listed in the bundle.
 
 > **Theme assets note:** The static files under `themes/` inside the bundle
 > (CSS, JS, images, fonts) are included for reference and are not automatically
@@ -165,17 +174,43 @@ The tool produces a **DotCMS push-publish bundle** (`.tar.gz`). The bundle conta
 
 ```
 site.tar.gz
-├── manifest.csv                                    ← bundle manifest
+├── manifest.csv                                              ← bundle manifest
 ├── working/
 │   └── System Host/
-│       ├── {uuid}.contentType.json                 ← one file per content type
-│       └── …
+│       ├── {uuid}.contentType.json                           ← one file per content type
+│       ├── {uuid}.containers.container.xml                   ← one file per DNN container
+│       └── {uuid}.template.template.xml                      ← one file per DNN skin
 └── themes/
-    └── {ThemeName}/                                ← static skin assets (CSS/JS/images)
+    └── {ThemeName}/                                          ← static skin assets (CSS/JS/images)
         ├── skin.css
         ├── Bootstrap/css/bootstrap.min.css
         └── …
 ```
+
+### Container XML format
+
+Each DNN container ASCX is converted to a DotCMS `ContainerWrapper` XML entry.
+The ASCX markup is transformed:
+- `<dnn:TITLE …/>` → `$dotContent.title` (Velocity variable)
+- `<div id="ContentPane" runat="server">…</div>` → `$!{dotContent.body}` (Velocity variable)
+- `runat="server"` attributes removed
+- ASP.NET directive blocks (`<%@ … %>`) removed
+
+### Template XML format
+
+Each DNN skin ASCX is converted to a DotCMS `TemplateWrapper` XML entry.
+The ASCX markup is transformed:
+- `<dnn:LOGO …/>` → `<img src="/logo.png" alt="Logo" />`
+- `<dnn:MENU …/>` → `<!-- Navigation -->`
+- `<dnn:SEARCH …/>` → `<!-- Search -->`
+- `<dnn:USER …/>` → `<!-- User Panel -->`
+- `<dnn:LOGIN …/>` → `<!-- Login -->`
+- `<dnn:COPYRIGHT …/>` → `<!-- Copyright -->`
+- `<dnn:BREADCRUMB …/>` → `<!-- Breadcrumb -->`
+- `<dnn:STYLES …/>`, `<dnn:jQuery …/>`, `<dnn:META …/>` removed (handled by DotCMS)
+- All other structural HTML is preserved
+
+### Content type JSON format
 
 Each `contentType.json` file uses the DotCMS push-publish bundle format:
 
