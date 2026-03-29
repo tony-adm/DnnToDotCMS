@@ -110,33 +110,36 @@ public static class BundleWriter
             manifestEntries.Add(("host", siteId, siteInode, hostname, "System Host", "/"));
         }
 
+        // Determine which host identifier and working-directory name to use
+        // for content types, containers, and templates.  When a new site is
+        // being created all three asset classes are placed under that site so
+        // that DotCMS associates them correctly on import.
+        string contentHostId  = siteId   ?? "SYSTEM_HOST";
+        string contentWorkDir = hostname ?? "System Host";
+        string contentSiteName = hostname ?? "systemHost";
+
         // --- content types ---------------------------------------------------
         foreach (DotCmsContentType ct in contentTypes)
         {
-            string id    = Guid.NewGuid().ToString();
-            string json  = BuildContentTypeJson(ct, id);
-            WriteTextEntry(tar, $"working/System Host/{id}.contentType.json", json);
-            manifestEntries.Add(("contenttype", id, "", ct.Name, "System Host", "/"));
+            string id   = Guid.NewGuid().ToString();
+            string json = BuildContentTypeJson(ct, id, contentHostId, contentSiteName);
+            WriteTextEntry(tar, $"working/{contentWorkDir}/{id}.contentType.json", json);
+            manifestEntries.Add(("contenttype", id, "", ct.Name, contentWorkDir, "/"));
         }
-
-        // Determine which host identifier and working-directory name to use
-        // for containers and templates.
-        string containerHostId   = siteId   ?? "SYSTEM_HOST";
-        string containerWorkDir  = hostname ?? "System Host";
 
         // --- containers (from DNN containers) --------------------------------
         foreach (var (id, inode, name, html) in containerDefs)
         {
-            string xml = BuildContainerXml(id, inode, name, html, containerHostId);
-            WriteTextEntry(tar, $"working/{containerWorkDir}/{id}.containers.container.xml", xml);
+            string xml = BuildContainerXml(id, inode, name, html, contentHostId);
+            WriteTextEntry(tar, $"working/{contentWorkDir}/{id}.containers.container.xml", xml);
             manifestEntries.Add(("containers", id, inode, name, "", ""));
         }
 
         // --- templates (from DNN skins) --------------------------------------
         foreach (var (id, inode, name, html) in templateDefs)
         {
-            string xml = BuildTemplateXml(id, inode, name, html, containerHostId);
-            WriteTextEntry(tar, $"working/{containerWorkDir}/{id}.template.template.xml", xml);
+            string xml = BuildTemplateXml(id, inode, name, html, contentHostId);
+            WriteTextEntry(tar, $"working/{contentWorkDir}/{id}.template.template.xml", xml);
             manifestEntries.Add(("template", id, inode, name, "", ""));
         }
 
@@ -163,7 +166,11 @@ public static class BundleWriter
     // Content-type JSON builder
     // ------------------------------------------------------------------
 
-    private static string BuildContentTypeJson(DotCmsContentType ct, string id)
+    private static string BuildContentTypeJson(
+        DotCmsContentType ct,
+        string id,
+        string hostId   = "SYSTEM_HOST",
+        string siteName = "systemHost")
     {
         // Make the content-type clazz Immutable-prefixed for bundle format.
         string ctClazz = ToImmutableClazz(ct.Clazz);
@@ -179,6 +186,8 @@ public static class BundleWriter
             System          = ct.System,
             Variable        = ct.Variable,
             Icon            = ct.Icon,
+            Host            = hostId,
+            SiteName        = siteName,
         };
 
         var bundleFields = BuildBundleFields(ct.Fields, id);

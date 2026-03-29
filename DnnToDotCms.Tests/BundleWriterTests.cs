@@ -968,6 +968,93 @@ public class BundleWriterTests
     }
 
     // ------------------------------------------------------------------
+    // Site-scoped content type tests
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Write_WithSiteName_ContentTypesGoToSiteDirectory()
+    {
+        var (_, names) = WriteBundleWithSite("My Website");
+
+        Assert.Contains(names, n =>
+            n.StartsWith("working/my-website/") &&
+            n.EndsWith(".contentType.json"));
+        Assert.DoesNotContain(names, n =>
+            n.StartsWith("working/System Host/") &&
+            n.EndsWith(".contentType.json"));
+    }
+
+    [Fact]
+    public void Write_WithSiteName_ContentTypeJsonHasSiteHostId()
+    {
+        var (ms, names) = WriteBundleWithSite("My Website");
+        string entryName = names.First(n => n.EndsWith(".contentType.json"));
+        string json = ReadTarEntry(ms, entryName)!;
+        using var doc = JsonDocument.Parse(json);
+
+        string host = doc.RootElement
+            .GetProperty("contentType").GetProperty("host").GetString()!;
+
+        // Must NOT be the literal SYSTEM_HOST value; must be a site UUID.
+        Assert.NotEqual("SYSTEM_HOST", host);
+        Assert.True(Guid.TryParse(host, out _),
+            $"host should be a UUID; got: '{host}'");
+    }
+
+    [Fact]
+    public void Write_WithSiteName_ContentTypeJsonHasSiteName()
+    {
+        var (ms, names) = WriteBundleWithSite("My Website");
+        string entryName = names.First(n => n.EndsWith(".contentType.json"));
+        string json = ReadTarEntry(ms, entryName)!;
+        using var doc = JsonDocument.Parse(json);
+
+        string siteName = doc.RootElement
+            .GetProperty("contentType").GetProperty("siteName").GetString()!;
+
+        Assert.Equal("my-website", siteName);
+    }
+
+    [Fact]
+    public void Write_WithSiteName_ManifestContentTypeRowUsesSiteName()
+    {
+        var (ms, _) = WriteBundleWithSite("My Website");
+        string manifest = ReadTarEntry(ms, "manifest.csv")!;
+
+        string ctLine = manifest
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .First(l => l.StartsWith("INCLUDED,contenttype,"));
+
+        // The site column should be "my-website", not "System Host".
+        Assert.Contains("my-website", ctLine);
+        Assert.DoesNotContain("System Host", ctLine);
+    }
+
+    [Fact]
+    public void Write_WithoutSiteName_ContentTypesStayOnSystemHost()
+    {
+        var (_, names) = WriteBundleToMemory([MakeHtmlContentType()]);
+
+        Assert.Contains(names, n =>
+            n.StartsWith("working/System Host/") &&
+            n.EndsWith(".contentType.json"));
+        Assert.DoesNotContain(names, n =>
+            !n.StartsWith("working/System Host/") &&
+            n.EndsWith(".contentType.json"));
+    }
+
+    [Fact]
+    public void Write_WithoutSiteName_ContentTypeJsonHasSystemHost()
+    {
+        var (ms, names) = WriteBundleToMemory([MakeHtmlContentType()]);
+        using var doc = ParseFirstContentTypeJson(ms, names);
+
+        JsonElement ct = doc.RootElement.GetProperty("contentType");
+        Assert.Equal("SYSTEM_HOST", ct.GetProperty("host").GetString());
+        Assert.Equal("systemHost",  ct.GetProperty("siteName").GetString());
+    }
+
+    // ------------------------------------------------------------------
     // SanitizeHostname utility tests
     // ------------------------------------------------------------------
 
