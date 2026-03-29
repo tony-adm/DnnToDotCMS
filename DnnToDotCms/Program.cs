@@ -108,7 +108,7 @@ try
         BundleWriter.Write(contentTypes, outStream, themesZip);
 
     string themeNote = themesZip is not null
-        ? " Static theme assets included under themes/ (manual upload to DotCMS required)."
+        ? " Containers, templates, and static theme assets included from export_themes.zip."
         : string.Empty;
 
     Console.WriteLine(
@@ -157,11 +157,12 @@ static void PrintUsage()
 
         Output:
           A DotCMS push-publish site bundle (.tar.gz) containing:
-            • working/System Host/{uuid}.contentType.json  — one file per content type
-            • manifest.csv                                 — bundle manifest
-            • themes/{ThemeName}/…                         — static theme assets
-              (CSS, JS, images and fonts from export_themes.zip when available;
-               these need to be manually uploaded to DotCMS after import)
+            • working/System Host/{uuid}.contentType.json          — one file per content type
+            • working/System Host/{uuid}.containers.container.xml  — one file per DNN container
+            • working/System Host/{uuid}.template.template.xml     — one file per DNN skin
+            • manifest.csv                                         — bundle manifest
+            • themes/{ThemeName}/…                                 — static theme assets
+              (CSS, JS, images and fonts from export_themes.zip)
 
         Examples:
           DnnToDotCms example/2026-03-29_01-49-26
