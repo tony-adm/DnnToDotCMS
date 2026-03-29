@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using DnnToDotCms.Mappings;
 using DnnToDotCms.Models;
 using DnnToDotCms.Parser;
@@ -224,6 +225,197 @@ public class DnnXmlParserTests
         Assert.True(m.Extra.ContainsKey("timezone"));
         Assert.Equal("UTC-5", m.Extra["timezone"]);
         Assert.Equal("10", m.Extra["maxItems"]);
+    }
+
+    // ------------------------------------------------------------------
+    // ParseExportFolder tests
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Helper: build an in-memory folder structure matching the DNN official
+    /// site-export layout and return the folder path.
+    ///
+    /// Layout produced:
+    ///   &lt;tempDir&gt;/
+    ///     export_packages.zip
+    ///       └─ Module_TestMod_1.0.0.resources  (zip-in-zip)
+    ///            └─ testmod.dnn                 (DNN package manifest XML)
+    /// </summary>
+    private static string BuildExportFolder(string dnnXml, string moduleName = "TestMod")
+    {
+        string dir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(dir);
+
+        // inner zip: the .resources file
+        using var innerStream = new MemoryStream();
+        using (var innerZip = new ZipArchive(innerStream, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            ZipArchiveEntry dnnEntry = innerZip.CreateEntry($"{moduleName.ToLower()}.dnn");
+            using StreamWriter w = new(dnnEntry.Open());
+            w.Write(dnnXml);
+        }
+
+        // outer zip: export_packages.zip
+        string outerPath = Path.Combine(dir, "export_packages.zip");
+        using var outerZip = ZipFile.Open(outerPath, ZipArchiveMode.Create);
+        ZipArchiveEntry resourceEntry =
+            outerZip.CreateEntry($"Module_{moduleName}_1.0.0.resources");
+        using (Stream dest = resourceEntry.Open())
+        {
+            innerStream.Position = 0;
+            innerStream.CopyTo(dest);
+        }
+
+        return dir;
+    }
+
+    [Fact]
+    public void ParseExportFolder_SingleModule_ReturnsModule()
+    {
+        const string xml = """
+            <dotnetnuke type="Package" version="5.0">
+              <packages>
+                <package name="DNN_HTML" type="Module" version="9.11.2">
+                  <friendlyName>HTML</friendlyName>
+                  <description>HTML module</description>
+                  <components>
+                    <component type="Module">
+                      <desktopModule>
+                        <moduleName>DNN_HTML</moduleName>
+                        <foldername>HTML</foldername>
+                      </desktopModule>
+                    </component>
+                  </components>
+                </package>
+              </packages>
+            </dotnetnuke>
+            """;
+
+        string folder = BuildExportFolder(xml, "DNN_HTML");
+        try
+        {
+            IReadOnlyList<DnnModule> modules = DnnXmlParser.ParseExportFolder(folder);
+
+            Assert.Single(modules);
+            Assert.Equal("DNN_HTML", modules[0].ModuleName);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ParseExportFolder_MissingPackagesZip_ThrowsFileNotFoundException()
+    {
+        string emptyFolder = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(emptyFolder);
+        try
+        {
+            Assert.Throws<FileNotFoundException>(
+                () => DnnXmlParser.ParseExportFolder(emptyFolder));
+        }
+        finally
+        {
+            Directory.Delete(emptyFolder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ParseExportJson_ExportJsonFile_ReturnsModules()
+    {
+        // Arrange: build a folder with export_packages.zip and an export.json sidecar
+        const string xml = """
+            <dotnetnuke type="Package" version="5.0">
+              <packages>
+                <package name="DNN_HTML" type="Module" version="9.11.2">
+                  <friendlyName>HTML</friendlyName>
+                  <components>
+                    <component type="Module">
+                      <desktopModule>
+                        <moduleName>DNN_HTML</moduleName>
+                        <foldername>HTML</foldername>
+                      </desktopModule>
+                    </component>
+                  </components>
+                </package>
+              </packages>
+            </dotnetnuke>
+            """;
+
+        string folder = BuildExportFolder(xml, "DNN_HTML");
+        string jsonFile = Path.Combine(folder, "export.json");
+        File.WriteAllText(jsonFile, """{"Name":"TestExport","PortalName":"My Website"}""");
+        try
+        {
+            IReadOnlyList<DnnModule> modules = DnnXmlParser.ParseExportJson(jsonFile);
+
+            Assert.Single(modules);
+            Assert.Equal("DNN_HTML", modules[0].ModuleName);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ParseExportFolder_SkinsAreIgnored_OnlyModulesReturned()
+    {
+        const string moduleXml = """
+            <dotnetnuke type="Package" version="5.0">
+              <packages>
+                <package name="MyMod" type="Module" version="1.0.0">
+                  <friendlyName>My Module</friendlyName>
+                  <components>
+                    <component type="Module">
+                      <desktopModule><moduleName>MyMod</moduleName></desktopModule>
+                    </component>
+                  </components>
+                </package>
+              </packages>
+            </dotnetnuke>
+            """;
+
+        // Build a folder that also contains a Skin_ entry (should be skipped)
+        string dir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(dir);
+
+        using var innerStream = new MemoryStream();
+        using (var innerZip = new ZipArchive(innerStream, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            ZipArchiveEntry dnnEntry = innerZip.CreateEntry("mymod.dnn");
+            using StreamWriter w = new(dnnEntry.Open());
+            w.Write(moduleXml);
+        }
+
+        string outerPath = Path.Combine(dir, "export_packages.zip");
+        using (var outerZip = ZipFile.Open(outerPath, ZipArchiveMode.Create))
+        {
+            // Module entry
+            ZipArchiveEntry modEntry = outerZip.CreateEntry("Module_MyMod_1.0.0.resources");
+            using (Stream dest = modEntry.Open())
+            {
+                innerStream.Position = 0;
+                innerStream.CopyTo(dest);
+            }
+
+            // Skin entry (should be skipped)
+            ZipArchiveEntry skinEntry = outerZip.CreateEntry("Skin_MySkin_1.0.0.resources");
+            using Stream skinDest = skinEntry.Open(); // empty
+        }
+
+        try
+        {
+            IReadOnlyList<DnnModule> modules = DnnXmlParser.ParseExportFolder(dir);
+
+            Assert.Single(modules);
+            Assert.Equal("MyMod", modules[0].ModuleName);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
     }
 
     // ------------------------------------------------------------------
