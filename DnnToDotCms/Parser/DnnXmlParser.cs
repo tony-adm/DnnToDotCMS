@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Text.Json;
 using System.Xml.Linq;
 using DnnToDotCms.Models;
 
@@ -33,6 +34,36 @@ public static class DnnXmlParser
     // ------------------------------------------------------------------
     // Public API
     // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Reads the portal / site name from a DNN export folder or <c>export.json</c>
+    /// manifest file.  Returns <see langword="null"/> when the file does not
+    /// exist or cannot be parsed.
+    /// </summary>
+    /// <param name="exportFolderOrJson">
+    /// Either the DNN export folder path or the full path to <c>export.json</c>.
+    /// </param>
+    public static string? ParsePortalName(string exportFolderOrJson)
+    {
+        string jsonPath = Directory.Exists(exportFolderOrJson)
+            ? Path.Combine(exportFolderOrJson, "export.json")
+            : exportFolderOrJson;
+
+        if (!File.Exists(jsonPath))
+            return null;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(jsonPath));
+            return doc.RootElement.TryGetProperty("PortalName", out JsonElement pn)
+                ? pn.GetString()
+                : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
 
     /// <summary>
     /// Parse a DNN official site-export from an <c>export.json</c> manifest file.

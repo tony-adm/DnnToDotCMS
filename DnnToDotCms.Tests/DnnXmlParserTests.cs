@@ -440,4 +440,84 @@ public class DnnXmlParserTests
         const string xml = "<unknownRoot><child/></unknownRoot>";
         Assert.Throws<InvalidOperationException>(() => DnnXmlParser.ParseXml(xml));
     }
+
+    // ------------------------------------------------------------------
+    // ParsePortalName
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void ParsePortalName_ReadsPortalNameFromFolder()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(dir);
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(dir, "export.json"),
+                """{"PortalName":"My Test Site","ExportVersion":"1"}""");
+
+            string? result = DnnXmlParser.ParsePortalName(dir);
+            Assert.Equal("My Test Site", result);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ParsePortalName_ReadsPortalNameFromJsonFile()
+    {
+        string path = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllText(path, """{"PortalName":"Direct File","Other":"ignored"}""");
+
+            string? result = DnnXmlParser.ParsePortalName(path);
+            Assert.Equal("Direct File", result);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void ParsePortalName_ReturnsNullWhenFileDoesNotExist()
+    {
+        string? result = DnnXmlParser.ParsePortalName("/nonexistent/path");
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void ParsePortalName_ReturnsNullWhenPropertyMissing()
+    {
+        string path = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllText(path, """{"Other":"value"}""");
+            string? result = DnnXmlParser.ParsePortalName(path);
+            Assert.Null(result);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void ParsePortalName_ReturnsNullOnCorruptJson()
+    {
+        string path = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllText(path, "not-json");
+            string? result = DnnXmlParser.ParsePortalName(path);
+            Assert.Null(result);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }
