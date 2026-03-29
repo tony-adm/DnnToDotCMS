@@ -39,15 +39,35 @@ DNN organises content in *modules* placed on pages. DotCMS organises content in 
 
 - [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) or later
 
-## Build
+## Quick Start
 
 ```bash
 git clone https://github.com/tony-adm/DnnToDotCMS.git
 cd DnnToDotCMS
+dotnet run --project DnnToDotCms -- example/2026-03-29_01-49-26 --pretty
+```
+
+> **Note:** The executable project lives in the `DnnToDotCms/` subfolder.
+> Always include `--project DnnToDotCms` when running from the repo root, or
+> `cd` into the subfolder first and use `../` to reach the example files:
+>
+> ```bash
+> cd DnnToDotCms
+> dotnet run -- ../example/2026-03-29_01-49-26 --pretty
+> ```
+
+## Build
+
+```bash
+# From the repo root — builds the entire solution
 dotnet build
 ```
 
 ## Run
+
+All commands below are run from the **repo root**. The `--project DnnToDotCms`
+flag tells the .NET SDK which project to run (the executable is in the
+`DnnToDotCms/` subfolder, not in the root).
 
 ```bash
 # Use a DNN official site-export folder (recommended)
