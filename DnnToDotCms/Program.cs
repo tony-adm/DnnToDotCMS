@@ -103,17 +103,28 @@ try
     if (themesZip is not null && !File.Exists(themesZip))
         themesZip = null;
 
+    // Read the portal / site name from export.json when available.
+    string? portalName = exportDir is not null
+        ? DnnXmlParser.ParsePortalName(exportDir)
+        : isExportManifest
+            ? DnnXmlParser.ParsePortalName(inputPath)
+            : null;
+
     // Write the DotCMS site bundle.
     using (var outStream = File.Create(outputPath))
-        BundleWriter.Write(contentTypes, outStream, themesZip);
+        BundleWriter.Write(contentTypes, outStream, themesZip, portalName);
 
     string themeNote = themesZip is not null
         ? " Containers, templates, and static theme assets included from export_themes.zip."
         : string.Empty;
 
+    string siteNote = portalName is not null
+        ? $" Site '{portalName}' will be created on import."
+        : string.Empty;
+
     Console.WriteLine(
         $"Converted {modules.Count} module(s) to {contentTypes.Count} content type(s)." +
-        $"{themeNote} Bundle written to: {outputPath}");
+        $"{themeNote}{siteNote} Bundle written to: {outputPath}");
 
     return 0;
 }

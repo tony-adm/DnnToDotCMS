@@ -162,7 +162,12 @@ public class BundleWriterTests
         string manifest = ReadTarEntry(ms, "manifest.csv")!;
         Assert.Contains("INCLUDED,contenttype,", manifest);
         Assert.Contains("HTMLContent", manifest);
-        Assert.Contains("SYSTEM_HOST", manifest);
+        // Site column must be "System Host" (display name), NOT the internal
+        // identifier "SYSTEM_HOST".  DotCMS resolves the bundle file path using
+        // the site column value, so an incorrect value causes 0 content to
+        // be imported.
+        Assert.Contains("System Host", manifest);
+        Assert.DoesNotContain("SYSTEM_HOST", manifest);
     }
 
     // ------------------------------------------------------------------
@@ -745,5 +750,237 @@ public class BundleWriterTests
             Assert.Equal(0, templateCount);   // no top-level skins
         }
         finally { File.Delete(path); }
+    }
+
+    // ------------------------------------------------------------------
+    // Manifest format — inode column for containers and templates
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Manifest_ContainerRow_HasInodeInFourthColumn()
+    {
+        string zipPath = BuildThemesZip();
+        try
+        {
+            var (ms, _) = WriteBundleToMemory([MakeHtmlContentType()], zipPath);
+            string manifest = ReadTarEntry(ms, "manifest.csv")!;
+
+            // Find the containers row and verify the 4th CSV column (inode) is a UUID.
+            string containerLine = manifest
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .First(l => l.StartsWith("INCLUDED,containers,"));
+
+            string[] cols = containerLine.Split(',');
+            Assert.True(cols.Length >= 4, "Container row should have at least 4 columns.");
+            Assert.True(Guid.TryParse(cols[3], out _),
+                $"Inode column (col 4) should be a UUID; got: '{cols[3]}'");
+        }
+        finally { File.Delete(zipPath); }
+    }
+
+    [Fact]
+    public void Manifest_TemplateRow_HasInodeInFourthColumn()
+    {
+        string zipPath = BuildThemesZip();
+        try
+        {
+            var (ms, _) = WriteBundleToMemory([MakeHtmlContentType()], zipPath);
+            string manifest = ReadTarEntry(ms, "manifest.csv")!;
+
+            string templateLine = manifest
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .First(l => l.StartsWith("INCLUDED,template,"));
+
+            string[] cols = templateLine.Split(',');
+            Assert.True(cols.Length >= 4, "Template row should have at least 4 columns.");
+            Assert.True(Guid.TryParse(cols[3], out _),
+                $"Inode column (col 4) should be a UUID; got: '{cols[3]}'");
+        }
+        finally { File.Delete(zipPath); }
+    }
+
+    [Fact]
+    public void Manifest_ContainerRow_HasEmptySiteAndFolder()
+    {
+        // DB-type containers use empty site/folder in the manifest;
+        // DotCMS scans working/ subdirectories and reads <hostId> from the XML.
+        string zipPath = BuildThemesZip();
+        try
+        {
+            var (ms, _) = WriteBundleToMemory([MakeHtmlContentType()], zipPath);
+            string manifest = ReadTarEntry(ms, "manifest.csv")!;
+
+            string containerLine = manifest
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .First(l => l.StartsWith("INCLUDED,containers,"));
+
+            // columns: INCLUDED,containers,{id},{inode},{name},{site},{folder},,reason
+            string[] cols = containerLine.Split(',');
+            Assert.True(cols.Length >= 7, "Container row should have at least 7 columns.");
+            Assert.Equal(string.Empty, cols[5]); // site
+            Assert.Equal(string.Empty, cols[6]); // folder
+        }
+        finally { File.Delete(zipPath); }
+    }
+
+    // ------------------------------------------------------------------
+    // Site / host entry tests
+    // ------------------------------------------------------------------
+
+    private static (MemoryStream stream, List<string> entryNames) WriteBundleWithSite(
+        string siteName,
+        string? themesZipPath = null)
+    {
+        var ms = new MemoryStream();
+        BundleWriter.Write([MakeHtmlContentType()], ms, themesZipPath, siteName);
+        ms.Position = 0;
+
+        var names = new List<string>();
+        using var gz  = new GZipStream(ms, CompressionMode.Decompress, leaveOpen: true);
+        using var tar = new TarReader(gz);
+
+        TarEntry? entry;
+        while ((entry = tar.GetNextEntry()) is not null)
+            names.Add(entry.Name);
+
+        ms.Position = 0;
+        return (ms, names);
+    }
+
+    [Fact]
+    public void Write_WithSiteName_IncludesHostXmlEntry()
+    {
+        var (_, names) = WriteBundleWithSite("My Website");
+
+        Assert.Contains(names, n =>
+            n.StartsWith("live/System Host/1/") &&
+            n.EndsWith(".content.host.xml"));
+    }
+
+    [Fact]
+    public void Write_WithSiteName_HostXmlHasCorrectRootElement()
+    {
+        var (ms, names) = WriteBundleWithSite("My Website");
+        string entryName = names.First(n => n.EndsWith(".content.host.xml"));
+        string xml = ReadTarEntry(ms, entryName)!;
+
+        Assert.Contains("<com.dotcms.publisher.pusher.wrapper.HostWrapper>", xml);
+        Assert.Contains("<operation>PUBLISH</operation>", xml);
+        Assert.Contains("<assetType>contentlet</assetType>", xml);
+    }
+
+    [Fact]
+    public void Write_WithSiteName_HostXmlContainsHostname()
+    {
+        var (ms, names) = WriteBundleWithSite("My Website");
+        string xml = ReadTarEntry(ms, names.First(n => n.EndsWith(".content.host.xml")))!;
+
+        // "My Website" should be sanitized to "my-website"
+        Assert.Contains("my-website", xml);
+        Assert.Contains("<string>hostname</string>", xml);
+    }
+
+    [Fact]
+    public void Write_WithSiteName_ManifestIncludesHostRow()
+    {
+        var (ms, _) = WriteBundleWithSite("My Website");
+        string manifest = ReadTarEntry(ms, "manifest.csv")!;
+
+        Assert.Contains("INCLUDED,host,", manifest);
+        Assert.Contains("my-website", manifest);
+    }
+
+    [Fact]
+    public void Write_WithSiteName_ContainersGoToSiteDirectory()
+    {
+        string zipPath = BuildThemesZip();
+        try
+        {
+            var (_, names) = WriteBundleWithSite("My Website", zipPath);
+
+            // Containers should be in the sanitized site directory, not System Host.
+            Assert.Contains(names, n =>
+                n.StartsWith("working/my-website/") &&
+                n.EndsWith(".containers.container.xml"));
+            Assert.DoesNotContain(names, n =>
+                n.StartsWith("working/System Host/") &&
+                n.EndsWith(".containers.container.xml"));
+        }
+        finally { File.Delete(zipPath); }
+    }
+
+    [Fact]
+    public void Write_WithSiteName_TemplatesGoToSiteDirectory()
+    {
+        string zipPath = BuildThemesZip();
+        try
+        {
+            var (_, names) = WriteBundleWithSite("My Website", zipPath);
+
+            Assert.Contains(names, n =>
+                n.StartsWith("working/my-website/") &&
+                n.EndsWith(".template.template.xml"));
+            Assert.DoesNotContain(names, n =>
+                n.StartsWith("working/System Host/") &&
+                n.EndsWith(".template.template.xml"));
+        }
+        finally { File.Delete(zipPath); }
+    }
+
+    [Fact]
+    public void Write_WithSiteName_ContainerXmlHasSiteHostId()
+    {
+        string zipPath = BuildThemesZip();
+        try
+        {
+            var (ms, names) = WriteBundleWithSite("My Website", zipPath);
+            string entryName = names.First(n => n.EndsWith(".containers.container.xml"));
+            string xml = ReadTarEntry(ms, entryName)!;
+
+            // The <hostId> inside the XML should NOT be the literal SYSTEM_HOST;
+            // it must be the site's UUID.
+            Assert.DoesNotContain("<hostId>SYSTEM_HOST</hostId>", xml);
+        }
+        finally { File.Delete(zipPath); }
+    }
+
+    [Fact]
+    public void Write_WithoutSiteName_NoHostXmlEntry()
+    {
+        var (_, names) = WriteBundleToMemory([MakeHtmlContentType()]);
+
+        Assert.DoesNotContain(names, n => n.EndsWith(".content.host.xml"));
+    }
+
+    [Fact]
+    public void Write_WithoutSiteName_ContainersStayOnSystemHost()
+    {
+        string zipPath = BuildThemesZip();
+        try
+        {
+            var (_, names) = WriteBundleToMemory([MakeHtmlContentType()], zipPath);
+
+            Assert.Contains(names, n =>
+                n.StartsWith("working/System Host/") &&
+                n.EndsWith(".containers.container.xml"));
+        }
+        finally { File.Delete(zipPath); }
+    }
+
+    // ------------------------------------------------------------------
+    // SanitizeHostname utility tests
+    // ------------------------------------------------------------------
+
+    [Theory]
+    [InlineData("My Website",        "my-website")]
+    [InlineData("DNN Site Export",   "dnn-site-export")]
+    [InlineData("Hello World!",      "hello-world")]
+    [InlineData("  spaces  ",        "spaces")]
+    [InlineData("A",                 "a")]
+    [InlineData("",                  "imported-site")]
+    [InlineData("---",               "imported-site")]
+    public void SanitizeHostname_ProducesExpectedResult(string input, string expected)
+    {
+        Assert.Equal(expected, BundleWriter.SanitizeHostname(input));
     }
 }

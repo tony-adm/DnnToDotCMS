@@ -18,6 +18,9 @@ public static class BundleWriter
     private const string SystemWorkflowId   = "d61a59e1-a49c-46f2-a929-db2b4bfa88b2";
     private const string SystemWorkflowName = "System Workflow";
 
+    // Fixed content-type UUID for the DotCMS built-in Host/Site content type.
+    private const string HostContentTypeInode = "855a2d72-f2f3-4169-8b04-ac5157c4380c";
+
     // File extensions considered "static assets" (safe to carry across).
     private static readonly HashSet<string> StaticExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -49,20 +52,39 @@ public static class BundleWriter
     /// assets (CSS, JS, images, fonts) are embedded under a <c>themes/</c>
     /// directory for reference.
     /// </param>
+    /// <param name="siteName">
+    /// Optional DNN portal / site name (e.g. <c>"My Website"</c>).  When
+    /// supplied a new DotCMS site (host) entry is written into the bundle so
+    /// that importing the bundle creates the site.  Containers and templates
+    /// derived from <paramref name="themesZipPath"/> are associated with the
+    /// new site rather than with System Host.
+    /// </param>
     public static void Write(
         IReadOnlyList<DotCmsContentType> contentTypes,
         Stream output,
-        string? themesZipPath = null)
+        string? themesZipPath = null,
+        string? siteName = null)
     {
         string bundleId = Guid.NewGuid().ToString("N").ToUpperInvariant();
 
-        // Manifest entries: (objectType, id, name)
-        var manifestEntries = new List<(string type, string id, string name)>(contentTypes.Count);
+        // Derive a URL-safe hostname from the optional site name.
+        string? hostname = siteName is not null ? SanitizeHostname(siteName) : null;
+        string? siteId   = hostname is not null ? Guid.NewGuid().ToString() : null;
+        string? siteInode = hostname is not null ? Guid.NewGuid().ToString() : null;
+
+        // Manifest entries: (objectType, identifier, inode, title, site, folder)
+        // The site and folder columns follow DotCMS push-publish manifest conventions:
+        //   • contenttype → site = "System Host", folder = "/"
+        //   • DB containers / templates → site and folder are empty (DotCMS scans
+        //     working/ subdirectories and uses the <hostId> in the XML instead)
+        //   • host → site = "System Host", folder = "/"
+        var manifestEntries = new List<(string type, string id, string inode, string name, string site, string folder)>(contentTypes.Count);
 
         // Pre-collect container and template definitions from the themes zip so
         // that their IDs are known before the manifest.csv is written.
-        var containerDefs = new List<(string id, string name, string html)>();
-        var templateDefs  = new List<(string id, string name, string html)>();
+        // Tuple: (identifier, inode, name, html)
+        var containerDefs = new List<(string id, string inode, string name, string html)>();
+        var templateDefs  = new List<(string id, string inode, string name, string html)>();
 
         if (themesZipPath is not null && File.Exists(themesZipPath))
         {
@@ -80,31 +102,42 @@ public static class BundleWriter
         using var gz  = new GZipStream(output, CompressionLevel.Optimal, leaveOpen: true);
         using var tar = new TarWriter(gz, TarEntryFormat.Gnu);
 
+        // --- site / host entry (when a site name is provided) ----------------
+        if (hostname is not null && siteId is not null && siteInode is not null)
+        {
+            string hostXml = BuildHostXml(siteId, siteInode, hostname);
+            WriteTextEntry(tar, $"live/System Host/1/{siteId}.content.host.xml", hostXml);
+            manifestEntries.Add(("host", siteId, siteInode, hostname, "System Host", "/"));
+        }
+
         // --- content types ---------------------------------------------------
         foreach (DotCmsContentType ct in contentTypes)
         {
             string id    = Guid.NewGuid().ToString();
             string json  = BuildContentTypeJson(ct, id);
             WriteTextEntry(tar, $"working/System Host/{id}.contentType.json", json);
-            manifestEntries.Add(("contenttype", id, ct.Name));
+            manifestEntries.Add(("contenttype", id, "", ct.Name, "System Host", "/"));
         }
 
+        // Determine which host identifier and working-directory name to use
+        // for containers and templates.
+        string containerHostId   = siteId   ?? "SYSTEM_HOST";
+        string containerWorkDir  = hostname ?? "System Host";
+
         // --- containers (from DNN containers) --------------------------------
-        foreach (var (id, name, html) in containerDefs)
+        foreach (var (id, inode, name, html) in containerDefs)
         {
-            string inode = Guid.NewGuid().ToString();
-            string xml   = BuildContainerXml(id, inode, name, html);
-            WriteTextEntry(tar, $"working/System Host/{id}.containers.container.xml", xml);
-            manifestEntries.Add(("containers", id, name));
+            string xml = BuildContainerXml(id, inode, name, html, containerHostId);
+            WriteTextEntry(tar, $"working/{containerWorkDir}/{id}.containers.container.xml", xml);
+            manifestEntries.Add(("containers", id, inode, name, "", ""));
         }
 
         // --- templates (from DNN skins) --------------------------------------
-        foreach (var (id, name, html) in templateDefs)
+        foreach (var (id, inode, name, html) in templateDefs)
         {
-            string inode = Guid.NewGuid().ToString();
-            string xml   = BuildTemplateXml(id, inode, name, html);
-            WriteTextEntry(tar, $"working/System Host/{id}.template.template.xml", xml);
-            manifestEntries.Add(("template", id, name));
+            string xml = BuildTemplateXml(id, inode, name, html, containerHostId);
+            WriteTextEntry(tar, $"working/{containerWorkDir}/{id}.template.template.xml", xml);
+            manifestEntries.Add(("template", id, inode, name, "", ""));
         }
 
         // --- manifest.csv ----------------------------------------------------
@@ -226,7 +259,7 @@ public static class BundleWriter
     // ------------------------------------------------------------------
 
     private static string BuildContainerXml(
-        string id, string inode, string title, string code)
+        string id, string inode, string title, string code, string hostId = "SYSTEM_HOST")
     {
         string now      = DateTime.UtcNow.ToString(XmlTimestampFormat);
         string xmlCode  = System.Security.SecurityElement.Escape(code) ?? string.Empty;
@@ -239,7 +272,7 @@ public static class BundleWriter
                 <assetName>{id}.containers</assetName>
                 <assetType>containers</assetType>
                 <parentPath>/</parentPath>
-                <hostId>SYSTEM_HOST</hostId>
+                <hostId>{hostId}</hostId>
                 <createDate class="sql-timestamp">{now}</createDate>
               </containerId>
               <container>
@@ -280,7 +313,7 @@ public static class BundleWriter
     // ------------------------------------------------------------------
 
     private static string BuildTemplateXml(
-        string id, string inode, string title, string body)
+        string id, string inode, string title, string body, string hostId = "SYSTEM_HOST")
     {
         string now      = DateTime.UtcNow.ToString(XmlTimestampFormat);
         string xmlBody  = System.Security.SecurityElement.Escape(body) ?? string.Empty;
@@ -293,7 +326,7 @@ public static class BundleWriter
                 <assetName>{id}.template</assetName>
                 <assetType>template</assetType>
                 <parentPath>/</parentPath>
-                <hostId>SYSTEM_HOST</hostId>
+                <hostId>{hostId}</hostId>
                 <owner></owner>
                 <createDate class="sql-timestamp">{now}</createDate>
               </templateId>
@@ -333,19 +366,171 @@ public static class BundleWriter
     }
 
     // ------------------------------------------------------------------
+    // Host / site XML builder  (matches HostWrapper format in dotCMS bundle)
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// One empty <c>ConcurrentHashMap.Segment</c> for the Java 7 serialization
+    /// format used inside a DotCMS <c>HostWrapper</c> XML.
+    /// <para>
+    /// <b>Why this exact structure?</b>
+    /// DotCMS uses XStream to serialize/deserialize push-publish bundles.
+    /// A DotCMS <c>Host</c> object extends <c>Contentlet</c> whose field map
+    /// is a <c>Contentlet.ContentletHashMap</c> — a subclass of
+    /// <c>ConcurrentHashMap</c>.  XStream falls back to Java's own serialization
+    /// mechanism for this class (hence <c>serialization="custom"</c>).
+    /// In Java 7, <c>ConcurrentHashMap.writeObject</c> first calls
+    /// <c>defaultWriteObject</c>, which writes the non-transient fields
+    /// (<c>segments</c>, <c>segmentShift</c>, <c>segmentMask</c>), then writes
+    /// all live entries as alternating key/value objects, and finally writes
+    /// two <c>null</c> sentinels.  XStream wraps the <c>defaultWriteObject</c>
+    /// output in a <c>&lt;default&gt;</c> block and the explicit writes come
+    /// directly after it inside the enclosing <c>&lt;concurrent-hash-map&gt;</c>
+    /// element.  Do <b>not</b> simplify or reorder this structure — DotCMS's
+    /// XStream deserializer will fail silently and the host will not be created.
+    /// </para>
+    /// </summary>
+    private const string EmptyConcurrentHashMapSegment = """
+              <java.util.concurrent.ConcurrentHashMap_-Segment>
+                <sync class="java.util.concurrent.locks.ReentrantLock$NonfairSync" serialization="custom">
+                  <java.util.concurrent.locks.AbstractQueuedSynchronizer>
+                    <default>
+                      <state>0</state>
+                    </default>
+                  </java.util.concurrent.locks.AbstractQueuedSynchronizer>
+                  <java.util.concurrent.locks.ReentrantLock_-Sync>
+                    <default/>
+                  </java.util.concurrent.locks.ReentrantLock_-Sync>
+                </sync>
+                <loadFactor>0.75</loadFactor>
+              </java.util.concurrent.ConcurrentHashMap_-Segment>
+        """;
+
+    private static string BuildHostXml(string hostId, string hostInode, string hostname)
+    {
+        string now         = DateTime.UtcNow.ToString(XmlTimestampFormat);
+        string xmlHostname = System.Security.SecurityElement.Escape(hostname) ?? string.Empty;
+
+        // Java 7 ConcurrentHashMap uses 16 segments by default (concurrencyLevel=16,
+        // which gives 2^4 = 16 segments).  segmentShift=28 and segmentMask=15
+        // correspond to this configuration.  All 16 segments are empty because the
+        // actual map entries are written after the <default> block (see
+        // EmptyConcurrentHashMapSegment documentation above).
+        string segments = string.Concat(Enumerable.Repeat(EmptyConcurrentHashMapSegment, 16));
+
+        return $"""
+            <com.dotcms.publisher.pusher.wrapper.HostWrapper>
+              <info>
+                <identifier>{hostId}</identifier>
+                <liveInode>{hostInode}</liveInode>
+                <workingInode>{hostInode}</workingInode>
+                <lockedBy>dotcms.org.1</lockedBy>
+                <lockedOn class="sql-timestamp">{now}</lockedOn>
+                <deleted>false</deleted>
+                <versionTs class="sql-timestamp">{now}</versionTs>
+                <lang>1</lang>
+                <variant>DEFAULT</variant>
+                <publishDate class="sql-timestamp">{now}</publishDate>
+              </info>
+              <host>
+                <map class="com.dotmarketing.portlets.contentlet.model.Contentlet$ContentletHashMap" serialization="custom">
+                  <unserializable-parents/>
+                  <concurrent-hash-map>
+                    <default>
+                      <segments>
+            {segments}
+                      </segments>
+                      <segmentShift>28</segmentShift>
+                      <segmentMask>15</segmentMask>
+                    </default>
+                    <string>type</string>
+                    <string>host</string>
+                    <string>inode</string>
+                    <string>{hostInode}</string>
+                    <string>hostname</string>
+                    <string>{xmlHostname}</string>
+                    <string>hostName</string>
+                    <string>{xmlHostname}</string>
+                    <string>__DOTNAME__</string>
+                    <string>{xmlHostname}</string>
+                    <string>host</string>
+                    <string>SYSTEM_HOST</string>
+                    <string>stInode</string>
+                    <string>{HostContentTypeInode}</string>
+                    <string>owner</string>
+                    <string>dotcms.org.1</string>
+                    <string>identifier</string>
+                    <string>{hostId}</string>
+                    <string>languageId</string>
+                    <long>1</long>
+                    <string>runDashboard</string>
+                    <boolean>false</boolean>
+                    <string>isSystemHost</string>
+                    <boolean>false</boolean>
+                    <string>isDefault</string>
+                    <boolean>false</boolean>
+                    <string>folder</string>
+                    <string>SYSTEM_FOLDER</string>
+                    <string>tagStorage</string>
+                    <string>SYSTEM_HOST</string>
+                    <string>sortOrder</string>
+                    <long>0</long>
+                    <string>modUser</string>
+                    <string>dotcms.org.1</string>
+                    <string>open</string>
+                    <boolean>true</boolean>
+                    <null/>
+                    <null/>
+                  </concurrent-hash-map>
+                  <com.dotmarketing.portlets.contentlet.model.Contentlet_-ContentletHashMap>
+                    <default>
+                      <outer-class reference="../../../.."/>
+                    </default>
+                  </com.dotmarketing.portlets.contentlet.model.Contentlet_-ContentletHashMap>
+                </map>
+                <lowIndexPriority>false</lowIndexPriority>
+                <variantId>DEFAULT</variantId>
+              </host>
+              <id>
+                <id>{hostId}</id>
+                <assetName>{hostId}.content</assetName>
+                <assetType>contentlet</assetType>
+                <parentPath>/</parentPath>
+                <hostId>SYSTEM_HOST</hostId>
+                <owner>dotcms.org.1</owner>
+                <createDate class="sql-timestamp">{now}</createDate>
+                <assetSubType>Host</assetSubType>
+              </id>
+              <multiTree/>
+              <tree/>
+              <tags class="java.util.ImmutableCollections$ListN" resolves-to="java.util.CollSer" serialization="custom">
+                <java.util.CollSer>
+                  <default>
+                    <tag>1</tag>
+                  </default>
+                  <int>0</int>
+                </java.util.CollSer>
+              </tags>
+              <operation>PUBLISH</operation>
+            </com.dotcms.publisher.pusher.wrapper.HostWrapper>
+            """;
+    }
+
+    // ------------------------------------------------------------------
     // Manifest builder
     // ------------------------------------------------------------------
 
     private static string BuildManifest(
-        string bundleId, IReadOnlyList<(string type, string id, string name)> entries)
+        string bundleId,
+        IReadOnlyList<(string type, string id, string inode, string name, string site, string folder)> entries)
     {
         var sb = new StringBuilder();
         sb.AppendLine($"#Bundle ID:{bundleId}");
         sb.AppendLine("#Operation:PUBLISH");
         sb.AppendLine("INCLUDED/EXCLUDED,object type, Id, inode, title, site, folder, excluded by, reason to be evaluated");
 
-        foreach (var (type, id, name) in entries)
-            sb.AppendLine($"INCLUDED,{type},{id},,{name},SYSTEM_HOST,/,,Added by DNN to DotCMS converter");
+        foreach (var (type, id, inode, name, site, folder) in entries)
+            sb.AppendLine($"INCLUDED,{type},{id},{inode},{name},{site},{folder},,Added by DNN to DotCMS converter");
 
         return sb.ToString();
     }
@@ -363,8 +548,8 @@ public static class BundleWriter
     /// </summary>
     private static void CollectThemeDefinitions(
         string themesZipPath,
-        List<(string id, string name, string html)> containerDefs,
-        List<(string id, string name, string html)> templateDefs)
+        List<(string id, string inode, string name, string html)> containerDefs,
+        List<(string id, string inode, string name, string html)> templateDefs)
     {
         const string containersPrefix = "_default/Containers/";
         const string skinsPrefix      = "_default/Skins/";
@@ -387,7 +572,7 @@ public static class BundleWriter
                 string name = Path.GetFileNameWithoutExtension(entry.Name);
                 using var reader = new StreamReader(entry.Open(), Encoding.UTF8);
                 string html = ConvertAscxToContainerHtml(reader.ReadToEnd());
-                containerDefs.Add((Guid.NewGuid().ToString(), name, html));
+                containerDefs.Add((Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), name, html));
             }
             else if (entryPath.StartsWith(skinsPrefix, StringComparison.OrdinalIgnoreCase))
             {
@@ -398,7 +583,7 @@ public static class BundleWriter
                 string name = Path.GetFileNameWithoutExtension(entry.Name);
                 using var reader = new StreamReader(entry.Open(), Encoding.UTF8);
                 string html = ConvertAscxToTemplateHtml(reader.ReadToEnd());
-                templateDefs.Add((Guid.NewGuid().ToString(), name, html));
+                templateDefs.Add((Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), name, html));
             }
         }
     }
@@ -624,6 +809,19 @@ public static class BundleWriter
         return shortName.StartsWith("Immutable", StringComparison.Ordinal)
             ? clazz
             : prefix + "Immutable" + shortName;
+    }
+
+    /// <summary>
+    /// Converts a DNN portal/site name into a URL-safe hostname string suitable
+    /// for use as a DotCMS site identifier.
+    /// For example: <c>"My Website"</c> → <c>"my-website"</c>.
+    /// </summary>
+    public static string SanitizeHostname(string siteName)
+    {
+        // Lowercase, replace runs of non-alphanumeric characters with a dash.
+        string sanitized = Regex.Replace(siteName.ToLowerInvariant(), @"[^a-z0-9]+", "-");
+        sanitized = sanitized.Trim('-');
+        return string.IsNullOrEmpty(sanitized) ? "imported-site" : sanitized;
     }
 
     /// <summary>
