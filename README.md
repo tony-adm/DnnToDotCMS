@@ -1,10 +1,10 @@
 # DnnToDotCMS
 
-A C# (.NET 8) command-line tool that converts **DNN (DotNetNuke)** site exports into **DotCMS** content type definitions.
+A C# (.NET 8) command-line tool that converts **DNN (DotNetNuke)** site exports into a **DotCMS push-publish site bundle** (`.tar.gz`) that can be uploaded directly to DotCMS.
 
 ## Overview
 
-DNN organises content in *modules* placed on pages. DotCMS organises content in *Content Types* with structured fields. This tool reads a DNN export and outputs a JSON array of DotCMS content type definitions ready to be imported via the DotCMS REST API.
+DNN organises content in *modules* placed on pages. DotCMS organises content in *Content Types* with structured fields. This tool reads a DNN export and produces a DotCMS-compatible push-publish bundle containing the converted content types and, when available, the static theme assets from the DNN skin.
 
 ## Features
 
@@ -15,7 +15,10 @@ DNN organises content in *modules* placed on pages. DotCMS organises content in 
 - Maps 14 common DNN module types to DotCMS content types out of the box (see table below)
 - De-duplicates: multiple DNN modules of the same type produce a single content type definition
 - Falls back to a generic two-field content type for unrecognised module types
-- Outputs pretty-printed or compact JSON
+- Outputs a DotCMS push-publish bundle (`.tar.gz`) containing:
+  - `working/System Host/{uuid}.contentType.json` — one file per converted content type
+  - `manifest.csv` — bundle manifest listing all content types
+  - `themes/{ThemeName}/…` — static theme assets (CSS, JS, images, fonts) extracted from `export_themes.zip` when the input is a DNN export folder
 
 ## Supported Module Mappings
 
@@ -44,7 +47,8 @@ DNN organises content in *modules* placed on pages. DotCMS organises content in 
 ```bash
 git clone https://github.com/tony-adm/DnnToDotCMS.git
 cd DnnToDotCMS
-dotnet run --project DnnToDotCms -- example/2026-03-29_01-49-26/export.json --pretty
+dotnet run --project DnnToDotCms -- example/2026-03-29_01-49-26
+# → produces site.tar.gz in the current directory
 ```
 
 > **Note:** The executable project lives in the `DnnToDotCms/` subfolder.
@@ -53,7 +57,7 @@ dotnet run --project DnnToDotCms -- example/2026-03-29_01-49-26/export.json --pr
 >
 > ```bash
 > cd DnnToDotCms
-> dotnet run -- ../example/2026-03-29_01-49-26/export.json --pretty
+> dotnet run -- ../example/2026-03-29_01-49-26
 > ```
 
 ## Build
@@ -70,17 +74,17 @@ flag tells the .NET SDK which project to run (the executable is in the
 `DnnToDotCms/` subfolder, not in the root).
 
 ```bash
-# Use export.json from a DNN official site-export folder (recommended)
-dotnet run --project DnnToDotCms -- example/2026-03-29_01-49-26/export.json --pretty
+# Use an export folder (also picks up export_themes.zip for theme assets)
+dotnet run --project DnnToDotCms -- example/2026-03-29_01-49-26
 
-# Or pass the folder directly
-dotnet run --project DnnToDotCms -- example/2026-03-29_01-49-26 --pretty
+# Or pass the export.json manifest directly
+dotnet run --project DnnToDotCms -- example/2026-03-29_01-49-26/export.json
 
 # Use a single .dnn package manifest
-dotnet run --project DnnToDotCms -- samples/sample-site-export.dnn --pretty
+dotnet run --project DnnToDotCms -- samples/sample-site-export.dnn
 
-# Write output to a file
-dotnet run --project DnnToDotCms -- example/2026-03-29_01-49-26/export.json --output content-types.json
+# Write the bundle to a custom filename
+dotnet run --project DnnToDotCms -- example/2026-03-29_01-49-26 --output my-site.tar.gz
 
 # Help
 dotnet run --project DnnToDotCms -- --help
@@ -90,27 +94,37 @@ Or build a self-contained executable first:
 
 ```bash
 dotnet publish DnnToDotCms -c Release -o ./publish
-./publish/DnnToDotCms example/2026-03-29_01-49-26/export.json --output output/content-types.json
+./publish/DnnToDotCms example/2026-03-29_01-49-26 --output my-site.tar.gz
 ```
+
+## Uploading to DotCMS
+
+1. Run the tool to produce `site.tar.gz`.
+2. In DotCMS, go to **Dev Tools → Push & Publish → Bundle Import** (or use the Push Publish REST endpoint).
+3. Upload `site.tar.gz`. DotCMS will import all content types listed in the bundle.
+
+> **Theme assets note:** The static files under `themes/` inside the bundle
+> (CSS, JS, images, fonts) are included for reference and are not automatically
+> imported by DotCMS's push-publish mechanism. After the bundle import, upload
+> them manually through **Site Browser** in DotCMS or via the Files API.
 
 ## Input Formats
 
-### 1. DNN Official Site-Export — `export.json` (recommended)
+### 1. DNN Official Site-Export folder (recommended)
 
 DNN's built-in **Export / Import** wizard produces a timestamped folder (e.g.
 `2026-03-29_01-49-26`) containing `export.json` and several ZIP archives.
-Pass the **`export.json` path** to the converter:
+Pass the **folder path** (or the `export.json` path inside it) to the converter:
 
 ```bash
-dotnet run --project DnnToDotCms -- example/2026-03-29_01-49-26/export.json --pretty
+dotnet run --project DnnToDotCms -- example/2026-03-29_01-49-26
+# or
+dotnet run --project DnnToDotCms -- example/2026-03-29_01-49-26/export.json
 ```
 
-You can also pass the **folder path** directly and the tool will find
-`export_packages.zip` automatically:
-
-```bash
-dotnet run --project DnnToDotCms -- example/2026-03-29_01-49-26 --pretty
-```
+When you pass the folder (or `export.json`), the tool automatically looks for
+`export_themes.zip` alongside `export_packages.zip` and includes any static
+theme assets in the output bundle.
 
 The tool opens `export_packages.zip`, iterates over every `Module_*.resources`
 entry (each is itself a ZIP), extracts the `.dnn` manifest inside each one, and
@@ -120,12 +134,12 @@ Typical folder layout produced by DNN Export:
 
 ```
 2026-03-29_01-49-26/
-  export.json            ← export metadata (portal name, date, summary)  ← pass this
+  export.json            ← export metadata (portal name, date, summary)
   export_db.zip          ← LiteDB site database (not used by this tool)
   export_files.zip       ← uploaded file assets
   export_packages.zip    ← installed module/skin packages  ← read by this tool
   export_templates.zip   ← page templates
-  export_themes.zip      ← installed themes
+  export_themes.zip      ← installed themes  ← static assets extracted into bundle
 ```
 
 ### 2. DNN Package Manifest (`.dnn` file)
@@ -134,7 +148,7 @@ A standard DNN module-installation manifest with a
 `<dotnetnuke type="Package">` root element:
 
 ```bash
-dotnet run --project DnnToDotCms -- samples/sample-site-export.dnn --pretty
+dotnet run --project DnnToDotCms -- samples/sample-site-export.dnn
 ```
 
 ### 3. IPortable Module-Content Export (`.xml` file)
@@ -142,51 +156,53 @@ dotnet run --project DnnToDotCms -- samples/sample-site-export.dnn --pretty
 Produced when a single module is exported from a DNN page:
 
 ```bash
-dotnet run --project DnnToDotCms -- samples/sample-html-module.xml --pretty
+dotnet run --project DnnToDotCms -- samples/sample-html-module.xml
 ```
 
 ## Output Format
 
-The output is a JSON array of DotCMS content type objects, each compatible with the DotCMS REST API:
+The tool produces a **DotCMS push-publish bundle** (`.tar.gz`). The bundle contains:
 
 ```
-POST /api/v1/contenttype
-Content-Type: application/json
-
-[ { ... content type definition ... } ]
+site.tar.gz
+├── manifest.csv                                    ← bundle manifest
+├── working/
+│   └── System Host/
+│       ├── {uuid}.contentType.json                 ← one file per content type
+│       └── …
+└── themes/
+    └── {ThemeName}/                                ← static skin assets (CSS/JS/images)
+        ├── skin.css
+        ├── Bootstrap/css/bootstrap.min.css
+        └── …
 ```
 
-Example output for an HTML module:
+Each `contentType.json` file uses the DotCMS push-publish bundle format:
 
 ```json
-[
-  {
-    "clazz": "com.dotcms.contenttype.model.type.SimpleContentType",
+{
+  "contentType": {
+    "clazz": "com.dotcms.contenttype.model.type.ImmutableSimpleContentType",
     "name": "HTMLContent",
+    "id": "<uuid>",
     "variable": "htmlContent",
-    "description": "Converted from DNN HTML module",
-    "icon": "fa fa-code",
-    "fields": [
-      {
-        "clazz": "com.dotcms.contenttype.model.field.TextField",
-        "name": "Title",
-        "variable": "title",
-        "dataType": "TEXT",
-        "fieldTypeLabel": "Text",
-        "required": true,
-        "listed": true
-      },
-      {
-        "clazz": "com.dotcms.contenttype.model.field.WysiwygField",
-        "name": "Body",
-        "variable": "body",
-        "dataType": "LONG_TEXT",
-        "fieldTypeLabel": "WYSIWYG",
-        "required": true
-      }
-    ]
-  }
-]
+    "host": "SYSTEM_HOST",
+    "folder": "SYSTEM_FOLDER"
+  },
+  "fields": [
+    { "clazz": "com.dotcms.contenttype.model.field.ImmutableRowField", … },
+    { "clazz": "com.dotcms.contenttype.model.field.ImmutableColumnField", … },
+    { "clazz": "com.dotcms.contenttype.model.field.ImmutableTextField",
+      "name": "Title", "variable": "title", "dbColumn": "text1", … },
+    { "clazz": "com.dotcms.contenttype.model.field.ImmutableWysiwygField",
+      "name": "Body",  "variable": "body",  "dbColumn": "text_area1", … }
+  ],
+  "workflowSchemaIds": ["d61a59e1-a49c-46f2-a929-db2b4bfa88b2"],
+  "workflowSchemaNames": ["System Workflow"],
+  "operation": "PUBLISH",
+  "fieldVariables": [],
+  "systemActionMappings": {}
+}
 ```
 
 ## Project Structure
@@ -196,18 +212,21 @@ DnnToDotCms/
   Program.cs                  CLI entry point
   Models/
     DnnModels.cs              DNN data models (DnnModule, DnnModuleDefinition, …)
-    DotCmsModels.cs           DotCMS data models (DotCmsContentType, DotCmsField)
+    DotCmsModels.cs           DotCMS data models (content type, field, and bundle-format models)
   Parser/
     DnnXmlParser.cs           Parses DNN exports into DnnModule objects (folder, .dnn, IPortable)
   Mappings/
     ModuleMappings.cs         Maps DNN module names to DotCMS content type definitions
   Converter/
     DnnConverter.cs           Converts DnnModule objects to DotCmsContentType objects
+  Bundle/
+    BundleWriter.cs           Writes a DotCMS push-publish bundle (.tar.gz)
 
 DnnToDotCms.Tests/
   DnnXmlParserTests.cs        Tests for the DNN XML parser (including export-folder format)
   ModuleMappingsTests.cs      Tests for the module-type mappings
   DnnConverterTests.cs        Tests for the conversion logic
+  BundleWriterTests.cs        Tests for the bundle writer
 
 example/
   2026-03-29_01-49-26/        Real DNN official site-export folder ("My Website")
@@ -216,7 +235,7 @@ example/
     export_db.zip             LiteDB site database
     export_files.zip          Uploaded file assets
     export_templates.zip      Page templates
-    export_themes.zip         Installed themes
+    export_themes.zip         Installed themes (static assets bundled by this tool)
 
 samples/
   sample-site-export.dnn      Multi-module DNN package manifest
@@ -229,5 +248,5 @@ samples/
 dotnet test
 ```
 
-All 50 unit tests cover the parser (including the export-folder format), mappings, and converter.
+All 71 unit tests cover the parser (including the export-folder format), mappings, converter, and bundle writer.
 

@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+﻿using DnnToDotCms.Bundle;
 using DnnToDotCms.Converter;
 using DnnToDotCms.Models;
 using DnnToDotCms.Parser;
@@ -8,7 +8,7 @@ using DnnToDotCms.Parser;
 // ---------------------------------------------------------------------------
 //
 // Usage:
-//   DnnToDotCms <input> [--output <output.json>] [--pretty]
+//   DnnToDotCms <input> [--output <site.tar.gz>] [--help]
 //   DnnToDotCms --help
 //
 // Arguments:
@@ -16,8 +16,7 @@ using DnnToDotCms.Parser;
 //                            inside that folder, or a DNN XML file (.dnn / IPortable)
 //
 // Options:
-//   --output <path>          Write output to a file instead of stdout
-//   --pretty                 Indent the JSON output (default when writing to file)
+//   --output <path>          Write the bundle to a file (default: site.tar.gz)
 //   --help, -h               Show this help and exit
 // ---------------------------------------------------------------------------
 
@@ -30,7 +29,6 @@ if (args.Length == 0 || args.Any(a => a is "--help" or "-h"))
 // Parse arguments
 string? inputPath  = null;
 string? outputPath = null;
-bool    pretty     = false;
 
 for (int i = 0; i < args.Length; i++)
 {
@@ -38,9 +36,6 @@ for (int i = 0; i < args.Length; i++)
     {
         case "--output" when i + 1 < args.Length:
             outputPath = args[++i];
-            break;
-        case "--pretty":
-            pretty = true;
             break;
         default:
             if (!args[i].StartsWith("--"))
@@ -73,9 +68,8 @@ if (!isDirectory && !isFile)
     return 1;
 }
 
-// When writing to a file, default to pretty-printed output.
-if (outputPath is not null)
-    pretty = true;
+// Default output file name.
+outputPath ??= "site.tar.gz";
 
 try
 {
@@ -95,27 +89,31 @@ try
     // Convert to DotCMS content types
     IReadOnlyList<DotCmsContentType> contentTypes = DnnConverter.ConvertAll(modules);
 
-    // Serialise
-    var jsonOptions = new JsonSerializerOptions
-    {
-        WriteIndented          = pretty,
-        PropertyNamingPolicy   = null,
-        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
-    };
+    // Locate optional themes zip (present when input is a DNN export folder).
+    string? exportDir = isDirectory
+        ? inputPath
+        : isExportManifest
+            ? Path.GetDirectoryName(inputPath)
+            : null;
 
-    string json = JsonSerializer.Serialize(contentTypes, jsonOptions);
+    string? themesZip = exportDir is not null
+        ? Path.Combine(exportDir, "export_themes.zip")
+        : null;
 
-    // Output
-    if (outputPath is not null)
-    {
-        File.WriteAllText(outputPath, json);
-        Console.WriteLine($"Converted {modules.Count} module(s) to {contentTypes.Count} " +
-                          $"content type(s). Output written to: {outputPath}");
-    }
-    else
-    {
-        Console.WriteLine(json);
-    }
+    if (themesZip is not null && !File.Exists(themesZip))
+        themesZip = null;
+
+    // Write the DotCMS site bundle.
+    using (var outStream = File.Create(outputPath))
+        BundleWriter.Write(contentTypes, outStream, themesZip);
+
+    string themeNote = themesZip is not null
+        ? " Static theme assets included under themes/ (manual upload to DotCMS required)."
+        : string.Empty;
+
+    Console.WriteLine(
+        $"Converted {modules.Count} module(s) to {contentTypes.Count} content type(s)." +
+        $"{themeNote} Bundle written to: {outputPath}");
 
     return 0;
 }
@@ -136,10 +134,10 @@ static void PrintUsage()
 {
     Console.WriteLine("""
         DNN to DotCMS Converter v1.0.0
-        Converts DNN (DotNetNuke) module exports to DotCMS content type definitions.
+        Converts DNN (DotNetNuke) site exports to a DotCMS push-publish bundle.
 
         Usage:
-          DnnToDotCms <input> [--output <output.json>] [--pretty]
+          DnnToDotCms <input> [--output <site.tar.gz>]
           DnnToDotCms --help
 
         Arguments:
@@ -148,8 +146,8 @@ static void PrintUsage()
                               XML file (.dnn or IPortable export)
 
         Options:
-          --output <path>     Write JSON output to a file (also enables pretty-print)
-          --pretty            Indent the JSON output on stdout
+          --output <path>     Write the bundle to a specific file
+                              (default: site.tar.gz in the current directory)
           --help, -h          Show this help message
 
         Supported DNN module types:
@@ -158,15 +156,19 @@ static void PrintUsage()
           Unknown module types produce a generic HTMLContent content type.
 
         Output:
-          A JSON array of DotCMS content type definitions suitable for import
-          via the DotCMS REST API:  POST /api/v1/contenttype
+          A DotCMS push-publish site bundle (.tar.gz) containing:
+            • working/System Host/{uuid}.contentType.json  — one file per content type
+            • manifest.csv                                 — bundle manifest
+            • themes/{ThemeName}/…                         — static theme assets
+              (CSS, JS, images and fonts from export_themes.zip when available;
+               these need to be manually uploaded to DotCMS after import)
 
         Examples:
-          DnnToDotCms example/2026-03-29_01-49-26/export.json
-          DnnToDotCms example/2026-03-29_01-49-26/export.json --output content-types.json
           DnnToDotCms example/2026-03-29_01-49-26
+          DnnToDotCms example/2026-03-29_01-49-26/export.json
+          DnnToDotCms example/2026-03-29_01-49-26 --output my-site.tar.gz
           DnnToDotCms site-export.dnn
-          DnnToDotCms module-export.xml --pretty
+          DnnToDotCms module-export.xml
         """);
 }
 
