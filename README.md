@@ -44,16 +44,16 @@ DNN organises content in *modules* placed on pages. DotCMS organises content in 
 ```bash
 git clone https://github.com/tony-adm/DnnToDotCMS.git
 cd DnnToDotCMS
-dotnet run --project DnnToDotCms -- example/2026-03-29_01-49-26 --pretty
+dotnet run --project DnnToDotCms -- samples/sample-site-export.dnn --pretty
 ```
 
 > **Note:** The executable project lives in the `DnnToDotCms/` subfolder.
 > Always include `--project DnnToDotCms` when running from the repo root, or
-> `cd` into the subfolder first and use `../` to reach the example files:
+> `cd` into the subfolder first and use `../` to reach the sample/example files:
 >
 > ```bash
 > cd DnnToDotCms
-> dotnet run -- ../example/2026-03-29_01-49-26 --pretty
+> dotnet run -- ../samples/sample-site-export.dnn --pretty
 > ```
 
 ## Build
