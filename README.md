@@ -44,16 +44,16 @@ DNN organises content in *modules* placed on pages. DotCMS organises content in 
 ```bash
 git clone https://github.com/tony-adm/DnnToDotCMS.git
 cd DnnToDotCMS
-dotnet run --project DnnToDotCms -- samples/sample-site-export.dnn --pretty
+dotnet run --project DnnToDotCms -- example/2026-03-29_01-49-26/export.json --pretty
 ```
 
 > **Note:** The executable project lives in the `DnnToDotCms/` subfolder.
 > Always include `--project DnnToDotCms` when running from the repo root, or
-> `cd` into the subfolder first and use `../` to reach the sample/example files:
+> `cd` into the subfolder first and use `../` to reach the example files:
 >
 > ```bash
 > cd DnnToDotCms
-> dotnet run -- ../samples/sample-site-export.dnn --pretty
+> dotnet run -- ../example/2026-03-29_01-49-26/export.json --pretty
 > ```
 
 ## Build
@@ -70,14 +70,17 @@ flag tells the .NET SDK which project to run (the executable is in the
 `DnnToDotCms/` subfolder, not in the root).
 
 ```bash
-# Use a DNN official site-export folder (recommended)
+# Use export.json from a DNN official site-export folder (recommended)
+dotnet run --project DnnToDotCms -- example/2026-03-29_01-49-26/export.json --pretty
+
+# Or pass the folder directly
 dotnet run --project DnnToDotCms -- example/2026-03-29_01-49-26 --pretty
 
 # Use a single .dnn package manifest
 dotnet run --project DnnToDotCms -- samples/sample-site-export.dnn --pretty
 
 # Write output to a file
-dotnet run --project DnnToDotCms -- example/2026-03-29_01-49-26 --output content-types.json
+dotnet run --project DnnToDotCms -- example/2026-03-29_01-49-26/export.json --output content-types.json
 
 # Help
 dotnet run --project DnnToDotCms -- --help
@@ -87,31 +90,37 @@ Or build a self-contained executable first:
 
 ```bash
 dotnet publish DnnToDotCms -c Release -o ./publish
-./publish/DnnToDotCms example/2026-03-29_01-49-26 --output output/content-types.json
+./publish/DnnToDotCms example/2026-03-29_01-49-26/export.json --output output/content-types.json
 ```
 
 ## Input Formats
 
-### 1. DNN Official Site-Export Folder (recommended)
+### 1. DNN Official Site-Export — `export.json` (recommended)
 
 DNN's built-in **Export / Import** wizard produces a timestamped folder (e.g.
-`2026-03-29_01-49-26`) containing several files. Pass the **folder path** to the
-converter:
+`2026-03-29_01-49-26`) containing `export.json` and several ZIP archives.
+Pass the **`export.json` path** to the converter:
+
+```bash
+dotnet run --project DnnToDotCms -- example/2026-03-29_01-49-26/export.json --pretty
+```
+
+You can also pass the **folder path** directly and the tool will find
+`export_packages.zip` automatically:
 
 ```bash
 dotnet run --project DnnToDotCms -- example/2026-03-29_01-49-26 --pretty
 ```
 
-The folder must contain `export_packages.zip`. The tool automatically opens that
-archive, iterates over every `Module_*.resources` entry (each is itself a ZIP),
-extracts the `.dnn` manifest inside, and parses it. `Skin_*.resources` and other
-non-module entries are silently skipped.
+The tool opens `export_packages.zip`, iterates over every `Module_*.resources`
+entry (each is itself a ZIP), extracts the `.dnn` manifest inside each one, and
+parses it. `Skin_*.resources` and other non-module entries are silently skipped.
 
 Typical folder layout produced by DNN Export:
 
 ```
 2026-03-29_01-49-26/
-  export.json            ← export metadata (portal name, date, summary)
+  export.json            ← export metadata (portal name, date, summary)  ← pass this
   export_db.zip          ← LiteDB site database (not used by this tool)
   export_files.zip       ← uploaded file assets
   export_packages.zip    ← installed module/skin packages  ← read by this tool
@@ -220,5 +229,5 @@ samples/
 dotnet test
 ```
 
-All 49 unit tests cover the parser (including the export-folder format), mappings, and converter.
+All 50 unit tests cover the parser (including the export-folder format), mappings, and converter.
 

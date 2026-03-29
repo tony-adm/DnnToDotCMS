@@ -322,6 +322,44 @@ public class DnnXmlParserTests
     }
 
     [Fact]
+    public void ParseExportJson_ExportJsonFile_ReturnsModules()
+    {
+        // Arrange: build a folder with export_packages.zip and an export.json sidecar
+        const string xml = """
+            <dotnetnuke type="Package" version="5.0">
+              <packages>
+                <package name="DNN_HTML" type="Module" version="9.11.2">
+                  <friendlyName>HTML</friendlyName>
+                  <components>
+                    <component type="Module">
+                      <desktopModule>
+                        <moduleName>DNN_HTML</moduleName>
+                        <foldername>HTML</foldername>
+                      </desktopModule>
+                    </component>
+                  </components>
+                </package>
+              </packages>
+            </dotnetnuke>
+            """;
+
+        string folder = BuildExportFolder(xml, "DNN_HTML");
+        string jsonFile = Path.Combine(folder, "export.json");
+        File.WriteAllText(jsonFile, """{"Name":"TestExport","PortalName":"My Website"}""");
+        try
+        {
+            IReadOnlyList<DnnModule> modules = DnnXmlParser.ParseExportJson(jsonFile);
+
+            Assert.Single(modules);
+            Assert.Equal("DNN_HTML", modules[0].ModuleName);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
     public void ParseExportFolder_SkinsAreIgnored_OnlyModulesReturned()
     {
         const string moduleXml = """

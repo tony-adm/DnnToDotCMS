@@ -35,6 +35,26 @@ public static class DnnXmlParser
     // ------------------------------------------------------------------
 
     /// <summary>
+    /// Parse a DNN official site-export from an <c>export.json</c> manifest file.
+    /// Locates <c>export_packages.zip</c> in the same directory as the manifest
+    /// and delegates to <see cref="ParseExportFolder"/>.
+    /// </summary>
+    /// <param name="jsonFilePath">
+    /// Path to the <c>export.json</c> file inside a DNN site-export folder.
+    /// </param>
+    /// <exception cref="FileNotFoundException">
+    /// Thrown when <c>export_packages.zip</c> is not found alongside the manifest.
+    /// </exception>
+    public static IReadOnlyList<DnnModule> ParseExportJson(string jsonFilePath)
+    {
+        string folder = Path.GetDirectoryName(Path.GetFullPath(jsonFilePath))
+            ?? throw new ArgumentException(
+                $"Cannot determine directory for: {jsonFilePath}", nameof(jsonFilePath));
+
+        return ParseExportFolder(folder);
+    }
+
+    /// <summary>
     /// Parse a DNN official site-export folder and return a de-duplicated list
     /// of <see cref="DnnModule"/> objects discovered from all
     /// <c>Module_*.resources</c> entries inside <c>export_packages.zip</c>.

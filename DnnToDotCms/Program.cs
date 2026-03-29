@@ -12,8 +12,8 @@ using DnnToDotCms.Parser;
 //   DnnToDotCms --help
 //
 // Arguments:
-//   <input>                  Path to a DNN export folder (official site export)
-//                            or a DNN XML export file (.dnn or IPortable export)
+//   <input>                  Path to a DNN export folder, the export.json manifest
+//                            inside that folder, or a DNN XML file (.dnn / IPortable)
 //
 // Options:
 //   --output <path>          Write output to a file instead of stdout
@@ -62,8 +62,10 @@ if (string.IsNullOrWhiteSpace(inputPath))
     return 1;
 }
 
-bool isDirectory = Directory.Exists(inputPath);
-bool isFile      = !isDirectory && File.Exists(inputPath);
+bool isDirectory      = Directory.Exists(inputPath);
+bool isFile           = !isDirectory && File.Exists(inputPath);
+bool isExportManifest = isFile &&
+    Path.GetFileName(inputPath).Equals("export.json", StringComparison.OrdinalIgnoreCase);
 
 if (!isDirectory && !isFile)
 {
@@ -77,10 +79,12 @@ if (outputPath is not null)
 
 try
 {
-    // Parse DNN export (folder or XML file)
+    // Parse DNN export (folder, export.json manifest, or XML file)
     IReadOnlyList<DnnModule> modules = isDirectory
         ? DnnXmlParser.ParseExportFolder(inputPath)
-        : DnnXmlParser.ParseFile(inputPath);
+        : isExportManifest
+            ? DnnXmlParser.ParseExportJson(inputPath)
+            : DnnXmlParser.ParseFile(inputPath);
 
     if (modules.Count == 0)
     {
@@ -139,9 +143,9 @@ static void PrintUsage()
           DnnToDotCms --help
 
         Arguments:
-          <input>             Path to a DNN official site-export folder (contains
-                              export_packages.zip), or a DNN XML file (.dnn or
-                              IPortable export)
+          <input>             Path to a DNN official site-export folder, or the
+                              export.json manifest inside that folder, or a DNN
+                              XML file (.dnn or IPortable export)
 
         Options:
           --output <path>     Write JSON output to a file (also enables pretty-print)
@@ -158,10 +162,10 @@ static void PrintUsage()
           via the DotCMS REST API:  POST /api/v1/contenttype
 
         Examples:
+          DnnToDotCms example/2026-03-29_01-49-26/export.json
+          DnnToDotCms example/2026-03-29_01-49-26/export.json --output content-types.json
           DnnToDotCms example/2026-03-29_01-49-26
-          DnnToDotCms example/2026-03-29_01-49-26 --output content-types.json
           DnnToDotCms site-export.dnn
-          DnnToDotCms site-export.dnn --output content-types.json
           DnnToDotCms module-export.xml --pretty
         """);
 }
