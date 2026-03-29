@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Xml.Linq;
 using DnnToDotCms.Models;
 
@@ -6,8 +7,15 @@ namespace DnnToDotCms.Parser;
 /// <summary>
 /// Parses DNN (DotNetNuke) XML exports into <see cref="DnnModule"/> objects.
 /// <para>
-/// Two formats are supported:
+/// Three formats are supported:
 /// <list type="bullet">
+///   <item><description>
+///     <b>Official site export folder</b> — the folder produced by DNN's built-in
+///     Export/Import feature (e.g. <c>2026-03-29_01-49-26/</c>). The folder must
+///     contain an <c>export_packages.zip</c> file, which holds one or more
+///     <c>Module_*.resources</c> archives. Each <c>.resources</c> file is itself a
+///     ZIP that contains a <c>.dnn</c> package manifest.
+///   </description></item>
 ///   <item><description>
 ///     <b>Package manifest</b> — the standard <c>.dnn</c> installation manifest
 ///     with a <c>&lt;dotnetnuke type="Package"&gt;</c> root element.
@@ -25,6 +33,53 @@ public static class DnnXmlParser
     // ------------------------------------------------------------------
     // Public API
     // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Parse a DNN official site-export folder and return a de-duplicated list
+    /// of <see cref="DnnModule"/> objects discovered from all
+    /// <c>Module_*.resources</c> entries inside <c>export_packages.zip</c>.
+    /// </summary>
+    /// <param name="folderPath">
+    /// Path to the export folder that contains <c>export_packages.zip</c>
+    /// (e.g. the <c>2026-03-29_01-49-26</c> folder created by DNN Export).
+    /// </param>
+    /// <exception cref="FileNotFoundException">
+    /// Thrown when <c>export_packages.zip</c> is not found inside
+    /// <paramref name="folderPath"/>.
+    /// </exception>
+    public static IReadOnlyList<DnnModule> ParseExportFolder(string folderPath)
+    {
+        string packagesZip = Path.Combine(folderPath, "export_packages.zip");
+        if (!File.Exists(packagesZip))
+            throw new FileNotFoundException(
+                $"export_packages.zip not found in folder: {folderPath}", packagesZip);
+
+        var modules = new List<DnnModule>();
+
+        using ZipArchive outer = ZipFile.OpenRead(packagesZip);
+        foreach (ZipArchiveEntry resourceEntry in outer.Entries)
+        {
+            // Only process Module_*.resources entries
+            if (!resourceEntry.Name.StartsWith("Module_", StringComparison.OrdinalIgnoreCase) ||
+                !resourceEntry.Name.EndsWith(".resources", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            using Stream resourceStream = resourceEntry.Open();
+            using var resourceZip = new ZipArchive(resourceStream, ZipArchiveMode.Read);
+
+            foreach (ZipArchiveEntry dnnEntry in resourceZip.Entries)
+            {
+                if (!dnnEntry.Name.EndsWith(".dnn", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                using StreamReader reader = new(dnnEntry.Open());
+                string xmlContent = reader.ReadToEnd();
+                modules.AddRange(ParseXml(xmlContent));
+            }
+        }
+
+        return modules;
+    }
 
     /// <summary>
     /// Parse a DNN XML string and return a list of <see cref="DnnModule"/>.
