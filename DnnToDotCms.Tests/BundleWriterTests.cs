@@ -1188,6 +1188,49 @@ public class BundleWriterTests
     }
 
     [Fact]
+    public void Write_WithHtmlContents_ContentXmlAssetSubTypeIsContentTypeVariable()
+    {
+        // assetSubType must match the content type variable (e.g. "htmlContent"), not the name
+        // ("HTMLContent").  DotCMS uses assetSubType to resolve the content type on import.
+        var contents = new[] { new DnnHtmlContent("Title", "<p>Body</p>") };
+        var (ms, names) = WriteBundleWithContents(contents);
+        string contentEntry = names.First(n => n.Contains("/1/") && n.EndsWith(".content.xml"));
+        string contentXml   = ReadTarEntry(ms, contentEntry)!;
+
+        Assert.Contains("<assetSubType>htmlContent</assetSubType>", contentXml);
+        Assert.DoesNotContain("<assetSubType>HTMLContent</assetSubType>", contentXml);
+    }
+
+    [Fact]
+    public void Write_WithHtmlContents_ContentXmlAssetNameIsIdentifierDotContent()
+    {
+        // assetName must follow the "{identifier}.content" convention used by DotCMS bundles.
+        var contents = new[] { new DnnHtmlContent("Title", "<p>Body</p>") };
+        var (ms, names) = WriteBundleWithContents(contents);
+        string entryName = names.First(n => n.Contains("/1/") && n.EndsWith(".content.xml"));
+        string contentXml = ReadTarEntry(ms, entryName)!;
+
+        // The entry name is "live/.../1/{identifier}.content.xml"; extract the identifier part.
+        string entryBaseName = System.IO.Path.GetFileNameWithoutExtension(
+            System.IO.Path.GetFileNameWithoutExtension(entryName)); // strips .xml then .content
+        Assert.Contains($"<assetName>{entryBaseName}.content</assetName>", contentXml);
+    }
+
+    [Fact]
+    public void Write_ContentTypeJson_SystemActionMappingsIsJsonArray()
+    {
+        // systemActionMappings must be a JSON array ("[]"), not a JSON object ("{}").
+        // DotCMS expects a List serialization; an object causes deserialization failure on import.
+        var (ms, names) = WriteBundleToMemory([MakeHtmlContentType()]);
+        string ctEntry = names.First(n => n.EndsWith(".contentType.json"));
+        string ctJson  = ReadTarEntry(ms, ctEntry)!;
+
+        using var doc = JsonDocument.Parse(ctJson);
+        JsonElement mappings = doc.RootElement.GetProperty("systemActionMappings");
+        Assert.Equal(JsonValueKind.Array, mappings.ValueKind);
+    }
+
+    [Fact]
     public void Write_WithHtmlContents_WorkflowXmlHasPushWorkflowWrapper()
     {
         var (ms, names) = WriteBundleWithContents(MakeHtmlContents());
