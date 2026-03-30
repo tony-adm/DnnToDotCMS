@@ -18,6 +18,12 @@ public static class BundleWriter
     private const string SystemWorkflowId   = "d61a59e1-a49c-46f2-a929-db2b4bfa88b2";
     private const string SystemWorkflowName = "System Workflow";
 
+    // DotCMS stores several fields (content-type description, contentlet TEXT
+    // fields, workflow task title, container/template title) in VARCHAR(255)
+    // columns.  Any value exceeding this limit causes a database error on
+    // bundle import.
+    private const int MaxVarcharLength = 255;
+
     // Fixed content-type UUID for the DotCMS built-in Host/Site content type.
     private const string HostContentTypeInode = "855a2d72-f2f3-4169-8b04-ac5157c4380c";
 
@@ -228,7 +234,9 @@ public static class BundleWriter
             Clazz           = ctClazz,
             Name            = ct.Name,
             Id              = id,
-            Description     = string.IsNullOrWhiteSpace(ct.Description) ? null : ct.Description,
+            Description     = string.IsNullOrWhiteSpace(ct.Description)
+                                  ? null
+                                  : Truncate(ct.Description, MaxVarcharLength),
             DefaultType     = ct.DefaultType,
             Fixed           = ct.Fixed,
             System          = ct.System,
@@ -320,7 +328,7 @@ public static class BundleWriter
     {
         string now      = DateTime.UtcNow.ToString(XmlTimestampFormat);
         string xmlCode  = System.Security.SecurityElement.Escape(code) ?? string.Empty;
-        string xmlTitle = System.Security.SecurityElement.Escape(title) ?? string.Empty;
+        string xmlTitle = System.Security.SecurityElement.Escape(Truncate(title, MaxVarcharLength)) ?? string.Empty;
 
         return $"""
             <com.dotcms.publisher.pusher.wrapper.ContainerWrapper>
@@ -375,7 +383,7 @@ public static class BundleWriter
     {
         string now      = DateTime.UtcNow.ToString(XmlTimestampFormat);
         string xmlBody  = System.Security.SecurityElement.Escape(body) ?? string.Empty;
-        string xmlTitle = System.Security.SecurityElement.Escape(title) ?? string.Empty;
+        string xmlTitle = System.Security.SecurityElement.Escape(Truncate(title, MaxVarcharLength)) ?? string.Empty;
 
         return $"""
             <com.dotcms.publisher.pusher.wrapper.TemplateWrapper>
@@ -594,7 +602,7 @@ public static class BundleWriter
         string contentTypeVariable)
     {
         string now        = DateTime.UtcNow.ToString(XmlTimestampFormat);
-        string xmlTitle   = System.Security.SecurityElement.Escape(title)   ?? string.Empty;
+        string xmlTitle   = System.Security.SecurityElement.Escape(Truncate(title, MaxVarcharLength))   ?? string.Empty;
         string xmlBody    = System.Security.SecurityElement.Escape(htmlBody) ?? string.Empty;
 
         // Java 7 ConcurrentHashMap with 16 empty segments (same pattern as HostWrapper).
@@ -715,7 +723,7 @@ public static class BundleWriter
     private static string BuildContentWorkflowXml(string identifier, string title)
     {
         string now      = DateTime.UtcNow.ToString(XmlTimestampFormat);
-        string xmlTitle = System.Security.SecurityElement.Escape(title) ?? string.Empty;
+        string xmlTitle = System.Security.SecurityElement.Escape(Truncate(title, MaxVarcharLength)) ?? string.Empty;
 
         return $"""
             <com.dotcms.publisher.pusher.wrapper.PushContentWorkflowWrapper>
@@ -1063,4 +1071,12 @@ public static class BundleWriter
             "SYSTEM"    => $"binary{++binaryCount}",
             _           => $"text{++textCount}",
         };
+
+    /// <summary>
+    /// Truncates <paramref name="value"/> to at most <paramref name="maxLength"/>
+    /// characters.  This prevents "value too long for type character varying(255)"
+    /// errors when dotCMS stores the field in a VARCHAR column.
+    /// </summary>
+    private static string Truncate(string value, int maxLength) =>
+        value.Length <= maxLength ? value : value[..maxLength];
 }

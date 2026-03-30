@@ -30,6 +30,11 @@ public static class DnnConverter
                 : $"{contentType.Description}. {module.Description}";
         }
 
+        // DotCMS stores the content-type description in a VARCHAR(255) column.
+        // Truncate here so that no bundle entry can exceed that limit.
+        if (contentType.Description.Length > 255)
+            contentType.Description = contentType.Description[..255];
+
         return contentType;
     }
 
