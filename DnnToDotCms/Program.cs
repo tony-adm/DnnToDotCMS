@@ -116,9 +116,20 @@ try
         ? DnnXmlParser.ParseHtmlContents(exportDir)
         : [];
 
+    // Extract portal pages (tabs) from the LiteDB database.
+    IReadOnlyList<DnnPortalPage> portalPages = exportDir is not null
+        ? DnnXmlParser.ParsePortalPages(exportDir)
+        : [];
+
+    // Extract portal static files from export_files.zip + LiteDB metadata.
+    IReadOnlyList<DnnPortalFile> portalFiles = exportDir is not null
+        ? DnnXmlParser.ParsePortalFiles(exportDir)
+        : [];
+
     // Write the DotCMS site bundle.
     using (var outStream = File.Create(outputPath))
-        BundleWriter.Write(contentTypes, outStream, themesZip, portalName, htmlContents);
+        BundleWriter.Write(contentTypes, outStream, themesZip, portalName, htmlContents,
+            portalPages, portalFiles);
 
     string themeNote = themesZip is not null
         ? " Containers, templates, and static theme assets included from export_themes.zip."
@@ -132,9 +143,20 @@ try
         ? $" {htmlContents.Count} HTML content item(s) included."
         : string.Empty;
 
+    // Count only the Level-0 non-Admin pages that are actually written to the bundle.
+    int importedPageCount = portalPages.Count(p =>
+        p.Level == 0 && !p.Name.Equals("Admin", StringComparison.OrdinalIgnoreCase));
+    string pageNote = importedPageCount > 0
+        ? $" {importedPageCount} page(s) included."
+        : string.Empty;
+
+    string fileNote = portalFiles.Count > 0
+        ? $" {portalFiles.Count} static file(s) included."
+        : string.Empty;
+
     Console.WriteLine(
         $"Converted {modules.Count} module(s) to {contentTypes.Count} content type(s)." +
-        $"{themeNote}{siteNote}{contentNote} Bundle written to: {outputPath}");
+        $"{themeNote}{siteNote}{contentNote}{pageNote}{fileNote} Bundle written to: {outputPath}");
 
     return 0;
 }

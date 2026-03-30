@@ -46,3 +46,50 @@ public sealed record DnnModule(
     public IReadOnlyDictionary<string, string> Extra { get; init; } =
         new Dictionary<string, string>();
 }
+
+/// <summary>
+/// Represents a DNN portal page (tab) extracted from the
+/// <c>ExportTab</c> collection in <c>export_db.zip</c>.
+/// </summary>
+public sealed record DnnPortalPage(
+    /// <summary>The DNN tab's stable identifier (UniqueId GUID).</summary>
+    string UniqueId,
+    /// <summary>Internal tab name used to build the URL slug.</summary>
+    string Name,
+    /// <summary>Display title shown in the browser title-bar.</summary>
+    string Title,
+    /// <summary>Page description (used for meta description).</summary>
+    string Description,
+    /// <summary>DNN tab path, e.g. <c>//Home</c> or <c>//ActivityFeed//MyProfile</c>.</summary>
+    string TabPath,
+    /// <summary>Nesting depth: 0 = top-level, 1 = first child, etc.</summary>
+    int Level,
+    /// <summary>Whether the page is visible in the navigation.</summary>
+    bool IsVisible,
+    /// <summary>
+    /// DNN skin source, e.g. <c>[G]Skins/Xcillion/Home.ascx</c>.
+    /// Empty when the page inherits the portal default.
+    /// </summary>
+    string SkinSrc);
+
+/// <summary>
+/// Represents a DNN portal file extracted from the <c>ExportFile</c>
+/// collection in <c>export_db.zip</c> together with its binary content
+/// from <c>export_files.zip</c>.
+/// </summary>
+public sealed record DnnPortalFile(
+    /// <summary>Stable file identifier (UniqueId GUID from ExportFile).</summary>
+    string UniqueId,
+    /// <summary>Version/inode GUID (VersionGuid from ExportFile).</summary>
+    string VersionGuid,
+    /// <summary>File name, e.g. <c>logo.png</c>.</summary>
+    string FileName,
+    /// <summary>
+    /// DNN folder path relative to the portal root, e.g. <c>""</c> for the
+    /// root or <c>"Images/"</c> for the Images sub-folder.
+    /// </summary>
+    string FolderPath,
+    /// <summary>MIME type reported by DNN, e.g. <c>image/png</c>.</summary>
+    string MimeType,
+    /// <summary>Raw file bytes.</summary>
+    byte[] Content);

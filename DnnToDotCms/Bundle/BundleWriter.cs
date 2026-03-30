@@ -14,6 +14,12 @@ namespace DnnToDotCms.Bundle;
 /// </summary>
 public static class BundleWriter
 {
+    // Fixed content-type UUID for the DotCMS built-in htmlpageasset content type.
+    private const string HtmlPageAssetContentTypeId = "c541abb1-69b3-4bc5-8430-5e09e5239cc8";
+
+    // Fixed content-type UUID for the DotCMS built-in FileAsset content type.
+    private const string FileAssetContentTypeId = "33888b6f-7a8e-4069-b1b6-5c1aa9d0a48d";
+
     // Fixed UUID of the built-in DotCMS "System Workflow".
     private const string SystemWorkflowId   = "d61a59e1-a49c-46f2-a929-db2b4bfa88b2";
     private const string SystemWorkflowName = "System Workflow";
@@ -72,12 +78,25 @@ public static class BundleWriter
     /// as a published DotCMS contentlet (<c>PushContentWrapper</c>) linked to
     /// the <c>htmlContent</c> content type generated from the DNN HTML module.
     /// </param>
+    /// <param name="pages">
+    /// Optional list of DNN portal pages (tabs) extracted from the LiteDB
+    /// database.  When provided, each page is written as a published DotCMS
+    /// <c>htmlpageasset</c> contentlet.
+    /// </param>
+    /// <param name="portalFiles">
+    /// Optional list of DNN portal static files extracted from
+    /// <c>export_files.zip</c> together with their metadata from the LiteDB
+    /// database.  When provided, each file is written as a published DotCMS
+    /// <c>FileAsset</c> contentlet.
+    /// </param>
     public static void Write(
         IReadOnlyList<DotCmsContentType> contentTypes,
         Stream output,
         string? themesZipPath = null,
         string? siteName = null,
-        IReadOnlyList<DnnHtmlContent>? htmlContents = null)
+        IReadOnlyList<DnnHtmlContent>? htmlContents = null,
+        IReadOnlyList<DnnPortalPage>? pages = null,
+        IReadOnlyList<DnnPortalFile>? portalFiles = null)
     {
         string bundleId = Guid.NewGuid().ToString("N").ToUpperInvariant();
 
@@ -141,7 +160,13 @@ public static class BundleWriter
         {
             string id   = Guid.NewGuid().ToString();
             string json = BuildContentTypeJson(ct, id, contentHostId, contentSiteName);
-            WriteTextEntry(tar, $"working/{contentWorkDir}/{id}.contentType.json", json);
+            // DotCMS push-publish format requires each .contentType.json to:
+            //   1. contain two JSON objects (old state + new state), and
+            //   2. appear twice in the tar archive.
+            // For new content types the old and new states are identical.
+            string doubledJson = json + json;
+            WriteTextEntry(tar, $"working/{contentWorkDir}/{id}.contentType.json", doubledJson);
+            WriteTextEntry(tar, $"working/{contentWorkDir}/{id}.contentType.json", doubledJson);
             manifestEntries.Add(("contenttype", id, "", ct.Name, contentWorkDir, "/"));
 
             if (ct.Variable == "htmlContent")
@@ -194,6 +219,108 @@ public static class BundleWriter
 
                 manifestEntries.Add(("contentlet", identifier, inode, hc.Title,
                     contentWorkDir, "/"));
+            }
+        }
+
+        // --- portal pages (from DNN tabs) ------------------------------------
+        if (pages is not null && pages.Count > 0)
+        {
+            // Build a lookup from skin name → template ID for matching DNN pages
+            // to the templates that were converted from DNN skins.
+            var skinToTemplateId = BuildSkinToTemplateMap(templateDefs);
+
+            // Generate a root-folder UUID for the site (used as the folder for
+            // top-level pages and files).
+            string rootFolderId = Guid.NewGuid().ToString();
+
+            // Write a root-folder entry so that pages and files have a valid parent.
+            if (hostname is not null && siteId is not null)
+            {
+                string folderXml = BuildFolderXml(rootFolderId, hostname, siteId, "/", "/");
+                WriteTextEntry(tar, $"live/{contentWorkDir}/{rootFolderId}.folder.xml", folderXml);
+                manifestEntries.Add(("folder", rootFolderId, rootFolderId, hostname, contentWorkDir, "/"));
+            }
+
+            foreach (DnnPortalPage page in pages)
+            {
+                // Only import non-deleted, non-admin Level-0 pages.
+                if (page.Level != 0) continue;
+                if (page.Name.Equals("Admin", StringComparison.OrdinalIgnoreCase)) continue;
+
+                string identifier = Guid.NewGuid().ToString();
+                string inode      = Guid.NewGuid().ToString();
+                string url        = PageNameToUrl(page.Name);
+                string templateId = ResolveTemplateId(page.SkinSrc, skinToTemplateId);
+
+                string pageXml = BuildPageXml(
+                    identifier, inode, page.Title, url,
+                    contentHostId, rootFolderId, templateId);
+                WriteTextEntry(
+                    tar,
+                    $"live/{contentWorkDir}/1/{identifier}.content.xml",
+                    pageXml);
+
+                string workflowXml = BuildContentWorkflowXml(identifier, page.Title);
+                WriteTextEntry(
+                    tar,
+                    $"live/{contentWorkDir}/1/{identifier}.contentworkflow.xml",
+                    workflowXml);
+
+                manifestEntries.Add(("contentlet", identifier, inode,
+                    Truncate(page.Title, MaxVarcharLength), contentWorkDir, "/"));
+            }
+        }
+
+        // --- portal static files (from DNN export_files.zip) -----------------
+        if (portalFiles is not null && portalFiles.Count > 0)
+        {
+            // Build a map of DNN folder path → DotCMS folder UUID so that files
+            // in sub-folders reference the correct parent folder.
+            var folderIdMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (DnnPortalFile pf in portalFiles)
+            {
+                // Ensure the folder has a UUID in our map.
+                if (!folderIdMap.TryGetValue(pf.FolderPath, out string? folderUuid))
+                {
+                    folderUuid = Guid.NewGuid().ToString();
+                    folderIdMap[pf.FolderPath] = folderUuid;
+
+                    // Write a folder entry for non-root folders.
+                    if (!string.IsNullOrEmpty(pf.FolderPath) && hostname is not null && siteId is not null)
+                    {
+                        string dotPath   = "/" + pf.FolderPath.TrimEnd('/').ToLowerInvariant() + "/";
+                        string parentPath = "/";
+                        string folderXml = BuildFolderXml(folderUuid, pf.FolderPath.TrimEnd('/'), siteId, dotPath, parentPath);
+                        WriteTextEntry(tar, $"live/{contentWorkDir}/{folderUuid}.folder.xml", folderXml);
+                        manifestEntries.Add(("folder", folderUuid, folderUuid, pf.FolderPath.TrimEnd('/'), contentWorkDir, "/"));
+                    }
+                }
+
+                string identifier = pf.UniqueId;
+                string inode      = pf.VersionGuid;
+
+                // Write the actual file bytes under assets/{x}/{y}/{inode}/fileAsset/{filename}
+                string assetPath = BuildAssetPath(inode, pf.FileName);
+                WriteBinaryEntry(tar, assetPath, pf.Content);
+
+                // Write the contentlet XML.
+                string fileContentXml = BuildFileAssetXml(
+                    identifier, inode, pf.FileName, assetPath,
+                    contentHostId, folderUuid);
+                WriteTextEntry(
+                    tar,
+                    $"live/{contentWorkDir}/1/{identifier}.content.xml",
+                    fileContentXml);
+
+                string workflowXml = BuildContentWorkflowXml(identifier, pf.FileName);
+                WriteTextEntry(
+                    tar,
+                    $"live/{contentWorkDir}/1/{identifier}.contentworkflow.xml",
+                    workflowXml);
+
+                manifestEntries.Add(("contentlet", identifier, inode,
+                    Truncate(pf.FileName, MaxVarcharLength), contentWorkDir, "/"));
             }
         }
 
@@ -765,8 +892,379 @@ public static class BundleWriter
     }
 
     // ------------------------------------------------------------------
-    // Theme definition collector — builds container/template defs
+    // Page (htmlpageasset) XML builder
     // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Builds a DotCMS <c>PushContentWrapper</c> XML for an
+    /// <c>htmlpageasset</c> contentlet (a DotCMS page).
+    /// </summary>
+    private static string BuildPageXml(
+        string identifier,
+        string inode,
+        string title,
+        string url,
+        string hostId,
+        string folderId,
+        string templateId)
+    {
+        string now      = DateTime.UtcNow.ToString(XmlTimestampFormat);
+        string xmlTitle = System.Security.SecurityElement.Escape(Truncate(title, MaxVarcharLength)) ?? string.Empty;
+        string xmlUrl   = System.Security.SecurityElement.Escape(url) ?? string.Empty;
+
+        string segments = string.Concat(Enumerable.Repeat(EmptyConcurrentHashMapSegment, 16));
+
+        return $"""
+            <com.dotcms.publisher.pusher.wrapper.PushContentWrapper>
+              <info>
+                <identifier>{identifier}</identifier>
+                <liveInode>{inode}</liveInode>
+                <workingInode>{inode}</workingInode>
+                <lockedOn class="sql-timestamp">{now}</lockedOn>
+                <deleted>false</deleted>
+                <versionTs class="sql-timestamp">{now}</versionTs>
+                <lang>1</lang>
+                <variant>DEFAULT</variant>
+                <publishDate class="sql-timestamp">{now}</publishDate>
+              </info>
+              <content>
+                <map class="com.dotmarketing.portlets.contentlet.model.Contentlet$ContentletHashMap" serialization="custom">
+                  <unserializable-parents/>
+                  <concurrent-hash-map>
+                    <default>
+                      <segments>
+            {segments}
+                      </segments>
+                      <segmentShift>28</segmentShift>
+                      <segmentMask>15</segmentMask>
+                    </default>
+                    <string>cachettl</string>
+                    <string>0</string>
+                    <string>inode</string>
+                    <string>{inode}</string>
+                    <string>disabledWYSIWYG</string>
+                    <com.google.common.collect.RegularImmutableList resolves-to="com.google.common.collect.ImmutableList$SerializedForm">
+                      <elements/>
+                    </com.google.common.collect.RegularImmutableList>
+                    <string>host</string>
+                    <string>{hostId}</string>
+                    <string>stInode</string>
+                    <string>{HtmlPageAssetContentTypeId}</string>
+                    <string>title</string>
+                    <string>{xmlTitle}</string>
+                    <string>friendlyName</string>
+                    <string>{xmlTitle}</string>
+                    <string>template</string>
+                    <string>{templateId}</string>
+                    <string>url</string>
+                    <string>{xmlUrl}</string>
+                    <string>owner</string>
+                    <string>dotcms.org.1</string>
+                    <string>identifier</string>
+                    <string>{identifier}</string>
+                    <string>nullProperties</string>
+                    <java.util.concurrent.ConcurrentHashMap_-KeySetView>
+                      <map/>
+                      <value class="boolean">true</value>
+                    </java.util.concurrent.ConcurrentHashMap_-KeySetView>
+                    <string>languageId</string>
+                    <long>1</long>
+                    <string>folder</string>
+                    <string>{folderId}</string>
+                    <string>sortOrder</string>
+                    <long>0</long>
+                    <string>modUser</string>
+                    <string>dotcms.org.1</string>
+                    <null/>
+                    <null/>
+                  </concurrent-hash-map>
+                  <com.dotmarketing.portlets.contentlet.model.Contentlet_-ContentletHashMap>
+                    <default>
+                      <outer-class reference="../../../.."/>
+                    </default>
+                  </com.dotmarketing.portlets.contentlet.model.Contentlet_-ContentletHashMap>
+                </map>
+                <lowIndexPriority>false</lowIndexPriority>
+                <variantId>DEFAULT</variantId>
+              </content>
+              <id>
+                <id>{identifier}</id>
+                <assetName>{xmlUrl}</assetName>
+                <assetType>contentlet</assetType>
+                <parentPath>/</parentPath>
+                <hostId>{hostId}</hostId>
+                <owner>dotcms.org.1</owner>
+                <createDate class="sql-timestamp">{now}</createDate>
+                <assetSubType>htmlpageasset</assetSubType>
+              </id>
+              <tree/>
+              <categories/>
+              <tags class="java.util.ImmutableCollections$ListN" resolves-to="java.util.CollSer" serialization="custom">
+                <java.util.CollSer>
+                  <default>
+                    <tag>1</tag>
+                  </default>
+                  <int>0</int>
+                </java.util.CollSer>
+              </tags>
+              <operation>PUBLISH</operation>
+              <language>
+                <id>1</id>
+                <languageCode>en</languageCode>
+                <countryCode>US</countryCode>
+                <language>English</language>
+                <country>United States</country>
+                <isoCode>en-us</isoCode>
+              </language>
+              <contentTags/>
+              <contentletMetadata/>
+            </com.dotcms.publisher.pusher.wrapper.PushContentWrapper>
+            """;
+    }
+
+    // ------------------------------------------------------------------
+    // FileAsset (PushContentWrapper) XML builder
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Builds a DotCMS <c>PushContentWrapper</c> XML for a <c>FileAsset</c>
+    /// contentlet representing a portal static file.
+    /// </summary>
+    private static string BuildFileAssetXml(
+        string identifier,
+        string inode,
+        string fileName,
+        string assetPath,
+        string hostId,
+        string folderId)
+    {
+        string now          = DateTime.UtcNow.ToString(XmlTimestampFormat);
+        string xmlFileName  = System.Security.SecurityElement.Escape(fileName)  ?? string.Empty;
+        // The fileAsset field uses the on-disk storage path under /data/shared.
+        string storagePath  = $"/data/shared/{assetPath}";
+
+        string segments = string.Concat(Enumerable.Repeat(EmptyConcurrentHashMapSegment, 16));
+
+        return $"""
+            <com.dotcms.publisher.pusher.wrapper.PushContentWrapper>
+              <info>
+                <identifier>{identifier}</identifier>
+                <liveInode>{inode}</liveInode>
+                <workingInode>{inode}</workingInode>
+                <lockedOn class="sql-timestamp">{now}</lockedOn>
+                <deleted>false</deleted>
+                <versionTs class="sql-timestamp">{now}</versionTs>
+                <lang>1</lang>
+                <variant>DEFAULT</variant>
+                <publishDate class="sql-timestamp">{now}</publishDate>
+              </info>
+              <content>
+                <map class="com.dotmarketing.portlets.contentlet.model.Contentlet$ContentletHashMap" serialization="custom">
+                  <unserializable-parents/>
+                  <concurrent-hash-map>
+                    <default>
+                      <segments>
+            {segments}
+                      </segments>
+                      <segmentShift>28</segmentShift>
+                      <segmentMask>15</segmentMask>
+                    </default>
+                    <string>modDate</string>
+                    <sql-timestamp>{now}</sql-timestamp>
+                    <string>fileName</string>
+                    <string>{xmlFileName}</string>
+                    <string>title</string>
+                    <string>{xmlFileName}</string>
+                    <string>inode</string>
+                    <string>{inode}</string>
+                    <string>disabledWYSIWYG</string>
+                    <com.google.common.collect.RegularImmutableList resolves-to="com.google.common.collect.ImmutableList$SerializedForm">
+                      <elements/>
+                    </com.google.common.collect.RegularImmutableList>
+                    <string>host</string>
+                    <string>{hostId}</string>
+                    <string>stInode</string>
+                    <string>{FileAssetContentTypeId}</string>
+                    <string>owner</string>
+                    <string>dotcms.org.1</string>
+                    <string>identifier</string>
+                    <string>{identifier}</string>
+                    <string>nullProperties</string>
+                    <java.util.concurrent.ConcurrentHashMap_-KeySetView>
+                      <map/>
+                      <value class="boolean">true</value>
+                    </java.util.concurrent.ConcurrentHashMap_-KeySetView>
+                    <string>languageId</string>
+                    <long>1</long>
+                    <string>fileAsset</string>
+                    <file>{storagePath}</file>
+                    <string>folder</string>
+                    <string>{folderId}</string>
+                    <string>sortOrder</string>
+                    <long>0</long>
+                    <string>modUser</string>
+                    <string>dotcms.org.1</string>
+                    <null/>
+                    <null/>
+                  </concurrent-hash-map>
+                  <com.dotmarketing.portlets.contentlet.model.Contentlet_-ContentletHashMap>
+                    <default>
+                      <outer-class reference="../../../.."/>
+                    </default>
+                  </com.dotmarketing.portlets.contentlet.model.Contentlet_-ContentletHashMap>
+                </map>
+                <lowIndexPriority>false</lowIndexPriority>
+                <variantId>DEFAULT</variantId>
+              </content>
+              <id>
+                <id>{identifier}</id>
+                <assetName>{xmlFileName}</assetName>
+                <assetType>contentlet</assetType>
+                <parentPath>/</parentPath>
+                <hostId>{hostId}</hostId>
+                <owner>dotcms.org.1</owner>
+                <createDate class="sql-timestamp">{now}</createDate>
+                <assetSubType>FileAsset</assetSubType>
+              </id>
+              <tree/>
+              <categories/>
+              <tags class="java.util.ImmutableCollections$ListN" resolves-to="java.util.CollSer" serialization="custom">
+                <java.util.CollSer>
+                  <default>
+                    <tag>1</tag>
+                  </default>
+                  <int>0</int>
+                </java.util.CollSer>
+              </tags>
+              <operation>PUBLISH</operation>
+              <language>
+                <id>1</id>
+                <languageCode>en</languageCode>
+                <countryCode>US</countryCode>
+                <language>English</language>
+                <country>United States</country>
+                <isoCode>en-us</isoCode>
+              </language>
+              <contentTags/>
+              <contentletMetadata/>
+            </com.dotcms.publisher.pusher.wrapper.PushContentWrapper>
+            """;
+    }
+
+    // ------------------------------------------------------------------
+    // Folder (FolderWrapper) XML builder
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Builds a DotCMS <c>FolderWrapper</c> XML entry for a site folder.
+    /// </summary>
+    private static string BuildFolderXml(
+        string folderId,
+        string folderName,
+        string hostId,
+        string folderPath,
+        string parentPath)
+    {
+        string now          = DateTime.UtcNow.ToString(XmlTimestampFormat);
+        string xmlName      = System.Security.SecurityElement.Escape(folderName) ?? string.Empty;
+        string xmlPath      = System.Security.SecurityElement.Escape(folderPath) ?? string.Empty;
+        string xmlParent    = System.Security.SecurityElement.Escape(parentPath) ?? string.Empty;
+
+        return $"""
+            <com.dotcms.publisher.pusher.wrapper.FolderWrapper>
+              <folder>
+                <identifier>{folderId}</identifier>
+                <name>{xmlName}</name>
+                <sortOrder>0</sortOrder>
+                <showOnMenu>false</showOnMenu>
+                <hostId>{hostId}</hostId>
+                <type>folder</type>
+                <title>{xmlName}</title>
+                <filesMasks></filesMasks>
+                <defaultFileType>{FileAssetContentTypeId}</defaultFileType>
+                <modDate class="sql-timestamp">{now}</modDate>
+                <owner>dotcms.org.1</owner>
+                <iDate class="sql-timestamp">{now}</iDate>
+                <inode>{folderId}</inode>
+                <path>{xmlPath}</path>
+              </folder>
+              <folderId>
+                <id>{folderId}</id>
+                <assetName>{xmlName}</assetName>
+                <assetType>folder</assetType>
+                <parentPath>{xmlParent}</parentPath>
+                <hostId>{hostId}</hostId>
+                <owner>dotcms.org.1</owner>
+                <createDate class="sql-timestamp">{now}</createDate>
+              </folderId>
+              <operation>PUBLISH</operation>
+            </com.dotcms.publisher.pusher.wrapper.FolderWrapper>
+            """;
+    }
+
+    // ------------------------------------------------------------------
+    // Page / file helper utilities
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Converts a DNN page name to a URL-safe slug (lowercase, hyphens).
+    /// </summary>
+    private static string PageNameToUrl(string name)
+    {
+        string slug = Regex.Replace(name.ToLowerInvariant(), @"[^a-z0-9]+", "-").Trim('-');
+        return string.IsNullOrEmpty(slug) ? "page" : slug;
+    }
+
+    /// <summary>
+    /// Returns the tar path for a file asset's binary content:
+    /// <c>assets/{x}/{y}/{inode}/fileAsset/{filename}</c>,
+    /// where <c>x</c> and <c>y</c> are the first two characters of the inode.
+    /// </summary>
+    private static string BuildAssetPath(string inode, string fileName)
+    {
+        string clean  = inode.Replace("-", "");
+        char   x      = clean.Length > 0 ? clean[0] : '0';
+        char   y      = clean.Length > 1 ? clean[1] : '0';
+        return $"assets/{x}/{y}/{inode}/fileAsset/{fileName}";
+    }
+
+    /// <summary>
+    /// Builds a skin-name → template-ID lookup from the template definitions
+    /// collected from the themes zip.  Skin name is derived from the ASCX file
+    /// name without extension (e.g. <c>Home</c> from <c>Home.ascx</c>).
+    /// </summary>
+    private static Dictionary<string, string> BuildSkinToTemplateMap(
+        IReadOnlyList<(string id, string inode, string name, string html)> templateDefs)
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (id, _, name, _) in templateDefs)
+            map.TryAdd(name, id);
+        return map;
+    }
+
+    /// <summary>
+    /// Resolves the DotCMS template ID for a DNN page based on its
+    /// <paramref name="skinSrc"/> (e.g. <c>[G]Skins/Xcillion/Home.ascx</c>).
+    /// Falls back to the first available template, or empty string when none.
+    /// </summary>
+    private static string ResolveTemplateId(
+        string skinSrc,
+        Dictionary<string, string> skinToTemplateId)
+    {
+        if (!string.IsNullOrWhiteSpace(skinSrc))
+        {
+            // Extract the skin file name without extension.
+            string skinName = Path.GetFileNameWithoutExtension(skinSrc);
+            if (skinToTemplateId.TryGetValue(skinName, out string? id))
+                return id;
+        }
+        // Fall back to the first available template.
+        foreach (string id in skinToTemplateId.Values)
+            return id;
+        return string.Empty;
+    }
+
+
 
     /// <summary>
     /// Scans <paramref name="themesZipPath"/> for DNN container and skin ASCX
@@ -1021,8 +1519,17 @@ public static class BundleWriter
         tar.WriteEntry(entry);
     }
 
-    /// <summary>
-    /// Converts a DotCMS class name to its Immutable variant required by the
+    private static void WriteBinaryEntry(TarWriter tar, string path, byte[] content)
+    {
+        using var ms = new MemoryStream(content);
+        var entry = new UstarTarEntry(TarEntryType.RegularFile, path)
+        {
+            DataStream = ms,
+        };
+        tar.WriteEntry(entry);
+    }
+
+
     /// push-publish bundle format, e.g.
     /// <c>…model.field.TextField</c> → <c>…model.field.ImmutableTextField</c>.
     /// </summary>
