@@ -432,7 +432,12 @@ public static class ModuleMappings
 
     private static string ToCamelCase(string name)
     {
-        string[] parts = Regex.Split(name.Trim(), @"[\s_\-]+");
+        // Split on any run of non-alphanumeric characters (dots, spaces, hyphens,
+        // underscores, etc.) so that names like "dotnetnuke.modules.memberDirectory"
+        // produce valid camelCase variable names without embedded punctuation.
+        string[] parts = Regex.Split(name.Trim(), @"[^a-zA-Z0-9]+")
+                              .Where(p => !string.IsNullOrEmpty(p))
+                              .ToArray();
         if (parts.Length == 0) return "genericModule";
 
         string first = parts[0];
@@ -444,6 +449,16 @@ public static class ModuleMappings
             if (!string.IsNullOrEmpty(part))
                 result += char.ToUpperInvariant(part[0]) + (part.Length > 1 ? part[1..] : string.Empty);
         }
-        return string.IsNullOrEmpty(result) ? "genericModule" : result;
+
+        // Strip any remaining non-alphanumeric characters (safety net for edge cases).
+        result = Regex.Replace(result, @"[^a-zA-Z0-9]", string.Empty);
+
+        if (string.IsNullOrEmpty(result)) return "genericModule";
+
+        // DotCMS variable names must start with a letter.
+        if (char.IsDigit(result[0]))
+            result = "module" + char.ToUpperInvariant(result[0]) + result[1..];
+
+        return result;
     }
 }
