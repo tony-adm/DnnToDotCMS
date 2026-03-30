@@ -1656,6 +1656,31 @@ public class BundleWriterTests
     }
 
     [Fact]
+    public void Write_WithPages_RootFolderXmlIsIncludedWithoutSiteName()
+    {
+        // When no site name is provided, the root folder must still be written
+        // so that DotCMS can create page identifiers (avoids the
+        // "you can only create an identifier on a host of folder. Trying:null" error).
+        var pages = new[]
+        {
+            new DnnPortalPage("aaa", "Home", "Home", "", "//Home", 0, true, ""),
+        };
+
+        var ms = new MemoryStream();
+        BundleWriter.Write([MakeHtmlContentType()], ms, null, null, null, pages);
+        ms.Position = 0;
+
+        var names = new List<string>();
+        using var gz  = new GZipStream(ms, CompressionMode.Decompress, leaveOpen: true);
+        using var tar = new TarReader(gz);
+        TarEntry? entry;
+        while ((entry = tar.GetNextEntry()) is not null)
+            names.Add(entry.Name);
+
+        Assert.Contains(names, n => n.EndsWith(".folder.xml"));
+    }
+
+    [Fact]
     public void Write_WithPages_ManifestIncludesContentletAndFolderRows()
     {
         var pages = new[]
@@ -1783,6 +1808,35 @@ public class BundleWriterTests
         var (_, names) = WriteBundleWithFiles(files, "Test Site");
 
         // Sub-folder should produce a folder XML entry.
+        Assert.Contains(names, n => n.EndsWith(".folder.xml"));
+    }
+
+    [Fact]
+    public void Write_WithPortalFiles_SubFolderProducesFolderXmlEntryWithoutSiteName()
+    {
+        // When no site name is provided, sub-folder XML must still be written
+        // so that DotCMS can create file asset identifiers (avoids the
+        // "you can only create an identifier on a host of folder. Trying:null" error).
+        var files = new[]
+        {
+            new DnnPortalFile(
+                "6f574d5f-0880-4d5a-b4a2-74d2e10b5659",
+                "69f363b0-6512-48ad-b187-b6a450ffda7b",
+                "logo.png", "Images/", "image/png",
+                [0x00]),
+        };
+
+        var ms = new MemoryStream();
+        BundleWriter.Write([MakeHtmlContentType()], ms, null, null, null, null, files);
+        ms.Position = 0;
+
+        var names = new List<string>();
+        using var gz  = new GZipStream(ms, CompressionMode.Decompress, leaveOpen: true);
+        using var tar = new TarReader(gz);
+        TarEntry? entry;
+        while ((entry = tar.GetNextEntry()) is not null)
+            names.Add(entry.Name);
+
         Assert.Contains(names, n => n.EndsWith(".folder.xml"));
     }
 

@@ -233,13 +233,12 @@ public static class BundleWriter
             // top-level pages and files).
             string rootFolderId = Guid.NewGuid().ToString();
 
-            // Write a root-folder entry so that pages and files have a valid parent.
-            if (hostname is not null && siteId is not null)
-            {
-                string folderXml = BuildFolderXml(rootFolderId, hostname, siteId, "/", "/");
-                WriteTextEntry(tar, $"live/{contentWorkDir}/{rootFolderId}.folder.xml", folderXml);
-                manifestEntries.Add(("folder", rootFolderId, rootFolderId, hostname, contentWorkDir, "/"));
-            }
+            // Always write a root-folder entry so that pages and files have a valid parent.
+            // When no custom site is provided, contentHostId is "SYSTEM_HOST".
+            string rootFolderName = hostname ?? contentWorkDir;
+            string rootFolderXml = BuildFolderXml(rootFolderId, rootFolderName, contentHostId, "/", "/");
+            WriteTextEntry(tar, $"live/{contentWorkDir}/{rootFolderId}.folder.xml", rootFolderXml);
+            manifestEntries.Add(("folder", rootFolderId, rootFolderId, rootFolderName, contentWorkDir, "/"));
 
             foreach (DnnPortalPage page in pages)
             {
@@ -287,11 +286,12 @@ public static class BundleWriter
                     folderIdMap[pf.FolderPath] = folderUuid;
 
                     // Write a folder entry for non-root folders.
-                    if (!string.IsNullOrEmpty(pf.FolderPath) && hostname is not null && siteId is not null)
+                    // When no custom site is provided, contentHostId is "SYSTEM_HOST".
+                    if (!string.IsNullOrEmpty(pf.FolderPath))
                     {
                         string dotPath   = "/" + pf.FolderPath.TrimEnd('/').ToLowerInvariant() + "/";
                         string parentPath = "/";
-                        string folderXml = BuildFolderXml(folderUuid, pf.FolderPath.TrimEnd('/'), siteId, dotPath, parentPath);
+                        string folderXml = BuildFolderXml(folderUuid, pf.FolderPath.TrimEnd('/'), contentHostId, dotPath, parentPath);
                         WriteTextEntry(tar, $"live/{contentWorkDir}/{folderUuid}.folder.xml", folderXml);
                         manifestEntries.Add(("folder", folderUuid, folderUuid, pf.FolderPath.TrimEnd('/'), contentWorkDir, "/"));
                     }
