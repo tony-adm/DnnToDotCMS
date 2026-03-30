@@ -127,9 +127,10 @@ public static class BundleWriter
         string contentSiteName = hostname ?? "systemHost";
 
         // --- content types ---------------------------------------------------
-        // Track the UUID assigned to the htmlContent type so that HTML module
-        // contentlets can reference it via their stInode field.
+        // Track the UUID and variable assigned to the htmlContent type so that
+        // HTML module contentlets can reference it via their stInode and assetSubType fields.
         string? htmlContentTypeId = null;
+        string? htmlContentTypeVariable = null;
         foreach (DotCmsContentType ct in contentTypes)
         {
             string id   = Guid.NewGuid().ToString();
@@ -138,7 +139,10 @@ public static class BundleWriter
             manifestEntries.Add(("contenttype", id, "", ct.Name, contentWorkDir, "/"));
 
             if (ct.Variable == "htmlContent")
+            {
                 htmlContentTypeId = id;
+                htmlContentTypeVariable = ct.Variable;
+            }
         }
 
         // --- containers (from DNN containers) --------------------------------
@@ -160,7 +164,8 @@ public static class BundleWriter
         }
 
         // --- HTML contentlets (from DNN HTML modules) ------------------------
-        if (htmlContents is not null && htmlContents.Count > 0 && htmlContentTypeId is not null)
+        if (htmlContents is not null && htmlContents.Count > 0
+            && htmlContentTypeId is not null && htmlContentTypeVariable is not null)
         {
             foreach (DnnHtmlContent hc in htmlContents)
             {
@@ -169,7 +174,7 @@ public static class BundleWriter
 
                 string contentXml = BuildContentXml(
                     identifier, inode, hc.Title, hc.HtmlBody,
-                    contentHostId, htmlContentTypeId);
+                    contentHostId, htmlContentTypeId, htmlContentTypeVariable);
                 WriteTextEntry(
                     tar,
                     $"live/{contentWorkDir}/1/{identifier}.content.xml",
@@ -585,7 +590,8 @@ public static class BundleWriter
         string title,
         string htmlBody,
         string hostId,
-        string contentTypeId)
+        string contentTypeId,
+        string contentTypeVariable)
     {
         string now        = DateTime.UtcNow.ToString(XmlTimestampFormat);
         string xmlTitle   = System.Security.SecurityElement.Escape(title)   ?? string.Empty;
@@ -665,13 +671,13 @@ public static class BundleWriter
               </content>
               <id>
                 <id>{identifier}</id>
-                <assetName>content.{inode}</assetName>
+                <assetName>{identifier}.content</assetName>
                 <assetType>contentlet</assetType>
                 <parentPath>/</parentPath>
                 <hostId>{hostId}</hostId>
                 <owner>dotcms.org.1</owner>
                 <createDate class="sql-timestamp">{now}</createDate>
-                <assetSubType>HTMLContent</assetSubType>
+                <assetSubType>{contentTypeVariable}</assetSubType>
               </id>
               <tree/>
               <categories/>

@@ -124,7 +124,7 @@ public sealed class DotCmsBundleEntry
     public List<object> FieldVariables { get; set; } = [];
 
     [JsonPropertyName("systemActionMappings")]
-    public Dictionary<string, object> SystemActionMappings { get; set; } = [];
+    public List<object> SystemActionMappings { get; set; } = [];
 }
 
 /// <summary>Content type metadata inside a DotCMS push-publish bundle entry.</summary>
