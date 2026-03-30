@@ -1323,4 +1323,124 @@ public class BundleWriterTests
         }
         finally { File.Delete(zipPath); }
     }
+
+    // ------------------------------------------------------------------
+    // VARCHAR(255) truncation tests
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Write_ContentTypeDescription_TruncatedTo255InJson()
+    {
+        // A content type whose description exceeds 255 characters should have
+        // it silently trimmed so dotCMS can store it in its VARCHAR(255) column.
+        var ct = MakeHtmlContentType();
+        ct.Description = new string('d', 300);
+
+        var (ms, names) = WriteBundleToMemory([ct]);
+        string entryName = names.First(n => n.EndsWith(".contentType.json"));
+        string json = ReadTarEntry(ms, entryName)!;
+
+        using var doc = JsonDocument.Parse(json);
+        string? description = doc.RootElement
+            .GetProperty("contentType")
+            .GetProperty("description")
+            .GetString();
+
+        Assert.NotNull(description);
+        Assert.True(description.Length <= 255,
+            $"description length {description.Length} exceeds 255.");
+        Assert.Equal(255, description.Length);
+    }
+
+    [Fact]
+    public void Write_HtmlContentTitle_TruncatedTo255InContentXml()
+    {
+        // A DNN HTML content item whose title exceeds 255 characters should be
+        // stored with a truncated title so dotCMS does not reject the import.
+        string longTitle = new string('t', 300);
+        var contents = new[] { new DnnHtmlContent(longTitle, "<p>body</p>") };
+
+        var (ms, names) = WriteBundleWithContents(contents);
+        string entryName = names.First(n => n.Contains("/1/") && n.EndsWith(".content.xml"));
+        string xml = ReadTarEntry(ms, entryName)!;
+
+        // The title in the XML must not contain the full 300-character string.
+        Assert.DoesNotContain(longTitle, xml);
+        // The truncated 255-char version must be present.
+        Assert.Contains(new string('t', 255), xml);
+    }
+
+    [Fact]
+    public void Write_HtmlContentTitle_TruncatedTo255InWorkflowXml()
+    {
+        string longTitle = new string('w', 300);
+        var contents = new[] { new DnnHtmlContent(longTitle, "<p>body</p>") };
+
+        var (ms, names) = WriteBundleWithContents(contents);
+        string entryName = names.First(n => n.Contains("/1/") && n.EndsWith(".contentworkflow.xml"));
+        string xml = ReadTarEntry(ms, entryName)!;
+
+        Assert.DoesNotContain(longTitle, xml);
+        Assert.Contains(new string('w', 255), xml);
+    }
+
+    [Fact]
+    public void Write_ContainerTitle_TruncatedTo255InContainerXml()
+    {
+        // Build a themes zip whose container file name is deliberately very long.
+        string longName = new string('c', 260);
+        string path = Path.GetTempFileName() + ".zip";
+        try
+        {
+            using (var zip = ZipFile.Open(path, ZipArchiveMode.Create))
+            {
+                ZipArchiveEntry e = zip.CreateEntry(
+                    $"_default/Containers/TestTheme/{longName}.ascx");
+                using var w = new StreamWriter(e.Open());
+                w.Write("""<div id="ContentPane" runat="server"></div>""");
+            }
+
+            var (ms, names) = WriteBundleToMemory([MakeHtmlContentType()], path);
+            string entryName = names.First(n => n.EndsWith(".containers.container.xml"));
+            string xml = ReadTarEntry(ms, entryName)!;
+
+            // The <title> element must not exceed 255 characters.
+            int start = xml.IndexOf("<title>", StringComparison.Ordinal) + "<title>".Length;
+            int end   = xml.IndexOf("</title>", start, StringComparison.Ordinal);
+            string titleContent = xml[start..end];
+
+            Assert.True(titleContent.Length <= 255,
+                $"Container title length {titleContent.Length} exceeds 255.");
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void Write_TemplateTitle_TruncatedTo255InTemplateXml()
+    {
+        string longName = new string('s', 260);
+        string path = Path.GetTempFileName() + ".zip";
+        try
+        {
+            using (var zip = ZipFile.Open(path, ZipArchiveMode.Create))
+            {
+                ZipArchiveEntry e = zip.CreateEntry(
+                    $"_default/Skins/TestTheme/{longName}.ascx");
+                using var w = new StreamWriter(e.Open());
+                w.Write("""<div id="siteWrapper"></div>""");
+            }
+
+            var (ms, names) = WriteBundleToMemory([MakeHtmlContentType()], path);
+            string entryName = names.First(n => n.EndsWith(".template.template.xml"));
+            string xml = ReadTarEntry(ms, entryName)!;
+
+            int start = xml.IndexOf("<title>", StringComparison.Ordinal) + "<title>".Length;
+            int end   = xml.IndexOf("</title>", start, StringComparison.Ordinal);
+            string titleContent = xml[start..end];
+
+            Assert.True(titleContent.Length <= 255,
+                $"Template title length {titleContent.Length} exceeds 255.");
+        }
+        finally { File.Delete(path); }
+    }
 }

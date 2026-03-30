@@ -109,6 +109,35 @@ public class DnnConverterTests
     }
 
     // ------------------------------------------------------------------
+    // VARCHAR(255) truncation tests
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Convert_LongModuleDescription_TruncatesDescriptionTo255()
+    {
+        // A module description that when combined with the base content-type
+        // description would exceed 255 characters.
+        string longDesc = new string('x', 300);
+        DotCmsContentType ct = DnnConverter.Convert(MakeModule("Events", longDesc));
+
+        Assert.True(ct.Description.Length <= 255,
+            $"Description length {ct.Description.Length} exceeds 255 characters.");
+    }
+
+    [Fact]
+    public void Convert_ModuleDescriptionExactly255_IsNotTruncated()
+    {
+        // When the combined description is exactly 255 characters it should
+        // be kept intact.
+        string desc = new string('a', 255);
+        // Use an unknown module so the base description is empty and we get
+        // exactly 255 chars without any appended separator.
+        DotCmsContentType ct = DnnConverter.Convert(MakeModule("UnknownModuleType", desc));
+
+        Assert.Equal(255, ct.Description.Length);
+    }
+
+    // ------------------------------------------------------------------
     // JSON serialisation
     // ------------------------------------------------------------------
 
