@@ -199,19 +199,41 @@ public static class DnnXmlParser
 
     private static IReadOnlyList<DnnHtmlContent> ExtractHtmlContents(LiteDatabase db)
     {
-        // Build a mapping of ModuleID → display title from ExportTabModule.
-        var moduleTitles = new Dictionary<int, string>();
+        // Build a mapping of TabID (int) → UniqueId (GUID string) from ExportTab.
+        var tabUniqueIds = new Dictionary<int, string>();
+        ILiteCollection<BsonDocument> tabs = db.GetCollection("ExportTab");
+        foreach (BsonDocument doc in tabs.FindAll())
+        {
+            if (!doc.TryGetValue("TabID",    out BsonValue tabIdVal))  continue;
+            if (!doc.TryGetValue("UniqueId", out BsonValue uidVal))    continue;
+            tabUniqueIds[tabIdVal.AsInt32] = uidVal.AsGuid.ToString();
+        }
+
+        // Build mappings of ModuleID → display title and ModuleID → tab UniqueId
+        // from ExportTabModule.  When a module appears on multiple tabs, the first
+        // association wins for the UniqueId lookup.
+        var moduleTitles    = new Dictionary<int, string>();
+        var moduleTabIds    = new Dictionary<int, string>();
         ILiteCollection<BsonDocument> tabModules = db.GetCollection("ExportTabModule");
         foreach (BsonDocument doc in tabModules.FindAll())
         {
             if (!doc.TryGetValue("ModuleID", out BsonValue moduleIdVal))
                 continue;
-            if (!doc.TryGetValue("ModuleTitle", out BsonValue titleVal))
-                continue;
 
-            string title = titleVal.AsString ?? string.Empty;
-            if (!string.IsNullOrWhiteSpace(title))
-                moduleTitles[moduleIdVal.AsInt32] = title;
+            int moduleId = moduleIdVal.AsInt32;
+
+            if (doc.TryGetValue("ModuleTitle", out BsonValue titleVal))
+            {
+                string title = titleVal.AsString ?? string.Empty;
+                if (!string.IsNullOrWhiteSpace(title))
+                    moduleTitles.TryAdd(moduleId, title);
+            }
+
+            if (doc.TryGetValue("TabID", out BsonValue tabIdVal)
+                && tabUniqueIds.TryGetValue(tabIdVal.AsInt32, out string? tabUniqueId))
+            {
+                moduleTabIds.TryAdd(moduleId, tabUniqueId);
+            }
         }
 
         var results = new List<DnnHtmlContent>();
@@ -230,10 +252,14 @@ public static class DnnXmlParser
             if (htmlBody is null)
                 continue;
 
-            moduleTitles.TryGetValue(moduleIdVal.AsInt32, out string? title);
+            int moduleId = moduleIdVal.AsInt32;
+            moduleTitles.TryGetValue(moduleId,    out string? title);
+            moduleTabIds.TryGetValue(moduleId,    out string? tabUniqueId);
+
             results.Add(new DnnHtmlContent(
-                Title:   string.IsNullOrWhiteSpace(title) ? "Content" : title,
-                HtmlBody: htmlBody));
+                Title:       string.IsNullOrWhiteSpace(title) ? "Content" : title,
+                HtmlBody:    htmlBody,
+                TabUniqueId: tabUniqueId ?? string.Empty));
         }
 
         return results;
