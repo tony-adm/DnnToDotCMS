@@ -781,6 +781,7 @@ public static class BundleWriter
                 <createDate class="sql-timestamp">{now}</createDate>
                 <assetSubType>{contentTypeVariable}</assetSubType>
               </id>
+              <multiTree/>
               <tree/>
               <categories/>
               <tags class="java.util.ImmutableCollections$ListN" resolves-to="java.util.CollSer" serialization="custom">
@@ -963,6 +964,7 @@ public static class BundleWriter
                 <createDate class="sql-timestamp">{now}</createDate>
                 <assetSubType>htmlpageasset</assetSubType>
               </id>
+              <multiTree/>
               <tree/>
               <categories/>
               <tags class="java.util.ImmutableCollections$ListN" resolves-to="java.util.CollSer" serialization="custom">
@@ -1091,6 +1093,7 @@ public static class BundleWriter
                 <createDate class="sql-timestamp">{now}</createDate>
                 <assetSubType>FileAsset</assetSubType>
               </id>
+              <multiTree/>
               <tree/>
               <categories/>
               <tags class="java.util.ImmutableCollections$ListN" resolves-to="java.util.CollSer" serialization="custom">
