@@ -1915,5 +1915,55 @@ public class BundleWriterTests
         Assert.Contains("/data/shared/assets/", xml);
         Assert.Contains("home.css", xml);
     }
+
+    [Fact]
+    public void Write_WithPortalFiles_RootFolderProducesFolderXmlEntry()
+    {
+        // Root-folder files (empty FolderPath) must also produce a .folder.xml
+        // entry so that DotCMS can resolve the folder UUID when creating
+        // identifiers (avoids "You can only create an identifier on a host of
+        // folder. Trying null" error for root-level file assets).
+        var files = new[]
+        {
+            new DnnPortalFile(
+                "e5dfe1f2-4cdc-46bd-ad32-7257a6b8105a",
+                "2af85195-c192-4a33-a14d-a8bb2dc6007e",
+                "home.css", "", "text/css",
+                Encoding.UTF8.GetBytes("/* css */")),
+        };
+
+        var (_, names) = WriteBundleWithFiles(files);
+
+        Assert.Contains(names, n => n.EndsWith(".folder.xml"));
+    }
+
+    [Fact]
+    public void Write_WithPortalFiles_RootFolderXmlContainsValidFolderUuid()
+    {
+        // The folder UUID written for root-folder files must be a parseable
+        // GUID and must match the folder field of the contentlet XML, and the
+        // .folder.xml filename must contain that UUID.
+        var files = new[]
+        {
+            new DnnPortalFile(
+                "e5dfe1f2-4cdc-46bd-ad32-7257a6b8105a",
+                "2af85195-c192-4a33-a14d-a8bb2dc6007e",
+                "home.css", "", "text/css",
+                Encoding.UTF8.GetBytes("/* css */")),
+        };
+
+        var (ms, names) = WriteBundleWithFiles(files);
+
+        // The contentlet XML's folder field must be a valid UUID.
+        string contentEntryName = names.First(n => n.Contains("/1/") && n.EndsWith(".content.xml")
+            && !n.Contains("host.xml"));
+        string contentXml = ReadTarEntry(ms, contentEntryName)!;
+        string contentFolder = ExtractXmlStringField(contentXml, "folder");
+        Assert.True(Guid.TryParse(contentFolder, out _),
+            $"Folder field '{contentFolder}' is not a valid GUID.");
+
+        // The bundle must contain a .folder.xml whose filename contains that UUID.
+        Assert.Contains(names, n => n.EndsWith(".folder.xml") && n.Contains(contentFolder));
+    }
 }
 
