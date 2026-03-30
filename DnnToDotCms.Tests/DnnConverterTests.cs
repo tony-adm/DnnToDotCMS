@@ -62,6 +62,26 @@ public class DnnConverterTests
         Assert.True(ct.Fields.Count >= 2);
     }
 
+    [Fact]
+    public void Convert_DotSeparatedModuleName_ProducesValidVariable()
+    {
+        // The module name below intentionally preserves the typo from the
+        // original bug report ("memberdirctory" is missing an 'e') – this is
+        // the exact name that caused the "Invalid content type variable" error.
+        DotCmsContentType ct = DnnConverter.Convert(MakeModule("dotnetnuke.modules.memberdirctory"));
+
+        Assert.Matches(@"^[a-zA-Z][a-zA-Z0-9]*$", ct.Variable);
+    }
+
+    [Fact]
+    public void Convert_DotSeparatedModuleName_ProducesCamelCaseVariable()
+    {
+        // Same intentional typo – see above.
+        DotCmsContentType ct = DnnConverter.Convert(MakeModule("dotnetnuke.modules.memberdirctory"));
+
+        Assert.Equal("dotnetnukeModulesMemberdirctory", ct.Variable);
+    }
+
     // ------------------------------------------------------------------
     // Bulk conversion / de-duplication
     // ------------------------------------------------------------------
