@@ -1283,45 +1283,18 @@ public class BundleWriterTests
     }
 
     [Fact]
-    public void Write_WithHtmlContents_RootFolderXmlIsIncluded()
+    public void Write_WithHtmlContents_ContentXmlFolderIsSystemFolder()
     {
-        // A root folder entry must be present so that DotCMS can create
-        // identifiers for HTML contentlets (avoids the
+        // The folder field must be "SYSTEM_FOLDER" so that DotCMS uses the site
+        // as the parent when creating identifiers (avoids the
         // "You can only create an identifier on a host of folder. Trying null" error).
-        var (_, names) = WriteBundleWithContents(MakeHtmlContents());
-
-        Assert.Contains(names, n => n.EndsWith(".folder.xml"));
-    }
-
-    [Fact]
-    public void Write_WithHtmlContents_ContentXmlFolderIsValidUuid()
-    {
-        // The folder field in the contentlet XML must be a real UUID, not the
-        // literal string "SYSTEM_FOLDER", so that DotCMS can resolve it.
         var contents = new[] { new DnnHtmlContent("Title", "<p>Body</p>") };
         var (ms, names) = WriteBundleWithContents(contents);
         string entryName = names.First(n => n.Contains("/1/") && n.EndsWith(".content.xml"));
         string xml = ReadTarEntry(ms, entryName)!;
         string folderValue = ExtractXmlStringField(xml, "folder");
 
-        Assert.True(Guid.TryParse(folderValue, out _),
-            $"Expected folder value to be a UUID but was: '{folderValue}'");
-        Assert.DoesNotContain("SYSTEM_FOLDER", xml);
-    }
-
-    [Fact]
-    public void Write_WithHtmlContents_ContentXmlFolderMatchesFolderXmlEntry()
-    {
-        // The folder UUID used in the contentlet XML must match a .folder.xml
-        // entry written into the same bundle so DotCMS can resolve the reference.
-        var contents = new[] { new DnnHtmlContent("Title", "<p>Body</p>") };
-        var (ms, names) = WriteBundleWithContents(contents);
-        string contentEntry = names.First(n => n.Contains("/1/") && n.EndsWith(".content.xml"));
-        string contentXml = ReadTarEntry(ms, contentEntry)!;
-        string folderUuid = ExtractXmlStringField(contentXml, "folder");
-
-        // The bundle must contain a .folder.xml whose name contains that UUID.
-        Assert.Contains(names, n => n.EndsWith(".folder.xml") && n.Contains(folderUuid));
+        Assert.Equal("SYSTEM_FOLDER", folderValue);
     }
 
     /// <summary>
@@ -1698,45 +1671,7 @@ public class BundleWriterTests
     }
 
     [Fact]
-    public void Write_WithPages_RootFolderXmlIsIncluded()
-    {
-        var pages = new[]
-        {
-            new DnnPortalPage("aaa", "Home", "Home", "", "//Home", 0, true, ""),
-        };
-
-        var (_, names) = WriteBundleWithPages(pages, "Test Site");
-
-        Assert.Contains(names, n => n.EndsWith(".folder.xml"));
-    }
-
-    [Fact]
-    public void Write_WithPages_RootFolderXmlIsIncludedWithoutSiteName()
-    {
-        // When no site name is provided, the root folder must still be written
-        // so that DotCMS can create page identifiers (avoids the
-        // "you can only create an identifier on a host of folder. Trying:null" error).
-        var pages = new[]
-        {
-            new DnnPortalPage("aaa", "Home", "Home", "", "//Home", 0, true, ""),
-        };
-
-        var ms = new MemoryStream();
-        BundleWriter.Write([MakeHtmlContentType()], ms, null, null, null, pages);
-        ms.Position = 0;
-
-        var names = new List<string>();
-        using var gz  = new GZipStream(ms, CompressionMode.Decompress, leaveOpen: true);
-        using var tar = new TarReader(gz);
-        TarEntry? entry;
-        while ((entry = tar.GetNextEntry()) is not null)
-            names.Add(entry.Name);
-
-        Assert.Contains(names, n => n.EndsWith(".folder.xml"));
-    }
-
-    [Fact]
-    public void Write_WithPages_ManifestIncludesContentletAndFolderRows()
+    public void Write_WithPages_ManifestIncludesContentletRows()
     {
         var pages = new[]
         {
@@ -1747,7 +1682,6 @@ public class BundleWriterTests
         string manifest = ReadTarEntry(ms, "manifest.csv")!;
 
         Assert.Contains("INCLUDED,contentlet,", manifest);
-        Assert.Contains("INCLUDED,folder,", manifest);
     }
 
     // ------------------------------------------------------------------
@@ -1849,8 +1783,11 @@ public class BundleWriterTests
     }
 
     [Fact]
-    public void Write_WithPortalFiles_SubFolderProducesFolderXmlEntry()
+    public void Write_WithPortalFiles_FileAssetContentXmlFolderIsSystemFolder()
     {
+        // All file-asset contentlets must use SYSTEM_FOLDER so that DotCMS
+        // falls back to the site as the identifier parent (avoids the
+        // "You can only create an identifier on a host of folder. Trying null" error).
         var files = new[]
         {
             new DnnPortalFile(
@@ -1860,39 +1797,14 @@ public class BundleWriterTests
                 [0x00]),
         };
 
-        var (_, names) = WriteBundleWithFiles(files, "Test Site");
+        var (ms, names) = WriteBundleWithFiles(files, "Test Site");
 
-        // Sub-folder should produce a folder XML entry.
-        Assert.Contains(names, n => n.EndsWith(".folder.xml"));
-    }
+        string entryName = names.First(n => n.Contains("/1/") && n.EndsWith(".content.xml")
+            && !n.Contains("host.xml"));
+        string xml = ReadTarEntry(ms, entryName)!;
+        string folderValue = ExtractXmlStringField(xml, "folder");
 
-    [Fact]
-    public void Write_WithPortalFiles_SubFolderProducesFolderXmlEntryWithoutSiteName()
-    {
-        // When no site name is provided, sub-folder XML must still be written
-        // so that DotCMS can create file asset identifiers (avoids the
-        // "you can only create an identifier on a host of folder. Trying:null" error).
-        var files = new[]
-        {
-            new DnnPortalFile(
-                "6f574d5f-0880-4d5a-b4a2-74d2e10b5659",
-                "69f363b0-6512-48ad-b187-b6a450ffda7b",
-                "logo.png", "Images/", "image/png",
-                [0x00]),
-        };
-
-        var ms = new MemoryStream();
-        BundleWriter.Write([MakeHtmlContentType()], ms, null, null, null, null, files);
-        ms.Position = 0;
-
-        var names = new List<string>();
-        using var gz  = new GZipStream(ms, CompressionMode.Decompress, leaveOpen: true);
-        using var tar = new TarReader(gz);
-        TarEntry? entry;
-        while ((entry = tar.GetNextEntry()) is not null)
-            names.Add(entry.Name);
-
-        Assert.Contains(names, n => n.EndsWith(".folder.xml"));
+        Assert.Equal("SYSTEM_FOLDER", folderValue);
     }
 
     [Fact]
@@ -1916,54 +1828,5 @@ public class BundleWriterTests
         Assert.Contains("home.css", xml);
     }
 
-    [Fact]
-    public void Write_WithPortalFiles_RootFolderProducesFolderXmlEntry()
-    {
-        // Root-folder files (empty FolderPath) must also produce a .folder.xml
-        // entry so that DotCMS can resolve the folder UUID when creating
-        // identifiers (avoids "You can only create an identifier on a host of
-        // folder. Trying null" error for root-level file assets).
-        var files = new[]
-        {
-            new DnnPortalFile(
-                "e5dfe1f2-4cdc-46bd-ad32-7257a6b8105a",
-                "2af85195-c192-4a33-a14d-a8bb2dc6007e",
-                "home.css", "", "text/css",
-                Encoding.UTF8.GetBytes("/* css */")),
-        };
 
-        var (_, names) = WriteBundleWithFiles(files);
-
-        Assert.Contains(names, n => n.EndsWith(".folder.xml"));
-    }
-
-    [Fact]
-    public void Write_WithPortalFiles_RootFolderXmlContainsValidFolderUuid()
-    {
-        // The folder UUID written for root-folder files must be a parseable
-        // GUID and must match the folder field of the contentlet XML, and the
-        // .folder.xml filename must contain that UUID.
-        var files = new[]
-        {
-            new DnnPortalFile(
-                "e5dfe1f2-4cdc-46bd-ad32-7257a6b8105a",
-                "2af85195-c192-4a33-a14d-a8bb2dc6007e",
-                "home.css", "", "text/css",
-                Encoding.UTF8.GetBytes("/* css */")),
-        };
-
-        var (ms, names) = WriteBundleWithFiles(files);
-
-        // The contentlet XML's folder field must be a valid UUID.
-        string contentEntryName = names.First(n => n.Contains("/1/") && n.EndsWith(".content.xml")
-            && !n.Contains("host.xml"));
-        string contentXml = ReadTarEntry(ms, contentEntryName)!;
-        string contentFolder = ExtractXmlStringField(contentXml, "folder");
-        Assert.True(Guid.TryParse(contentFolder, out _),
-            $"Folder field '{contentFolder}' is not a valid GUID.");
-
-        // The bundle must contain a .folder.xml whose filename contains that UUID.
-        Assert.Contains(names, n => n.EndsWith(".folder.xml") && n.Contains(contentFolder));
-    }
 }
-

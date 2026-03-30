@@ -194,24 +194,6 @@ public static class BundleWriter
             manifestEntries.Add(("template", id, inode, name, "", ""));
         }
 
-        // Generate a root-folder UUID shared by HTML contentlets and pages so
-        // that DotCMS can create identifiers for them (avoids the
-        // "You can only create an identifier on a host of folder. Trying null" error).
-        // HTML contentlets also require htmlContentTypeId/Variable to be resolved from the
-        // content-types list; pages always use the fixed built-in HtmlPageAssetContentTypeId
-        // constant, so no additional null guards are needed for the pages branch.
-        bool needsRootFolder = (htmlContents is not null && htmlContents.Count > 0
-                                    && htmlContentTypeId is not null && htmlContentTypeVariable is not null)
-                               || (pages is not null && pages.Count > 0);
-        string rootFolderId   = Guid.NewGuid().ToString();
-        string rootFolderName = hostname ?? contentWorkDir;
-        if (needsRootFolder)
-        {
-            string rootFolderXml = BuildFolderXml(rootFolderId, rootFolderName, contentHostId, "/", "/");
-            WriteTextEntry(tar, $"live/{contentWorkDir}/{rootFolderId}.folder.xml", rootFolderXml);
-            manifestEntries.Add(("folder", rootFolderId, rootFolderId, rootFolderName, contentWorkDir, "/"));
-        }
-
         // --- HTML contentlets (from DNN HTML modules) ------------------------
         if (htmlContents is not null && htmlContents.Count > 0
             && htmlContentTypeId is not null && htmlContentTypeVariable is not null)
@@ -223,7 +205,7 @@ public static class BundleWriter
 
                 string contentXml = BuildContentXml(
                     identifier, inode, hc.Title, hc.HtmlBody,
-                    contentHostId, rootFolderId, htmlContentTypeId, htmlContentTypeVariable);
+                    contentHostId, htmlContentTypeId, htmlContentTypeVariable);
                 WriteTextEntry(
                     tar,
                     $"live/{contentWorkDir}/1/{identifier}.content.xml",
@@ -260,7 +242,7 @@ public static class BundleWriter
 
                 string pageXml = BuildPageXml(
                     identifier, inode, page.Title, url,
-                    contentHostId, rootFolderId, templateId);
+                    contentHostId, templateId);
                 WriteTextEntry(
                     tar,
                     $"live/{contentWorkDir}/1/{identifier}.content.xml",
@@ -280,39 +262,8 @@ public static class BundleWriter
         // --- portal static files (from DNN export_files.zip) -----------------
         if (portalFiles is not null && portalFiles.Count > 0)
         {
-            // Build a map of DNN folder path → DotCMS folder UUID so that files
-            // in sub-folders reference the correct parent folder.
-            var folderIdMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
             foreach (DnnPortalFile pf in portalFiles)
             {
-                // Ensure the folder has a UUID in our map.
-                if (!folderIdMap.TryGetValue(pf.FolderPath, out string? folderUuid))
-                {
-                    folderUuid = Guid.NewGuid().ToString();
-                    folderIdMap[pf.FolderPath] = folderUuid;
-
-                    // Write a folder entry for all folders (including root) so that
-                    // DotCMS can resolve the folder UUID when creating identifiers.
-                    // Without this, root-folder files trigger the same
-                    // "You can only create an identifier on a host of folder. Trying null" error.
-                    if (!string.IsNullOrEmpty(pf.FolderPath))
-                    {
-                        string dotPath   = "/" + pf.FolderPath.TrimEnd('/').ToLowerInvariant() + "/";
-                        string parentPath = "/";
-                        string folderXml = BuildFolderXml(folderUuid, pf.FolderPath.TrimEnd('/'), contentHostId, dotPath, parentPath);
-                        WriteTextEntry(tar, $"live/{contentWorkDir}/{folderUuid}.folder.xml", folderXml);
-                        manifestEntries.Add(("folder", folderUuid, folderUuid, pf.FolderPath.TrimEnd('/'), contentWorkDir, "/"));
-                    }
-                    else
-                    {
-                        string rootName  = hostname ?? "System Host";
-                        string folderXml = BuildFolderXml(folderUuid, rootName, contentHostId, "/", "/");
-                        WriteTextEntry(tar, $"live/{contentWorkDir}/{folderUuid}.folder.xml", folderXml);
-                        manifestEntries.Add(("folder", folderUuid, folderUuid, rootName, contentWorkDir, "/"));
-                    }
-                }
-
                 string identifier = pf.UniqueId;
                 string inode      = pf.VersionGuid;
 
@@ -323,7 +274,7 @@ public static class BundleWriter
                 // Write the contentlet XML.
                 string fileContentXml = BuildFileAssetXml(
                     identifier, inode, pf.FileName, assetPath,
-                    contentHostId, folderUuid);
+                    contentHostId);
                 WriteTextEntry(
                     tar,
                     $"live/{contentWorkDir}/1/{identifier}.content.xml",
@@ -741,7 +692,6 @@ public static class BundleWriter
         string title,
         string htmlBody,
         string hostId,
-        string folderId,
         string contentTypeId,
         string contentTypeVariable)
     {
@@ -804,7 +754,7 @@ public static class BundleWriter
                     <string>languageId</string>
                     <long>1</long>
                     <string>folder</string>
-                    <string>{folderId}</string>
+                    <string>SYSTEM_FOLDER</string>
                     <string>sortOrder</string>
                     <long>0</long>
                     <string>modUser</string>
@@ -922,7 +872,6 @@ public static class BundleWriter
         string title,
         string url,
         string hostId,
-        string folderId,
         string templateId)
     {
         string now      = DateTime.UtcNow.ToString(XmlTimestampFormat);
@@ -987,7 +936,7 @@ public static class BundleWriter
                     <string>languageId</string>
                     <long>1</long>
                     <string>folder</string>
-                    <string>{folderId}</string>
+                    <string>SYSTEM_FOLDER</string>
                     <string>sortOrder</string>
                     <long>0</long>
                     <string>modUser</string>
@@ -1052,8 +1001,7 @@ public static class BundleWriter
         string inode,
         string fileName,
         string assetPath,
-        string hostId,
-        string folderId)
+        string hostId)
     {
         string now          = DateTime.UtcNow.ToString(XmlTimestampFormat);
         string xmlFileName  = System.Security.SecurityElement.Escape(fileName)  ?? string.Empty;
@@ -1116,7 +1064,7 @@ public static class BundleWriter
                     <string>fileAsset</string>
                     <file>{storagePath}</file>
                     <string>folder</string>
-                    <string>{folderId}</string>
+                    <string>SYSTEM_FOLDER</string>
                     <string>sortOrder</string>
                     <long>0</long>
                     <string>modUser</string>
@@ -1165,57 +1113,6 @@ public static class BundleWriter
               <contentTags/>
               <contentletMetadata/>
             </com.dotcms.publisher.pusher.wrapper.PushContentWrapper>
-            """;
-    }
-
-    // ------------------------------------------------------------------
-    // Folder (FolderWrapper) XML builder
-    // ------------------------------------------------------------------
-
-    /// <summary>
-    /// Builds a DotCMS <c>FolderWrapper</c> XML entry for a site folder.
-    /// </summary>
-    private static string BuildFolderXml(
-        string folderId,
-        string folderName,
-        string hostId,
-        string folderPath,
-        string parentPath)
-    {
-        string now          = DateTime.UtcNow.ToString(XmlTimestampFormat);
-        string xmlName      = System.Security.SecurityElement.Escape(folderName) ?? string.Empty;
-        string xmlPath      = System.Security.SecurityElement.Escape(folderPath) ?? string.Empty;
-        string xmlParent    = System.Security.SecurityElement.Escape(parentPath) ?? string.Empty;
-
-        return $"""
-            <com.dotcms.publisher.pusher.wrapper.FolderWrapper>
-              <folder>
-                <identifier>{folderId}</identifier>
-                <name>{xmlName}</name>
-                <sortOrder>0</sortOrder>
-                <showOnMenu>false</showOnMenu>
-                <hostId>{hostId}</hostId>
-                <type>folder</type>
-                <title>{xmlName}</title>
-                <filesMasks></filesMasks>
-                <defaultFileType>{FileAssetContentTypeId}</defaultFileType>
-                <modDate class="sql-timestamp">{now}</modDate>
-                <owner>dotcms.org.1</owner>
-                <iDate class="sql-timestamp">{now}</iDate>
-                <inode>{folderId}</inode>
-                <path>{xmlPath}</path>
-              </folder>
-              <folderId>
-                <id>{folderId}</id>
-                <assetName>{xmlName}</assetName>
-                <assetType>folder</assetType>
-                <parentPath>{xmlParent}</parentPath>
-                <hostId>{hostId}</hostId>
-                <owner>dotcms.org.1</owner>
-                <createDate class="sql-timestamp">{now}</createDate>
-              </folderId>
-              <operation>PUBLISH</operation>
-            </com.dotcms.publisher.pusher.wrapper.FolderWrapper>
             """;
     }
 
