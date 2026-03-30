@@ -1164,6 +1164,18 @@ public class BundleWriterTests
     }
 
     [Fact]
+    public void Write_WithHtmlContents_ContentXmlHasMultiTreeElement()
+    {
+        // wrapperMultiTree must not be null on import — DotCMS calls .isEmpty() on it and
+        // throws a NullPointerException when the element is absent from the XML.
+        var (ms, names) = WriteBundleWithContents(MakeHtmlContents());
+        string entryName = names.First(n => n.Contains("/1/") && n.EndsWith(".content.xml"));
+        string xml = ReadTarEntry(ms, entryName)!;
+
+        Assert.Contains("<multiTree/>", xml);
+    }
+
+    [Fact]
     public void Write_WithHtmlContents_ContentXmlHasLiveAndWorkingInode()
     {
         var (ms, names) = WriteBundleWithContents(MakeHtmlContents());
@@ -1684,6 +1696,24 @@ public class BundleWriterTests
         Assert.Contains("INCLUDED,contentlet,", manifest);
     }
 
+    [Fact]
+    public void Write_WithPages_PageContentXmlHasMultiTreeElement()
+    {
+        // wrapperMultiTree must not be null on import — DotCMS calls .isEmpty() on it and
+        // throws a NullPointerException when the element is absent from the XML.
+        var pages = new[]
+        {
+            new DnnPortalPage("aaa", "Home", "Home", "", "//Home", 0, true, ""),
+        };
+
+        var (ms, names) = WriteBundleWithPages(pages);
+        string entryName = names.First(n => n.Contains("/1/") && n.EndsWith(".content.xml")
+            && !n.Contains("host.xml"));
+        string xml = ReadTarEntry(ms, entryName)!;
+
+        Assert.Contains("<multiTree/>", xml);
+    }
+
     // ------------------------------------------------------------------
     // Portal static files (FileAsset) tests
     // ------------------------------------------------------------------
@@ -1826,6 +1856,28 @@ public class BundleWriterTests
 
         Assert.Contains("/data/shared/assets/", xml);
         Assert.Contains("home.css", xml);
+    }
+
+    [Fact]
+    public void Write_WithPortalFiles_FileAssetContentXmlHasMultiTreeElement()
+    {
+        // wrapperMultiTree must not be null on import — DotCMS calls .isEmpty() on it and
+        // throws a NullPointerException when the element is absent from the XML.
+        var files = new[]
+        {
+            new DnnPortalFile(
+                "e5dfe1f2-4cdc-46bd-ad32-7257a6b8105a",
+                "2af85195-c192-4a33-a14d-a8bb2dc6007e",
+                "home.css", "", "text/css",
+                Encoding.UTF8.GetBytes("/* css */")),
+        };
+
+        var (ms, names) = WriteBundleWithFiles(files);
+        string entryName = names.First(n => n.Contains("/1/") && n.EndsWith(".content.xml")
+            && !n.Contains("host.xml"));
+        string xml = ReadTarEntry(ms, entryName)!;
+
+        Assert.Contains("<multiTree/>", xml);
     }
 
 
