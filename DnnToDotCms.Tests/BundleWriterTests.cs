@@ -455,7 +455,7 @@ public class BundleWriterTests
             var (_, names) = WriteBundleToMemory([MakeHtmlContentType()], zipPath);
 
             Assert.Contains(names,
-                n => n.StartsWith("working/System Host/") &&
+                n => n.StartsWith("live/System Host/") &&
                      n.EndsWith(".containers.container.xml"));
         }
         finally { File.Delete(zipPath); }
@@ -524,7 +524,7 @@ public class BundleWriterTests
             var (_, names) = WriteBundleToMemory([MakeHtmlContentType()], zipPath);
 
             Assert.Contains(names,
-                n => n.StartsWith("working/System Host/") &&
+                n => n.StartsWith("live/System Host/") &&
                      n.EndsWith(".template.template.xml"));
         }
         finally { File.Delete(zipPath); }
@@ -900,7 +900,7 @@ public class BundleWriterTests
 
             // Containers should be in the sanitized site directory, not System Host.
             Assert.Contains(names, n =>
-                n.StartsWith("working/my-website/") &&
+                n.StartsWith("live/my-website/") &&
                 n.EndsWith(".containers.container.xml"));
             Assert.DoesNotContain(names, n =>
                 n.StartsWith("working/System Host/") &&
@@ -918,7 +918,7 @@ public class BundleWriterTests
             var (_, names) = WriteBundleWithSite("My Website", zipPath);
 
             Assert.Contains(names, n =>
-                n.StartsWith("working/my-website/") &&
+                n.StartsWith("live/my-website/") &&
                 n.EndsWith(".template.template.xml"));
             Assert.DoesNotContain(names, n =>
                 n.StartsWith("working/System Host/") &&
@@ -961,7 +961,7 @@ public class BundleWriterTests
             var (_, names) = WriteBundleToMemory([MakeHtmlContentType()], zipPath);
 
             Assert.Contains(names, n =>
-                n.StartsWith("working/System Host/") &&
+                n.StartsWith("live/System Host/") &&
                 n.EndsWith(".containers.container.xml"));
         }
         finally { File.Delete(zipPath); }
@@ -1069,5 +1069,215 @@ public class BundleWriterTests
     public void SanitizeHostname_ProducesExpectedResult(string input, string expected)
     {
         Assert.Equal(expected, BundleWriter.SanitizeHostname(input));
+    }
+
+    // ------------------------------------------------------------------
+    // Contentlet (HTML content) bundle entry tests
+    // ------------------------------------------------------------------
+
+    private static IReadOnlyList<DnnHtmlContent> MakeHtmlContents() =>
+    [
+        new DnnHtmlContent("Home Banner", "<h1>Welcome</h1><p>Hello world!</p>"),
+        new DnnHtmlContent("About Us",    "<p>We are a great company.</p>"),
+    ];
+
+    private static (MemoryStream stream, List<string> entryNames) WriteBundleWithContents(
+        IReadOnlyList<DnnHtmlContent> htmlContents,
+        string? siteName = null)
+    {
+        var ms = new MemoryStream();
+        BundleWriter.Write([MakeHtmlContentType()], ms,
+            themesZipPath: null, siteName: siteName, htmlContents: htmlContents);
+        ms.Position = 0;
+
+        var names = new List<string>();
+        using var gz  = new GZipStream(ms, CompressionMode.Decompress, leaveOpen: true);
+        using var tar = new TarReader(gz);
+
+        TarEntry? entry;
+        while ((entry = tar.GetNextEntry()) is not null)
+            names.Add(entry.Name);
+
+        ms.Position = 0;
+        return (ms, names);
+    }
+
+    [Fact]
+    public void Write_WithHtmlContents_IncludesContentXmlEntries()
+    {
+        var (_, names) = WriteBundleWithContents(MakeHtmlContents());
+
+        // Each HTML content item should have a .content.xml file under live/.../1/
+        int count = names.Count(n =>
+            n.Contains("/1/") && n.EndsWith(".content.xml"));
+        Assert.Equal(2, count);
+    }
+
+    [Fact]
+    public void Write_WithHtmlContents_ContentXmlUnderLiveDirectory()
+    {
+        var (_, names) = WriteBundleWithContents(MakeHtmlContents());
+
+        Assert.All(
+            names.Where(n => n.EndsWith(".content.xml") && n.Contains("/1/")),
+            n => Assert.StartsWith("live/", n));
+    }
+
+    [Fact]
+    public void Write_WithHtmlContents_IncludesWorkflowXmlEntries()
+    {
+        var (_, names) = WriteBundleWithContents(MakeHtmlContents());
+
+        int count = names.Count(n =>
+            n.Contains("/1/") && n.EndsWith(".contentworkflow.xml"));
+        Assert.Equal(2, count);
+    }
+
+    [Fact]
+    public void Write_WithHtmlContents_ContentXmlHasPushContentWrapper()
+    {
+        var (ms, names) = WriteBundleWithContents(MakeHtmlContents());
+        string entryName = names.First(n => n.Contains("/1/") && n.EndsWith(".content.xml"));
+        string xml = ReadTarEntry(ms, entryName)!;
+
+        Assert.Contains("<com.dotcms.publisher.pusher.wrapper.PushContentWrapper>", xml);
+        Assert.Contains("<operation>PUBLISH</operation>", xml);
+    }
+
+    [Fact]
+    public void Write_WithHtmlContents_ContentXmlHasLiveAndWorkingInode()
+    {
+        var (ms, names) = WriteBundleWithContents(MakeHtmlContents());
+        string entryName = names.First(n => n.Contains("/1/") && n.EndsWith(".content.xml"));
+        string xml = ReadTarEntry(ms, entryName)!;
+
+        Assert.Contains("<liveInode>", xml);
+        Assert.Contains("<workingInode>", xml);
+        Assert.Contains("<deleted>false</deleted>", xml);
+    }
+
+    [Fact]
+    public void Write_WithHtmlContents_ContentXmlContainsTitleAndBody()
+    {
+        var contents = new[] { new DnnHtmlContent("My Title", "<p>My body</p>") };
+        var (ms, names) = WriteBundleWithContents(contents);
+        string entryName = names.First(n => n.Contains("/1/") && n.EndsWith(".content.xml"));
+        string xml = ReadTarEntry(ms, entryName)!;
+
+        Assert.Contains("My Title", xml);
+        Assert.Contains("&lt;p&gt;My body&lt;/p&gt;", xml); // XML-escaped
+    }
+
+    [Fact]
+    public void Write_WithHtmlContents_ContentXmlReferencesHtmlContentTypeId()
+    {
+        var contents = new[] { new DnnHtmlContent("Title", "<p>Body</p>") };
+        var (ms, names) = WriteBundleWithContents(contents);
+
+        // Find the content type UUID used in the contentType.json
+        string ctEntry = names.First(n => n.EndsWith(".contentType.json"));
+        string ctJson  = ReadTarEntry(ms, ctEntry)!;
+        using var ctDoc = JsonDocument.Parse(ctJson);
+        string typeId = ctDoc.RootElement
+            .GetProperty("contentType").GetProperty("id").GetString()!;
+
+        // The contentlet XML should reference that same UUID
+        string contentEntry = names.First(n => n.Contains("/1/") && n.EndsWith(".content.xml"));
+        string contentXml   = ReadTarEntry(ms, contentEntry)!;
+        Assert.Contains(typeId, contentXml);
+    }
+
+    [Fact]
+    public void Write_WithHtmlContents_WorkflowXmlHasPushWorkflowWrapper()
+    {
+        var (ms, names) = WriteBundleWithContents(MakeHtmlContents());
+        string entryName = names.First(n => n.Contains("/1/") && n.EndsWith(".contentworkflow.xml"));
+        string xml = ReadTarEntry(ms, entryName)!;
+
+        Assert.Contains("<com.dotcms.publisher.pusher.wrapper.PushContentWorkflowWrapper>", xml);
+        Assert.Contains("<webasset>", xml);
+    }
+
+    [Fact]
+    public void Write_WithHtmlContents_ManifestIncludesContentletRows()
+    {
+        var (ms, _) = WriteBundleWithContents(MakeHtmlContents());
+        string manifest = ReadTarEntry(ms, "manifest.csv")!;
+
+        int count = manifest.Split('\n')
+            .Count(l => l.StartsWith("INCLUDED,contentlet,"));
+        Assert.Equal(2, count);
+    }
+
+    [Fact]
+    public void Write_WithNoHtmlContentType_HtmlContentsSkipped()
+    {
+        // If the content types don't include htmlContent, no contentlets should be written.
+        var otherType = new DotCmsContentType { Name = "Event", Variable = "event", Fields = [] };
+        var htmlContents = MakeHtmlContents();
+        var ms = new MemoryStream();
+        BundleWriter.Write([otherType], ms, themesZipPath: null,
+            siteName: null, htmlContents: htmlContents);
+        ms.Position = 0;
+
+        var names = new List<string>();
+        using var gz  = new GZipStream(ms, CompressionMode.Decompress, leaveOpen: true);
+        using var tar = new TarReader(gz);
+        TarEntry? entry;
+        while ((entry = tar.GetNextEntry()) is not null)
+            names.Add(entry.Name);
+
+        Assert.DoesNotContain(names, n => n.EndsWith(".content.xml") && n.Contains("/1/"));
+    }
+
+    [Fact]
+    public void Write_WithSiteName_ContentletsGoToSiteDirectory()
+    {
+        var (_, names) = WriteBundleWithContents(MakeHtmlContents(), siteName: "My Website");
+
+        Assert.Contains(names, n =>
+            n.StartsWith("live/my-website/1/") &&
+            n.EndsWith(".content.xml"));
+        Assert.DoesNotContain(names, n =>
+            n.StartsWith("live/System Host/1/") &&
+            n.EndsWith(".content.xml"));
+    }
+
+    // ------------------------------------------------------------------
+    // Container/template published-state (live/) tests
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Write_WithThemesZip_ContainerXmlHasLiveInode()
+    {
+        string zipPath = BuildThemesZip();
+        try
+        {
+            var (ms, names) = WriteBundleToMemory([MakeHtmlContentType()], zipPath);
+            string entryName = names.First(n => n.EndsWith(".containers.container.xml"));
+            string xml = ReadTarEntry(ms, entryName)!;
+
+            Assert.Contains("<liveInode>", xml);
+            Assert.Contains("<workingInode>", xml);
+            Assert.Contains("<deleted>false</deleted>", xml);
+        }
+        finally { File.Delete(zipPath); }
+    }
+
+    [Fact]
+    public void Write_WithThemesZip_TemplateXmlHasLiveInode()
+    {
+        string zipPath = BuildThemesZip();
+        try
+        {
+            var (ms, names) = WriteBundleToMemory([MakeHtmlContentType()], zipPath);
+            string entryName = names.First(n => n.EndsWith(".template.template.xml"));
+            string xml = ReadTarEntry(ms, entryName)!;
+
+            Assert.Contains("<liveInode>", xml);
+            Assert.Contains("<workingInode>", xml);
+            Assert.Contains("<deleted>false</deleted>", xml);
+        }
+        finally { File.Delete(zipPath); }
     }
 }

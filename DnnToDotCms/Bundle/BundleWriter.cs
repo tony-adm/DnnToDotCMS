@@ -21,7 +21,8 @@ public static class BundleWriter
     // Fixed content-type UUID for the DotCMS built-in Host/Site content type.
     private const string HostContentTypeInode = "855a2d72-f2f3-4169-8b04-ac5157c4380c";
 
-    // File extensions considered "static assets" (safe to carry across).
+    // Fixed workflow status UUID for the "Published" step in the DotCMS System Workflow.
+    private const string SystemWorkflowPublishedStatus = "dc3c9cd0-8467-404b-bf95-cb7df3fbc293";
     private static readonly HashSet<string> StaticExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
         ".css", ".js", ".jpg", ".jpeg", ".png", ".gif", ".svg",
@@ -47,8 +48,8 @@ public static class BundleWriter
     /// <param name="themesZipPath">
     /// Optional path to a DNN <c>export_themes.zip</c>.  When provided,
     /// DNN containers (<c>_default/Containers/…/*.ascx</c>) are converted to
-    /// DotCMS container JSON entries, DNN skins (<c>_default/Skins/…/*.ascx</c>)
-    /// are converted to DotCMS template JSON entries, and remaining static
+    /// DotCMS container XML entries, DNN skins (<c>_default/Skins/…/*.ascx</c>)
+    /// are converted to DotCMS template XML entries, and remaining static
     /// assets (CSS, JS, images, fonts) are embedded under a <c>themes/</c>
     /// directory for reference.
     /// </param>
@@ -59,11 +60,18 @@ public static class BundleWriter
     /// derived from <paramref name="themesZipPath"/> are associated with the
     /// new site rather than with System Host.
     /// </param>
+    /// <param name="htmlContents">
+    /// Optional list of HTML module content items extracted from the DNN
+    /// <c>export_db.zip</c> database.  When provided, each item is written
+    /// as a published DotCMS contentlet (<c>PushContentWrapper</c>) linked to
+    /// the <c>htmlContent</c> content type generated from the DNN HTML module.
+    /// </param>
     public static void Write(
         IReadOnlyList<DotCmsContentType> contentTypes,
         Stream output,
         string? themesZipPath = null,
-        string? siteName = null)
+        string? siteName = null,
+        IReadOnlyList<DnnHtmlContent>? htmlContents = null)
     {
         string bundleId = Guid.NewGuid().ToString("N").ToUpperInvariant();
 
@@ -100,7 +108,7 @@ public static class BundleWriter
         }
 
         using var gz  = new GZipStream(output, CompressionLevel.Optimal, leaveOpen: true);
-        using var tar = new TarWriter(gz, TarEntryFormat.Gnu);
+        using var tar = new TarWriter(gz, TarEntryFormat.Ustar);
 
         // --- site / host entry (when a site name is provided) ----------------
         if (hostname is not null && siteId is not null && siteInode is not null)
@@ -119,28 +127,63 @@ public static class BundleWriter
         string contentSiteName = hostname ?? "systemHost";
 
         // --- content types ---------------------------------------------------
+        // Track the UUID assigned to the htmlContent type so that HTML module
+        // contentlets can reference it via their stInode field.
+        string? htmlContentTypeId = null;
         foreach (DotCmsContentType ct in contentTypes)
         {
             string id   = Guid.NewGuid().ToString();
             string json = BuildContentTypeJson(ct, id, contentHostId, contentSiteName);
             WriteTextEntry(tar, $"working/{contentWorkDir}/{id}.contentType.json", json);
             manifestEntries.Add(("contenttype", id, "", ct.Name, contentWorkDir, "/"));
+
+            if (ct.Variable == "htmlContent")
+                htmlContentTypeId = id;
         }
 
         // --- containers (from DNN containers) --------------------------------
+        // Written to live/ so they are imported as published (not draft) assets.
         foreach (var (id, inode, name, html) in containerDefs)
         {
             string xml = BuildContainerXml(id, inode, name, html, contentHostId);
-            WriteTextEntry(tar, $"working/{contentWorkDir}/{id}.containers.container.xml", xml);
+            WriteTextEntry(tar, $"live/{contentWorkDir}/{id}.containers.container.xml", xml);
             manifestEntries.Add(("containers", id, inode, name, "", ""));
         }
 
         // --- templates (from DNN skins) --------------------------------------
+        // Written to live/ so they are imported as published (not draft) assets.
         foreach (var (id, inode, name, html) in templateDefs)
         {
             string xml = BuildTemplateXml(id, inode, name, html, contentHostId);
-            WriteTextEntry(tar, $"working/{contentWorkDir}/{id}.template.template.xml", xml);
+            WriteTextEntry(tar, $"live/{contentWorkDir}/{id}.template.template.xml", xml);
             manifestEntries.Add(("template", id, inode, name, "", ""));
+        }
+
+        // --- HTML contentlets (from DNN HTML modules) ------------------------
+        if (htmlContents is not null && htmlContents.Count > 0 && htmlContentTypeId is not null)
+        {
+            foreach (DnnHtmlContent hc in htmlContents)
+            {
+                string identifier = Guid.NewGuid().ToString();
+                string inode      = Guid.NewGuid().ToString();
+
+                string contentXml = BuildContentXml(
+                    identifier, inode, hc.Title, hc.HtmlBody,
+                    contentHostId, htmlContentTypeId);
+                WriteTextEntry(
+                    tar,
+                    $"live/{contentWorkDir}/1/{identifier}.content.xml",
+                    contentXml);
+
+                string workflowXml = BuildContentWorkflowXml(identifier, hc.Title);
+                WriteTextEntry(
+                    tar,
+                    $"live/{contentWorkDir}/1/{identifier}.contentworkflow.xml",
+                    workflowXml);
+
+                manifestEntries.Add(("contentlet", identifier, inode, hc.Title,
+                    contentWorkDir, "/"));
+            }
         }
 
         // --- manifest.csv ----------------------------------------------------
@@ -306,6 +349,7 @@ public static class BundleWriter
               </container>
               <cvi class="com.dotmarketing.portlets.containers.model.ContainerVersionInfo">
                 <identifier>{id}</identifier>
+                <liveInode>{inode}</liveInode>
                 <workingInode>{inode}</workingInode>
                 <lockedOn class="sql-timestamp">{now}</lockedOn>
                 <deleted>false</deleted>
@@ -364,6 +408,7 @@ public static class BundleWriter
               </template>
               <vi class="com.dotmarketing.portlets.templates.model.TemplateVersionInfo">
                 <identifier>{id}</identifier>
+                <liveInode>{inode}</liveInode>
                 <workingInode>{inode}</workingInode>
                 <lockedOn class="sql-timestamp">{now}</lockedOn>
                 <deleted>false</deleted>
@@ -522,6 +567,168 @@ public static class BundleWriter
               </tags>
               <operation>PUBLISH</operation>
             </com.dotcms.publisher.pusher.wrapper.HostWrapper>
+            """;
+    }
+
+    // ------------------------------------------------------------------
+    // Contentlet (PushContentWrapper) XML builder
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Builds a DotCMS <c>PushContentWrapper</c> XML for an HTML contentlet.
+    /// The content map uses the Java 7 <c>ConcurrentHashMap</c> XStream
+    /// serialization format (identical to <see cref="BuildHostXml"/>).
+    /// </summary>
+    private static string BuildContentXml(
+        string identifier,
+        string inode,
+        string title,
+        string htmlBody,
+        string hostId,
+        string contentTypeId)
+    {
+        string now        = DateTime.UtcNow.ToString(XmlTimestampFormat);
+        string xmlTitle   = System.Security.SecurityElement.Escape(title)   ?? string.Empty;
+        string xmlBody    = System.Security.SecurityElement.Escape(htmlBody) ?? string.Empty;
+
+        // Java 7 ConcurrentHashMap with 16 empty segments (same pattern as HostWrapper).
+        string segments = string.Concat(Enumerable.Repeat(EmptyConcurrentHashMapSegment, 16));
+
+        return $"""
+            <com.dotcms.publisher.pusher.wrapper.PushContentWrapper>
+              <info>
+                <identifier>{identifier}</identifier>
+                <liveInode>{inode}</liveInode>
+                <workingInode>{inode}</workingInode>
+                <lockedOn class="sql-timestamp">{now}</lockedOn>
+                <deleted>false</deleted>
+                <versionTs class="sql-timestamp">{now}</versionTs>
+                <lang>1</lang>
+                <variant>DEFAULT</variant>
+                <publishDate class="sql-timestamp">{now}</publishDate>
+              </info>
+              <content>
+                <map class="com.dotmarketing.portlets.contentlet.model.Contentlet$ContentletHashMap" serialization="custom">
+                  <unserializable-parents/>
+                  <concurrent-hash-map>
+                    <default>
+                      <segments>
+            {segments}
+                      </segments>
+                      <segmentShift>28</segmentShift>
+                      <segmentMask>15</segmentMask>
+                    </default>
+                    <string>modDate</string>
+                    <sql-timestamp>{now}</sql-timestamp>
+                    <string>inode</string>
+                    <string>{inode}</string>
+                    <string>disabledWYSIWYG</string>
+                    <com.google.common.collect.RegularImmutableList resolves-to="com.google.common.collect.ImmutableList$SerializedForm">
+                      <elements/>
+                    </com.google.common.collect.RegularImmutableList>
+                    <string>host</string>
+                    <string>{hostId}</string>
+                    <string>stInode</string>
+                    <string>{contentTypeId}</string>
+                    <string>title</string>
+                    <string>{xmlTitle}</string>
+                    <string>body</string>
+                    <string>{xmlBody}</string>
+                    <string>owner</string>
+                    <string>dotcms.org.1</string>
+                    <string>identifier</string>
+                    <string>{identifier}</string>
+                    <string>nullProperties</string>
+                    <java.util.concurrent.ConcurrentHashMap_-KeySetView>
+                      <map/>
+                      <value class="boolean">true</value>
+                    </java.util.concurrent.ConcurrentHashMap_-KeySetView>
+                    <string>languageId</string>
+                    <long>1</long>
+                    <string>folder</string>
+                    <string>SYSTEM_FOLDER</string>
+                    <string>sortOrder</string>
+                    <long>0</long>
+                    <string>modUser</string>
+                    <string>dotcms.org.1</string>
+                    <null/>
+                    <null/>
+                  </concurrent-hash-map>
+                  <com.dotmarketing.portlets.contentlet.model.Contentlet_-ContentletHashMap>
+                    <default>
+                      <outer-class reference="../../../.."/>
+                    </default>
+                  </com.dotmarketing.portlets.contentlet.model.Contentlet_-ContentletHashMap>
+                </map>
+                <lowIndexPriority>false</lowIndexPriority>
+                <variantId>DEFAULT</variantId>
+              </content>
+              <id>
+                <id>{identifier}</id>
+                <assetName>content.{inode}</assetName>
+                <assetType>contentlet</assetType>
+                <parentPath>/</parentPath>
+                <hostId>{hostId}</hostId>
+                <owner>dotcms.org.1</owner>
+                <createDate class="sql-timestamp">{now}</createDate>
+                <assetSubType>HTMLContent</assetSubType>
+              </id>
+              <tree/>
+              <categories/>
+              <tags class="java.util.ImmutableCollections$ListN" resolves-to="java.util.CollSer" serialization="custom">
+                <java.util.CollSer>
+                  <default>
+                    <tag>1</tag>
+                  </default>
+                  <int>0</int>
+                </java.util.CollSer>
+              </tags>
+              <operation>PUBLISH</operation>
+              <language>
+                <id>1</id>
+                <languageCode>en</languageCode>
+                <countryCode>US</countryCode>
+                <language>English</language>
+                <country>United States</country>
+                <isoCode>en-us</isoCode>
+              </language>
+              <contentTags/>
+              <contentletMetadata/>
+            </com.dotcms.publisher.pusher.wrapper.PushContentWrapper>
+            """;
+    }
+
+    // ------------------------------------------------------------------
+    // Content workflow (PushContentWorkflowWrapper) XML builder
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Builds a DotCMS <c>PushContentWorkflowWrapper</c> XML that places the
+    /// contentlet in the "Published" step of the System Workflow.
+    /// </summary>
+    private static string BuildContentWorkflowXml(string identifier, string title)
+    {
+        string now      = DateTime.UtcNow.ToString(XmlTimestampFormat);
+        string xmlTitle = System.Security.SecurityElement.Escape(title) ?? string.Empty;
+
+        return $"""
+            <com.dotcms.publisher.pusher.wrapper.PushContentWorkflowWrapper>
+              <task>
+                <id>{Guid.NewGuid()}</id>
+                <creationDate class="sql-timestamp">{now}</creationDate>
+                <modDate class="sql-timestamp">{now}</modDate>
+                <createdBy>dotcms.org.1</createdBy>
+                <assignedTo>dotcms.org.1</assignedTo>
+                <title>{xmlTitle}</title>
+                <status>{SystemWorkflowPublishedStatus}</status>
+                <webasset>{identifier}</webasset>
+                <languageId>1</languageId>
+              </task>
+              <history class="com.google.common.collect.RegularImmutableList" resolves-to="com.google.common.collect.ImmutableList$SerializedForm">
+                <elements/>
+              </history>
+              <comments class="com.google.common.collect.RegularImmutableList" reference="../history"/>
+            </com.dotcms.publisher.pusher.wrapper.PushContentWorkflowWrapper>
             """;
     }
 
@@ -753,7 +960,7 @@ public static class BundleWriter
             entryStream.CopyTo(ms);
             ms.Position = 0;
 
-            var tarEntry = new GnuTarEntry(TarEntryType.RegularFile, bundlePath)
+            var tarEntry = new UstarTarEntry(TarEntryType.RegularFile, bundlePath)
             {
                 DataStream = ms,
             };
@@ -794,7 +1001,7 @@ public static class BundleWriter
     {
         byte[] bytes = Encoding.UTF8.GetBytes(content);
         using var ms = new MemoryStream(bytes);
-        var entry = new GnuTarEntry(TarEntryType.RegularFile, path)
+        var entry = new UstarTarEntry(TarEntryType.RegularFile, path)
         {
             DataStream = ms,
         };

@@ -110,9 +110,15 @@ try
             ? DnnXmlParser.ParsePortalName(inputPath)
             : null;
 
+    // Extract HTML module content from the LiteDB database (export_db.zip).
+    // Available only when the input is a DNN official site-export folder.
+    IReadOnlyList<DnnHtmlContent> htmlContents = exportDir is not null
+        ? DnnXmlParser.ParseHtmlContents(exportDir)
+        : [];
+
     // Write the DotCMS site bundle.
     using (var outStream = File.Create(outputPath))
-        BundleWriter.Write(contentTypes, outStream, themesZip, portalName);
+        BundleWriter.Write(contentTypes, outStream, themesZip, portalName, htmlContents);
 
     string themeNote = themesZip is not null
         ? " Containers, templates, and static theme assets included from export_themes.zip."
@@ -122,9 +128,13 @@ try
         ? $" Site '{portalName}' will be created on import."
         : string.Empty;
 
+    string contentNote = htmlContents.Count > 0
+        ? $" {htmlContents.Count} HTML content item(s) included."
+        : string.Empty;
+
     Console.WriteLine(
         $"Converted {modules.Count} module(s) to {contentTypes.Count} content type(s)." +
-        $"{themeNote}{siteNote} Bundle written to: {outputPath}");
+        $"{themeNote}{siteNote}{contentNote} Bundle written to: {outputPath}");
 
     return 0;
 }

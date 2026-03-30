@@ -2,6 +2,7 @@ using System.IO.Compression;
 using System.Text.Json;
 using System.Xml.Linq;
 using DnnToDotCms.Models;
+using LiteDB;
 
 namespace DnnToDotCms.Parser;
 
@@ -58,6 +59,139 @@ public static class DnnXmlParser
             return doc.RootElement.TryGetProperty("PortalName", out JsonElement pn)
                 ? pn.GetString()
                 : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Extracts HTML module content from a DNN official site-export folder by
+    /// reading the LiteDB database in <c>export_db.zip</c>.
+    /// Returns an empty list if the file does not exist, cannot be opened, or
+    /// contains no HTML module content.
+    /// </summary>
+    /// <param name="exportFolderOrJson">
+    /// Either the DNN export folder path or the full path to <c>export.json</c>
+    /// inside that folder.
+    /// </param>
+    public static IReadOnlyList<DnnHtmlContent> ParseHtmlContents(string exportFolderOrJson)
+    {
+        string folderPath;
+        if (Directory.Exists(exportFolderOrJson))
+        {
+            folderPath = exportFolderOrJson;
+        }
+        else
+        {
+            string? parent = Path.GetDirectoryName(Path.GetFullPath(exportFolderOrJson));
+            if (parent is null)
+                return [];
+            folderPath = parent;
+        }
+
+        string dbZipPath = Path.Combine(folderPath, "export_db.zip");
+        if (!File.Exists(dbZipPath))
+            return [];
+
+        string tempDb = Path.GetTempFileName();
+        try
+        {
+            // Extract export.dnndb (LiteDB binary) from the zip to a temp file.
+            using (var zipStream = File.OpenRead(dbZipPath))
+            using (var zip = new ZipArchive(zipStream, ZipArchiveMode.Read))
+            {
+                ZipArchiveEntry? dbEntry = zip.GetEntry("export.dnndb");
+                if (dbEntry is null)
+                    return [];
+
+                using var outStream = File.Create(tempDb);
+                using var inStream  = dbEntry.Open();
+                inStream.CopyTo(outStream);
+            }
+
+            using var db = new LiteDatabase($"Filename={tempDb};ReadOnly=true");
+            return ExtractHtmlContents(db);
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException
+                                      or LiteException or InvalidOperationException)
+        {
+            Console.Error.WriteLine(
+                $"Warning: Could not read HTML content from '{dbZipPath}': {ex.Message}");
+            return [];
+        }
+        finally
+        {
+            try { File.Delete(tempDb); } catch (IOException) { /* best-effort cleanup */ }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // LiteDB HTML content extraction
+    // ------------------------------------------------------------------
+
+    private static IReadOnlyList<DnnHtmlContent> ExtractHtmlContents(LiteDatabase db)
+    {
+        // Build a mapping of ModuleID → display title from ExportTabModule.
+        var moduleTitles = new Dictionary<int, string>();
+        ILiteCollection<BsonDocument> tabModules = db.GetCollection("ExportTabModule");
+        foreach (BsonDocument doc in tabModules.FindAll())
+        {
+            if (!doc.TryGetValue("ModuleID", out BsonValue moduleIdVal))
+                continue;
+            if (!doc.TryGetValue("ModuleTitle", out BsonValue titleVal))
+                continue;
+
+            string title = titleVal.AsString ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(title))
+                moduleTitles[moduleIdVal.AsInt32] = title;
+        }
+
+        var results = new List<DnnHtmlContent>();
+        ILiteCollection<BsonDocument> moduleContents = db.GetCollection("ExportModuleContent");
+
+        foreach (BsonDocument doc in moduleContents.FindAll())
+        {
+            if (!doc.TryGetValue("ModuleID",    out BsonValue moduleIdVal))  continue;
+            if (!doc.TryGetValue("XmlContent",  out BsonValue xmlContentVal)) continue;
+
+            string xmlContent = xmlContentVal.AsString ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(xmlContent))
+                continue;
+
+            string? htmlBody = ExtractHtmlBodyFromDnnXml(xmlContent);
+            if (htmlBody is null)
+                continue;
+
+            moduleTitles.TryGetValue(moduleIdVal.AsInt32, out string? title);
+            results.Add(new DnnHtmlContent(
+                Title:   string.IsNullOrWhiteSpace(title) ? "Content" : title,
+                HtmlBody: htmlBody));
+        }
+
+        return results;
+    }
+
+    /// <summary>
+    /// Extracts and HTML-decodes the content stored inside a DNN HTML module's
+    /// <c>&lt;htmltext&gt;&lt;content&gt;&lt;![CDATA[…]]&gt;&lt;/content&gt;&lt;/htmltext&gt;</c>
+    /// XML payload.  Returns <see langword="null"/> when the input cannot be
+    /// parsed or contains no recognisable content.
+    /// </summary>
+    public static string? ExtractHtmlBodyFromDnnXml(string xmlContent)
+    {
+        try
+        {
+            XDocument doc     = XDocument.Parse(xmlContent);
+            XElement? content = doc.Root?.Element("content");
+            if (content is null)
+                return null;
+
+            // The CDATA value still has HTML entities encoded (e.g. &lt;, &quot;).
+            // Decode them to get the actual HTML markup.
+            string decoded = System.Net.WebUtility.HtmlDecode(content.Value);
+            return string.IsNullOrWhiteSpace(decoded) ? null : decoded.Trim();
         }
         catch
         {

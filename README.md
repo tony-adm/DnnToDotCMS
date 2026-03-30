@@ -23,9 +23,11 @@ DNN organises content in *modules* placed on pages. DotCMS organises content in 
 - Converts DNN **container** ASCX templates to DotCMS container XML bundle entries
 - Converts DNN **skin** ASCX templates to DotCMS template XML bundle entries
 - Outputs a DotCMS push-publish bundle (`.tar.gz`) containing:
-  - `working/System Host/{uuid}.contentType.json` — one file per converted content type
-  - `working/System Host/{uuid}.containers.container.xml` — one file per DNN container
-  - `working/System Host/{uuid}.template.template.xml` — one file per DNN skin
+  - `working/{site}/{uuid}.contentType.json` — one file per converted content type
+  - `live/{site}/{uuid}.containers.container.xml` — one file per DNN container (published)
+  - `live/{site}/{uuid}.template.template.xml` — one file per DNN skin (published)
+  - `live/{site}/1/{uuid}.content.xml` — one file per HTML module content item
+  - `live/{site}/1/{uuid}.contentworkflow.xml` — workflow state for each content item
   - `manifest.csv` — bundle manifest listing all items
   - `themes/{ThemeName}/…` — static theme assets (CSS, JS, images, fonts) from `export_themes.zip`
 
@@ -144,7 +146,7 @@ Typical folder layout produced by DNN Export:
 ```
 2026-03-29_01-49-26/
   export.json            ← export metadata (portal name, date, summary)
-  export_db.zip          ← LiteDB site database (not used by this tool)
+  export_db.zip          ← LiteDB site database (HTML module content extracted from here)
   export_files.zip       ← uploaded file assets
   export_packages.zip    ← installed module/skin packages  ← read by this tool
   export_templates.zip   ← page templates
@@ -175,11 +177,16 @@ The tool produces a **DotCMS push-publish bundle** (`.tar.gz`). The bundle conta
 ```
 site.tar.gz
 ├── manifest.csv                                              ← bundle manifest
+├── live/
+│   └── {site}/
+│       ├── {uuid}.containers.container.xml                   ← DNN container (published)
+│       ├── {uuid}.template.template.xml                      ← DNN skin (published)
+│       └── 1/
+│           ├── {uuid}.content.xml                            ← HTML module content (published)
+│           └── {uuid}.contentworkflow.xml                    ← workflow state for content
 ├── working/
-│   └── System Host/
-│       ├── {uuid}.contentType.json                           ← one file per content type
-│       ├── {uuid}.containers.container.xml                   ← one file per DNN container
-│       └── {uuid}.template.template.xml                      ← one file per DNN skin
+│   └── {site}/
+│       └── {uuid}.contentType.json                           ← one file per content type
 └── themes/
     └── {ThemeName}/                                          ← static skin assets (CSS/JS/images)
         ├── skin.css
