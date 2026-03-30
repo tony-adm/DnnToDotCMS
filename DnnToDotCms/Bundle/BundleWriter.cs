@@ -292,8 +292,10 @@ public static class BundleWriter
                     folderUuid = Guid.NewGuid().ToString();
                     folderIdMap[pf.FolderPath] = folderUuid;
 
-                    // Write a folder entry for non-root folders.
-                    // When no custom site is provided, contentHostId is "SYSTEM_HOST".
+                    // Write a folder entry for all folders (including root) so that
+                    // DotCMS can resolve the folder UUID when creating identifiers.
+                    // Without this, root-folder files trigger the same
+                    // "You can only create an identifier on a host of folder. Trying null" error.
                     if (!string.IsNullOrEmpty(pf.FolderPath))
                     {
                         string dotPath   = "/" + pf.FolderPath.TrimEnd('/').ToLowerInvariant() + "/";
@@ -301,6 +303,13 @@ public static class BundleWriter
                         string folderXml = BuildFolderXml(folderUuid, pf.FolderPath.TrimEnd('/'), contentHostId, dotPath, parentPath);
                         WriteTextEntry(tar, $"live/{contentWorkDir}/{folderUuid}.folder.xml", folderXml);
                         manifestEntries.Add(("folder", folderUuid, folderUuid, pf.FolderPath.TrimEnd('/'), contentWorkDir, "/"));
+                    }
+                    else
+                    {
+                        string rootName  = hostname ?? "System Host";
+                        string folderXml = BuildFolderXml(folderUuid, rootName, contentHostId, "/", "/");
+                        WriteTextEntry(tar, $"live/{contentWorkDir}/{folderUuid}.folder.xml", folderXml);
+                        manifestEntries.Add(("folder", folderUuid, folderUuid, rootName, contentWorkDir, "/"));
                     }
                 }
 
