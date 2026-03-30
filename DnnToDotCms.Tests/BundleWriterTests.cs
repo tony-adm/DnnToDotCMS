@@ -1283,6 +1283,61 @@ public class BundleWriterTests
     }
 
     [Fact]
+    public void Write_WithHtmlContents_RootFolderXmlIsIncluded()
+    {
+        // A root folder entry must be present so that DotCMS can create
+        // identifiers for HTML contentlets (avoids the
+        // "You can only create an identifier on a host of folder. Trying null" error).
+        var (_, names) = WriteBundleWithContents(MakeHtmlContents());
+
+        Assert.Contains(names, n => n.EndsWith(".folder.xml"));
+    }
+
+    [Fact]
+    public void Write_WithHtmlContents_ContentXmlFolderIsValidUuid()
+    {
+        // The folder field in the contentlet XML must be a real UUID, not the
+        // literal string "SYSTEM_FOLDER", so that DotCMS can resolve it.
+        var contents = new[] { new DnnHtmlContent("Title", "<p>Body</p>") };
+        var (ms, names) = WriteBundleWithContents(contents);
+        string entryName = names.First(n => n.Contains("/1/") && n.EndsWith(".content.xml"));
+        string xml = ReadTarEntry(ms, entryName)!;
+        string folderValue = ExtractXmlStringField(xml, "folder");
+
+        Assert.True(Guid.TryParse(folderValue, out _),
+            $"Expected folder value to be a UUID but was: '{folderValue}'");
+        Assert.DoesNotContain("SYSTEM_FOLDER", xml);
+    }
+
+    [Fact]
+    public void Write_WithHtmlContents_ContentXmlFolderMatchesFolderXmlEntry()
+    {
+        // The folder UUID used in the contentlet XML must match a .folder.xml
+        // entry written into the same bundle so DotCMS can resolve the reference.
+        var contents = new[] { new DnnHtmlContent("Title", "<p>Body</p>") };
+        var (ms, names) = WriteBundleWithContents(contents);
+        string contentEntry = names.First(n => n.Contains("/1/") && n.EndsWith(".content.xml"));
+        string contentXml = ReadTarEntry(ms, contentEntry)!;
+        string folderUuid = ExtractXmlStringField(contentXml, "folder");
+
+        // The bundle must contain a .folder.xml whose name contains that UUID.
+        Assert.Contains(names, n => n.EndsWith(".folder.xml") && n.Contains(folderUuid));
+    }
+
+    /// <summary>
+    /// Extracts the string value immediately following a <c>&lt;string&gt;{key}&lt;/string&gt;</c>
+    /// element in a DotCMS XStream-serialised XML blob.
+    /// </summary>
+    private static string ExtractXmlStringField(string xml, string key)
+    {
+        int keyIdx = xml.IndexOf($"<string>{key}</string>", StringComparison.Ordinal);
+        Assert.True(keyIdx >= 0, $"Key '{key}' not found in XML");
+        int valueStart = xml.IndexOf("<string>", keyIdx + 1, StringComparison.Ordinal) + "<string>".Length;
+        int valueEnd   = xml.IndexOf("</string>", valueStart, StringComparison.Ordinal);
+        return xml[valueStart..valueEnd];
+    }
+
+    [Fact]
     public void Write_WithNoHtmlContentType_HtmlContentsSkipped()
     {
         // If the content types don't include htmlContent, no contentlets should be written.

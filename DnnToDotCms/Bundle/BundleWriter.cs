@@ -194,6 +194,24 @@ public static class BundleWriter
             manifestEntries.Add(("template", id, inode, name, "", ""));
         }
 
+        // Generate a root-folder UUID shared by HTML contentlets and pages so
+        // that DotCMS can create identifiers for them (avoids the
+        // "You can only create an identifier on a host of folder. Trying null" error).
+        // HTML contentlets also require htmlContentTypeId/Variable to be resolved from the
+        // content-types list; pages always use the fixed built-in HtmlPageAssetContentTypeId
+        // constant, so no additional null guards are needed for the pages branch.
+        bool needsRootFolder = (htmlContents is not null && htmlContents.Count > 0
+                                    && htmlContentTypeId is not null && htmlContentTypeVariable is not null)
+                               || (pages is not null && pages.Count > 0);
+        string rootFolderId   = Guid.NewGuid().ToString();
+        string rootFolderName = hostname ?? contentWorkDir;
+        if (needsRootFolder)
+        {
+            string rootFolderXml = BuildFolderXml(rootFolderId, rootFolderName, contentHostId, "/", "/");
+            WriteTextEntry(tar, $"live/{contentWorkDir}/{rootFolderId}.folder.xml", rootFolderXml);
+            manifestEntries.Add(("folder", rootFolderId, rootFolderId, rootFolderName, contentWorkDir, "/"));
+        }
+
         // --- HTML contentlets (from DNN HTML modules) ------------------------
         if (htmlContents is not null && htmlContents.Count > 0
             && htmlContentTypeId is not null && htmlContentTypeVariable is not null)
@@ -205,7 +223,7 @@ public static class BundleWriter
 
                 string contentXml = BuildContentXml(
                     identifier, inode, hc.Title, hc.HtmlBody,
-                    contentHostId, htmlContentTypeId, htmlContentTypeVariable);
+                    contentHostId, rootFolderId, htmlContentTypeId, htmlContentTypeVariable);
                 WriteTextEntry(
                     tar,
                     $"live/{contentWorkDir}/1/{identifier}.content.xml",
@@ -228,17 +246,6 @@ public static class BundleWriter
             // Build a lookup from skin name → template ID for matching DNN pages
             // to the templates that were converted from DNN skins.
             var skinToTemplateId = BuildSkinToTemplateMap(templateDefs);
-
-            // Generate a root-folder UUID for the site (used as the folder for
-            // top-level pages and files).
-            string rootFolderId = Guid.NewGuid().ToString();
-
-            // Always write a root-folder entry so that pages and files have a valid parent.
-            // When no custom site is provided, contentHostId is "SYSTEM_HOST".
-            string rootFolderName = hostname ?? contentWorkDir;
-            string rootFolderXml = BuildFolderXml(rootFolderId, rootFolderName, contentHostId, "/", "/");
-            WriteTextEntry(tar, $"live/{contentWorkDir}/{rootFolderId}.folder.xml", rootFolderXml);
-            manifestEntries.Add(("folder", rootFolderId, rootFolderId, rootFolderName, contentWorkDir, "/"));
 
             foreach (DnnPortalPage page in pages)
             {
@@ -725,6 +732,7 @@ public static class BundleWriter
         string title,
         string htmlBody,
         string hostId,
+        string folderId,
         string contentTypeId,
         string contentTypeVariable)
     {
@@ -787,7 +795,7 @@ public static class BundleWriter
                     <string>languageId</string>
                     <long>1</long>
                     <string>folder</string>
-                    <string>SYSTEM_FOLDER</string>
+                    <string>{folderId}</string>
                     <string>sortOrder</string>
                     <long>0</long>
                     <string>modUser</string>
