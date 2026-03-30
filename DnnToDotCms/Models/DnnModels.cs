@@ -23,7 +23,12 @@ public sealed record DnnHtmlContent(
     /// <summary>Display title for the content item (from the module title or tab name).</summary>
     string Title,
     /// <summary>Decoded HTML body text.</summary>
-    string HtmlBody);
+    string HtmlBody,
+    /// <summary>
+    /// The UniqueId GUID of the DNN tab (page) that this module belongs to.
+    /// Empty when the tab association is unknown.
+    /// </summary>
+    string TabUniqueId = "");
 
 /// <summary>
 /// Represents a DNN module parsed from either a .dnn package manifest or an

@@ -896,8 +896,8 @@ public class BundleWriterTests
         var (ms, names) = WriteBundleWithSite("My Website");
         string xml = ReadTarEntry(ms, names.First(n => n.EndsWith(".content.host.xml")))!;
 
-        // "My Website" should be sanitized to "my-website"
-        Assert.Contains("my-website", xml);
+        // "My Website" should be sanitized to "My_Website"
+        Assert.Contains("My_Website", xml);
         Assert.Contains("<string>hostname</string>", xml);
     }
 
@@ -908,7 +908,7 @@ public class BundleWriterTests
         string manifest = ReadTarEntry(ms, "manifest.csv")!;
 
         Assert.Contains("INCLUDED,host,", manifest);
-        Assert.Contains("my-website", manifest);
+        Assert.Contains("My_Website", manifest);
     }
 
     [Fact]
@@ -921,7 +921,7 @@ public class BundleWriterTests
 
             // Containers should be in the sanitized site directory, not System Host.
             Assert.Contains(names, n =>
-                n.StartsWith("live/my-website/") &&
+                n.StartsWith("live/My_Website/") &&
                 n.EndsWith(".containers.container.xml"));
             Assert.DoesNotContain(names, n =>
                 n.StartsWith("working/System Host/") &&
@@ -939,7 +939,7 @@ public class BundleWriterTests
             var (_, names) = WriteBundleWithSite("My Website", zipPath);
 
             Assert.Contains(names, n =>
-                n.StartsWith("live/my-website/") &&
+                n.StartsWith("live/My_Website/") &&
                 n.EndsWith(".template.template.xml"));
             Assert.DoesNotContain(names, n =>
                 n.StartsWith("working/System Host/") &&
@@ -998,7 +998,7 @@ public class BundleWriterTests
         var (_, names) = WriteBundleWithSite("My Website");
 
         Assert.Contains(names, n =>
-            n.StartsWith("working/my-website/") &&
+            n.StartsWith("working/My_Website/") &&
             n.EndsWith(".contentType.json"));
         Assert.DoesNotContain(names, n =>
             n.StartsWith("working/System Host/") &&
@@ -1031,7 +1031,7 @@ public class BundleWriterTests
         string siteName = doc.RootElement
             .GetProperty("contentType").GetProperty("siteName").GetString()!;
 
-        Assert.Equal("my-website", siteName);
+        Assert.Equal("My_Website", siteName);
     }
 
     [Fact]
@@ -1044,8 +1044,8 @@ public class BundleWriterTests
             .Split('\n', StringSplitOptions.RemoveEmptyEntries)
             .First(l => l.StartsWith("INCLUDED,contenttype,"));
 
-        // The site column should be "my-website", not "System Host".
-        Assert.Contains("my-website", ctLine);
+        // The site column should be "My_Website", not "System Host".
+        Assert.Contains("My_Website", ctLine);
         Assert.DoesNotContain("System Host", ctLine);
     }
 
@@ -1078,11 +1078,11 @@ public class BundleWriterTests
     // ------------------------------------------------------------------
 
     [Theory]
-    [InlineData("My Website",        "my-website")]
-    [InlineData("DNN Site Export",   "dnn-site-export")]
-    [InlineData("Hello World!",      "hello-world")]
+    [InlineData("My Website",        "My_Website")]
+    [InlineData("DNN Site Export",   "DNN_Site_Export")]
+    [InlineData("Hello World!",      "Hello_World")]
     [InlineData("  spaces  ",        "spaces")]
-    [InlineData("A",                 "a")]
+    [InlineData("A",                 "A")]
     [InlineData("",                  "imported-site")]
     [InlineData("---",               "imported-site")]
     public void SanitizeHostname_ProducesExpectedResult(string input, string expected)
@@ -1349,7 +1349,7 @@ public class BundleWriterTests
         var (_, names) = WriteBundleWithContents(MakeHtmlContents(), siteName: "My Website");
 
         Assert.Contains(names, n =>
-            n.StartsWith("live/my-website/1/") &&
+            n.StartsWith("live/My_Website/1/") &&
             n.EndsWith(".content.xml"));
         Assert.DoesNotContain(names, n =>
             n.StartsWith("live/System Host/1/") &&
@@ -1878,6 +1878,198 @@ public class BundleWriterTests
         string xml = ReadTarEntry(ms, entryName)!;
 
         Assert.Contains("<multiTree/>", xml);
+    }
+
+    [Fact]
+    public void Write_WithPortalFiles_FileAssetContentXmlHasApplicationParentPath()
+    {
+        // Static portal files should be placed in the "application" folder, not the root.
+        var files = new[]
+        {
+            new DnnPortalFile(
+                "e5dfe1f2-4cdc-46bd-ad32-7257a6b8105a",
+                "2af85195-c192-4a33-a14d-a8bb2dc6007e",
+                "home.css", "", "text/css",
+                Encoding.UTF8.GetBytes("/* css */")),
+        };
+
+        var (ms, names) = WriteBundleWithFiles(files);
+        string entryName = names.First(n => n.Contains("/1/") && n.EndsWith(".content.xml")
+            && !n.Contains("host.xml"));
+        string xml = ReadTarEntry(ms, entryName)!;
+
+        Assert.Contains("<parentPath>/application/</parentPath>", xml);
+        Assert.DoesNotContain("<parentPath>/</parentPath>", xml);
+    }
+
+    // ------------------------------------------------------------------
+    // Page multiTree population tests
+    // ------------------------------------------------------------------
+
+    private static (MemoryStream stream, List<string> entryNames) WriteBundleWithPagesAndContents(
+        IReadOnlyList<DnnPortalPage> pages,
+        IReadOnlyList<DnnHtmlContent> htmlContents,
+        string siteName = "Test Site",
+        string? themesZipPath = null)
+    {
+        var ms = new MemoryStream();
+        BundleWriter.Write([MakeHtmlContentType()], ms, themesZipPath, siteName,
+            htmlContents, pages);
+        ms.Position = 0;
+
+        var names = new List<string>();
+        using var gz  = new GZipStream(ms, CompressionMode.Decompress, leaveOpen: true);
+        using var tar = new TarReader(gz);
+
+        TarEntry? entry;
+        while ((entry = tar.GetNextEntry()) is not null)
+            names.Add(entry.Name);
+
+        ms.Position = 0;
+        return (ms, names);
+    }
+
+    [Fact]
+    public void Write_WithPageAndMatchingContent_PageXmlHasPopulatedMultiTree()
+    {
+        // When an HTML contentlet carries a TabUniqueId that matches a page,
+        // the page's multiTree should contain a multiTree entry linking them.
+        string tabId = "aaa-111-bbb";
+        var pages = new[]
+        {
+            new DnnPortalPage(tabId, "Home", "Home", "", "//Home", 0, true, ""),
+        };
+        var contents = new[]
+        {
+            new DnnHtmlContent("Welcome", "<h1>Hello</h1>", TabUniqueId: tabId),
+        };
+
+        string zipPath = BuildThemesZip();
+        try
+        {
+            var (ms, names) = WriteBundleWithPagesAndContents(pages, contents,
+                themesZipPath: zipPath);
+
+            // Identify the page XML specifically by its assetSubType.
+            string? pageXml = null;
+            foreach (string name in names.Where(n =>
+                n.Contains("/1/") && n.EndsWith(".content.xml") && !n.Contains("host.xml")))
+            {
+                string candidate = ReadTarEntry(ms, name)!;
+                if (candidate.Contains("<assetSubType>htmlpageasset</assetSubType>"))
+                {
+                    pageXml = candidate;
+                    break;
+                }
+            }
+
+            Assert.NotNull(pageXml);
+
+            // The multiTree should be populated, not self-closing.
+            Assert.DoesNotContain("<multiTree/>", pageXml);
+            Assert.Contains("<multiTree>", pageXml);
+            Assert.Contains("<com.dotmarketing.beans.MultiTree>", pageXml);
+            Assert.Contains("<parent1>", pageXml);
+            Assert.Contains("<parent2>", pageXml);
+            Assert.Contains("<child>", pageXml);
+        }
+        finally { File.Delete(zipPath); }
+    }
+
+    [Fact]
+    public void Write_WithPageAndNoMatchingContent_PageXmlHasEmptyMultiTree()
+    {
+        // When no HTML content matches the page's UniqueId, multiTree stays self-closing.
+        var pages = new[]
+        {
+            new DnnPortalPage("page-uuid", "Home", "Home", "", "//Home", 0, true, ""),
+        };
+        var contents = new[]
+        {
+            // TabUniqueId does not match the page
+            new DnnHtmlContent("Welcome", "<h1>Hello</h1>", TabUniqueId: "other-uuid"),
+        };
+
+        var (ms, names) = WriteBundleWithPagesAndContents(pages, contents);
+
+        string? pageXml = null;
+        foreach (string name in names.Where(n =>
+            n.Contains("/1/") && n.EndsWith(".content.xml") && !n.Contains("host.xml")))
+        {
+            string candidate = ReadTarEntry(ms, name)!;
+            if (candidate.Contains("<assetSubType>htmlpageasset</assetSubType>"))
+            {
+                pageXml = candidate;
+                break;
+            }
+        }
+
+        Assert.NotNull(pageXml);
+        Assert.Contains("<multiTree/>", pageXml);
+    }
+
+    [Fact]
+    public void Write_WithPageAndMatchingContent_MultiTreeReferencesContentIdentifier()
+    {
+        // The <child> element in the multiTree must reference the contentlet identifier
+        // that was written to the bundle for the matching HTML content item.
+        string tabId = "tab-xyz-123";
+        var pages = new[]
+        {
+            new DnnPortalPage(tabId, "Home", "Home", "", "//Home", 0, true, ""),
+        };
+        var contents = new[]
+        {
+            new DnnHtmlContent("Banner", "<p>content</p>", TabUniqueId: tabId),
+        };
+
+        string zipPath = BuildThemesZip();
+        try
+        {
+            var (ms, names) = WriteBundleWithPagesAndContents(pages, contents,
+                themesZipPath: zipPath);
+
+            // Extract the contentlet identifier from the content.xml entry path.
+            string contentEntry = names.First(n => n.Contains("/1/") && n.EndsWith(".content.xml")
+                && !n.Contains("host.xml") && !n.Contains("htmlContent"));
+            // Entries are named live/.../1/{identifier}.content.xml
+            // Find the content entry that belongs to the HTML content (not the page).
+            // Both the page and the contentlet are under /1/; find the contentlet by checking
+            // that its XML contains the htmlContent assetSubType.
+            string? contentletId = null;
+            foreach (string name in names.Where(n => n.Contains("/1/") && n.EndsWith(".content.xml")
+                                                     && !n.Contains("host.xml")))
+            {
+                string candidateXml = ReadTarEntry(ms, name)!;
+                if (candidateXml.Contains("<assetSubType>htmlContent</assetSubType>"))
+                {
+                    // Extract the identifier from the XML.
+                    int start = candidateXml.IndexOf("<assetName>", StringComparison.Ordinal) + "<assetName>".Length;
+                    int end   = candidateXml.IndexOf(".content</assetName>", start, StringComparison.Ordinal);
+                    contentletId = candidateXml[start..end];
+                    break;
+                }
+            }
+
+            Assert.NotNull(contentletId);
+
+            // The page XML must reference that contentlet ID in its multiTree.
+            string? pageXml = null;
+            foreach (string name in names.Where(n => n.Contains("/1/") && n.EndsWith(".content.xml")
+                                                     && !n.Contains("host.xml")))
+            {
+                string candidateXml = ReadTarEntry(ms, name)!;
+                if (candidateXml.Contains("<assetSubType>htmlpageasset</assetSubType>"))
+                {
+                    pageXml = candidateXml;
+                    break;
+                }
+            }
+
+            Assert.NotNull(pageXml);
+            Assert.Contains($"<child>{contentletId}</child>", pageXml);
+        }
+        finally { File.Delete(zipPath); }
     }
 
 

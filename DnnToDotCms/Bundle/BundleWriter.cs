@@ -195,9 +195,16 @@ public static class BundleWriter
         }
 
         // --- HTML contentlets (from DNN HTML modules) ------------------------
+        // Pre-generate identifiers so they can be referenced in page multiTree entries.
+        // Build a lookup: tab UniqueId → list of (contentlet identifier, container id).
+        var tabContentMap = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+
         if (htmlContents is not null && htmlContents.Count > 0
             && htmlContentTypeId is not null && htmlContentTypeVariable is not null)
         {
+            // Use the first available container for multiTree associations.
+            string defaultContainerId = containerDefs.Count > 0 ? containerDefs[0].id : string.Empty;
+
             foreach (DnnHtmlContent hc in htmlContents)
             {
                 string identifier = Guid.NewGuid().ToString();
@@ -219,6 +226,17 @@ public static class BundleWriter
 
                 manifestEntries.Add(("contentlet", identifier, inode, hc.Title,
                     contentWorkDir, "/"));
+
+                // Record the association so pages can reference this contentlet in multiTree.
+                if (!string.IsNullOrEmpty(hc.TabUniqueId) && !string.IsNullOrEmpty(defaultContainerId))
+                {
+                    if (!tabContentMap.TryGetValue(hc.TabUniqueId, out List<string>? ids))
+                    {
+                        ids = [];
+                        tabContentMap[hc.TabUniqueId] = ids;
+                    }
+                    ids.Add(identifier);
+                }
             }
         }
 
@@ -228,6 +246,9 @@ public static class BundleWriter
             // Build a lookup from skin name → template ID for matching DNN pages
             // to the templates that were converted from DNN skins.
             var skinToTemplateId = BuildSkinToTemplateMap(templateDefs);
+
+            // Use the first available container for multiTree associations.
+            string defaultContainerId = containerDefs.Count > 0 ? containerDefs[0].id : string.Empty;
 
             foreach (DnnPortalPage page in pages)
             {
@@ -240,9 +261,13 @@ public static class BundleWriter
                 string url        = PageNameToUrl(page.Name);
                 string templateId = ResolveTemplateId(page.SkinSrc, skinToTemplateId);
 
+                // Resolve the HTML contentlet identifiers belonging to this page.
+                tabContentMap.TryGetValue(page.UniqueId, out List<string>? pageContentIds);
+
                 string pageXml = BuildPageXml(
                     identifier, inode, page.Title, url,
-                    contentHostId, templateId);
+                    contentHostId, templateId,
+                    defaultContainerId, pageContentIds ?? []);
                 WriteTextEntry(
                     tar,
                     $"live/{contentWorkDir}/1/{identifier}.content.xml",
@@ -873,13 +898,21 @@ public static class BundleWriter
         string title,
         string url,
         string hostId,
-        string templateId)
+        string templateId,
+        string containerId = "",
+        IReadOnlyList<string>? contentletIds = null)
     {
         string now      = DateTime.UtcNow.ToString(XmlTimestampFormat);
         string xmlTitle = System.Security.SecurityElement.Escape(Truncate(title, MaxVarcharLength)) ?? string.Empty;
         string xmlUrl   = System.Security.SecurityElement.Escape(url) ?? string.Empty;
 
         string segments = string.Concat(Enumerable.Repeat(EmptyConcurrentHashMapSegment, 16));
+
+        // Build multiTree entries linking this page to its contentlets via the container.
+        string multiTreeContent = BuildMultiTreeXml(identifier, containerId, contentletIds ?? []);
+        string multiTreeElement = string.IsNullOrEmpty(multiTreeContent)
+            ? "<multiTree/>"
+            : $"<multiTree>{multiTreeContent}</multiTree>";
 
         return $"""
             <com.dotcms.publisher.pusher.wrapper.PushContentWrapper>
@@ -964,7 +997,7 @@ public static class BundleWriter
                 <createDate class="sql-timestamp">{now}</createDate>
                 <assetSubType>htmlpageasset</assetSubType>
               </id>
-              <multiTree/>
+              {multiTreeElement}
               <tree/>
               <categories/>
               <tags class="java.util.ImmutableCollections$ListN" resolves-to="java.util.CollSer" serialization="custom">
@@ -988,6 +1021,44 @@ public static class BundleWriter
               <contentletMetadata/>
             </com.dotcms.publisher.pusher.wrapper.PushContentWrapper>
             """;
+    }
+
+    // ------------------------------------------------------------------
+    // MultiTree XML builder
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Builds zero or more DotCMS <c>com.dotmarketing.beans.MultiTree</c> XML
+    /// elements that associate a page (<paramref name="pageId"/>) with
+    /// <paramref name="contentletIds"/> placed in <paramref name="containerId"/>.
+    /// Returns an empty string when no container or contentlet IDs are given.
+    /// </summary>
+    private static string BuildMultiTreeXml(
+        string pageId,
+        string containerId,
+        IReadOnlyList<string> contentletIds)
+    {
+        if (string.IsNullOrEmpty(containerId) || contentletIds.Count == 0)
+            return string.Empty;
+
+        var sb = new StringBuilder();
+        for (int i = 0; i < contentletIds.Count; i++)
+        {
+            string relationType = Guid.NewGuid().ToString();
+            sb.Append($"""
+
+                  <com.dotmarketing.beans.MultiTree>
+                    <parent1>{pageId}</parent1>
+                    <parent2>{containerId}</parent2>
+                    <child>{contentletIds[i]}</child>
+                    <relationType>{relationType}</relationType>
+                    <treeOrder>{i}</treeOrder>
+                    <variantName>DEFAULT</variantName>
+                    <personalization>dot:default</personalization>
+                  </com.dotmarketing.beans.MultiTree>
+              """);
+        }
+        return sb.ToString();
     }
 
     // ------------------------------------------------------------------
@@ -1087,7 +1158,7 @@ public static class BundleWriter
                 <id>{identifier}</id>
                 <assetName>{xmlFileName}</assetName>
                 <assetType>contentlet</assetType>
-                <parentPath>/</parentPath>
+                <parentPath>/application/</parentPath>
                 <hostId>{hostId}</hostId>
                 <owner>dotcms.org.1</owner>
                 <createDate class="sql-timestamp">{now}</createDate>
@@ -1465,15 +1536,16 @@ public static class BundleWriter
     }
 
     /// <summary>
-    /// Converts a DNN portal/site name into a URL-safe hostname string suitable
-    /// for use as a DotCMS site identifier.
-    /// For example: <c>"My Website"</c> → <c>"my-website"</c>.
+    /// Converts a DNN portal/site name into a site name suitable for use as a
+    /// DotCMS site identifier, preserving the original casing and replacing
+    /// spaces (and other non-alphanumeric characters) with underscores.
+    /// For example: <c>"My Website"</c> → <c>"My_Website"</c>.
     /// </summary>
     public static string SanitizeHostname(string siteName)
     {
-        // Lowercase, replace runs of non-alphanumeric characters with a dash.
-        string sanitized = Regex.Replace(siteName.ToLowerInvariant(), @"[^a-z0-9]+", "-");
-        sanitized = sanitized.Trim('-');
+        // Replace runs of non-alphanumeric characters (including spaces) with an underscore.
+        string sanitized = Regex.Replace(siteName, @"[^A-Za-z0-9]+", "_");
+        sanitized = sanitized.Trim('_');
         return string.IsNullOrEmpty(sanitized) ? "imported-site" : sanitized;
     }
 
