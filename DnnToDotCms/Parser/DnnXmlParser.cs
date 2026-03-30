@@ -77,28 +77,33 @@ public static class DnnXmlParser
     /// inside that folder.
     /// </param>
     public static IReadOnlyList<DnnHtmlContent> ParseHtmlContents(string exportFolderOrJson)
-    {
-        string folderPath;
-        if (Directory.Exists(exportFolderOrJson))
-        {
-            folderPath = exportFolderOrJson;
-        }
-        else
-        {
-            string? parent = Path.GetDirectoryName(Path.GetFullPath(exportFolderOrJson));
-            if (parent is null)
-                return [];
-            folderPath = parent;
-        }
+        => WithLiteDb(exportFolderOrJson, ExtractHtmlContents);
 
-        string dbZipPath = Path.Combine(folderPath, "export_db.zip");
+    // ------------------------------------------------------------------
+    // Shared LiteDB helper
+    // ------------------------------------------------------------------
+
+    private static string ResolveFolderPath(string exportFolderOrJson)
+    {
+        if (Directory.Exists(exportFolderOrJson))
+            return exportFolderOrJson;
+
+        string? parent = Path.GetDirectoryName(Path.GetFullPath(exportFolderOrJson));
+        return parent ?? exportFolderOrJson;
+    }
+
+    private static IReadOnlyList<T> WithLiteDb<T>(
+        string exportFolderOrJson,
+        Func<LiteDatabase, IReadOnlyList<T>> action)
+    {
+        string folderPath  = ResolveFolderPath(exportFolderOrJson);
+        string dbZipPath   = Path.Combine(folderPath, "export_db.zip");
         if (!File.Exists(dbZipPath))
             return [];
 
         string tempDb = Path.GetTempFileName();
         try
         {
-            // Extract export.dnndb (LiteDB binary) from the zip to a temp file.
             using (var zipStream = File.OpenRead(dbZipPath))
             using (var zip = new ZipArchive(zipStream, ZipArchiveMode.Read))
             {
@@ -112,19 +117,80 @@ public static class DnnXmlParser
             }
 
             using var db = new LiteDatabase($"Filename={tempDb};ReadOnly=true");
-            return ExtractHtmlContents(db);
+            return action(db);
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException
                                       or LiteException or InvalidOperationException)
         {
             Console.Error.WriteLine(
-                $"Warning: Could not read HTML content from '{dbZipPath}': {ex.Message}");
+                $"Warning: Could not read data from '{dbZipPath}': {ex.Message}");
             return [];
         }
         finally
         {
             try { File.Delete(tempDb); } catch (IOException) { /* best-effort cleanup */ }
         }
+    }
+
+    // ------------------------------------------------------------------
+    // Public API — portal pages
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Extracts all DNN portal pages (tabs) from the <c>ExportTab</c>
+    /// collection in <c>export_db.zip</c>.
+    /// Returns an empty list when the database is unavailable or contains
+    /// no tab records.
+    /// </summary>
+    /// <param name="exportFolderOrJson">
+    /// Either the DNN export folder path or the full path to <c>export.json</c>.
+    /// </param>
+    public static IReadOnlyList<DnnPortalPage> ParsePortalPages(string exportFolderOrJson)
+        => WithLiteDb(exportFolderOrJson, ExtractPortalPages);
+
+    // ------------------------------------------------------------------
+    // Public API — portal files
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Extracts portal static files from <c>export_db.zip</c> (metadata) and
+    /// <c>export_files.zip</c> (binary content).
+    /// Returns an empty list when either archive is missing or unreadable.
+    /// </summary>
+    /// <param name="exportFolderOrJson">
+    /// Either the DNN export folder path or the full path to <c>export.json</c>.
+    /// </param>
+    public static IReadOnlyList<DnnPortalFile> ParsePortalFiles(string exportFolderOrJson)
+    {
+        string folderPath = ResolveFolderPath(exportFolderOrJson);
+
+        string filesZip = Path.Combine(folderPath, "export_files.zip");
+        if (!File.Exists(filesZip))
+            return [];
+
+        // Read actual file bytes from export_files.zip into a lookup.
+        var fileBytes = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            using var zip = ZipFile.OpenRead(filesZip);
+            foreach (ZipArchiveEntry entry in zip.Entries)
+            {
+                if (string.IsNullOrEmpty(entry.Name)) continue; // directory entry
+                using var ms   = new MemoryStream();
+                using var inSt = entry.Open();
+                inSt.CopyTo(ms);
+                // Normalise separators so lookups work on both platforms.
+                fileBytes[entry.FullName.Replace('\\', '/')] = ms.ToArray();
+            }
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException)
+        {
+            Console.Error.WriteLine(
+                $"Warning: Could not read portal files from '{filesZip}': {ex.Message}");
+            return [];
+        }
+
+        return WithLiteDb(exportFolderOrJson, db => ExtractPortalFiles(db, fileBytes));
     }
 
     // ------------------------------------------------------------------
@@ -172,6 +238,87 @@ public static class DnnXmlParser
 
         return results;
     }
+
+    // ------------------------------------------------------------------
+    // LiteDB portal pages extraction
+    // ------------------------------------------------------------------
+
+    private static IReadOnlyList<DnnPortalPage> ExtractPortalPages(LiteDatabase db)
+    {
+        var results = new List<DnnPortalPage>();
+        ILiteCollection<BsonDocument> tabs = db.GetCollection("ExportTab");
+
+        foreach (BsonDocument doc in tabs.FindAll())
+        {
+            if (!doc.TryGetValue("TabName",  out BsonValue nameVal))   continue;
+            if (!doc.TryGetValue("UniqueId", out BsonValue uidVal))    continue;
+            if (!doc.TryGetValue("IsDeleted",out BsonValue deletedVal)) continue;
+            if (deletedVal.AsBoolean) continue;
+
+            doc.TryGetValue("Title",       out BsonValue titleVal);
+            doc.TryGetValue("Description", out BsonValue descVal);
+            doc.TryGetValue("TabPath",     out BsonValue pathVal);
+            doc.TryGetValue("Level",       out BsonValue levelVal);
+            doc.TryGetValue("IsVisible",   out BsonValue visibleVal);
+            doc.TryGetValue("SkinSrc",     out BsonValue skinVal);
+
+            string uniqueId = uidVal.AsGuid.ToString();
+            string name     = nameVal.AsString  ?? string.Empty;
+            string title    = titleVal?.AsString ?? name;
+            string desc     = descVal?.AsString  ?? string.Empty;
+            string tabPath  = pathVal?.AsString  ?? string.Empty;
+            int level       = levelVal?.AsInt32  ?? 0;
+            bool isVisible  = visibleVal?.AsBoolean ?? true;
+            string skinSrc  = skinVal?.AsString  ?? string.Empty;
+
+            results.Add(new DnnPortalPage(uniqueId, name, title, desc,
+                tabPath, level, isVisible, skinSrc));
+        }
+
+        return results;
+    }
+
+    // ------------------------------------------------------------------
+    // LiteDB portal files extraction
+    // ------------------------------------------------------------------
+
+    private static IReadOnlyList<DnnPortalFile> ExtractPortalFiles(
+        LiteDatabase db,
+        Dictionary<string, byte[]> fileBytes)
+    {
+        var results = new List<DnnPortalFile>();
+        ILiteCollection<BsonDocument> files = db.GetCollection("ExportFile");
+
+        foreach (BsonDocument doc in files.FindAll())
+        {
+            if (!doc.TryGetValue("FileName",    out BsonValue fileNameVal)) continue;
+            if (!doc.TryGetValue("UniqueId",    out BsonValue uidVal))      continue;
+            if (!doc.TryGetValue("VersionGuid", out BsonValue versionVal))  continue;
+
+            doc.TryGetValue("Folder",      out BsonValue folderVal);
+            doc.TryGetValue("ContentType", out BsonValue ctVal);
+
+            string fileName    = fileNameVal.AsString ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(fileName)) continue;
+
+            string folderPath  = folderVal?.AsString ?? string.Empty;
+            string mimeType    = ctVal?.AsString     ?? "application/octet-stream";
+            string uniqueId    = uidVal.AsGuid.ToString();
+            string versionGuid = versionVal.AsGuid.ToString();
+
+            // Locate the actual file bytes in the zip using the DNN relative path.
+            // Ensure proper path joining and normalise separators (DNN may use either).
+            string zipKey = Path.Combine(folderPath, fileName).Replace('\\', '/');
+            if (!fileBytes.TryGetValue(zipKey, out byte[]? content))
+                continue;  // file missing from export_files.zip – skip
+
+            results.Add(new DnnPortalFile(uniqueId, versionGuid,
+                fileName, folderPath, mimeType, content));
+        }
+
+        return results;
+    }
+
 
     /// <summary>
     /// Extracts and HTML-decodes the content stored inside a DNN HTML module's

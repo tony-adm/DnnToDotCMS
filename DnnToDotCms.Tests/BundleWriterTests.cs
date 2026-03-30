@@ -1,5 +1,6 @@
 using System.Formats.Tar;
 using System.IO.Compression;
+using System.Text;
 using System.Text.Json;
 using DnnToDotCms.Bundle;
 using DnnToDotCms.Models;
@@ -122,8 +123,12 @@ public class BundleWriterTests
 
         var (_, names) = WriteBundleToMemory(contentTypes);
 
-        int count = names.Count(n =>
-            n.StartsWith("working/System Host/") && n.EndsWith(".contentType.json"));
+        // Each content type is written twice to the tar (DotCMS push-publish requirement),
+        // so count unique file names.
+        int count = names
+            .Where(n => n.StartsWith("working/System Host/") && n.EndsWith(".contentType.json"))
+            .Distinct()
+            .Count();
 
         Assert.Equal(2, count);
     }
@@ -178,9 +183,22 @@ public class BundleWriterTests
     {
         string entryName = names.First(n =>
             n.StartsWith("working/System Host/") && n.EndsWith(".contentType.json"));
-        string json = ReadTarEntry(ms, entryName)!;
-        return JsonDocument.Parse(json);
+        return ParseContentTypeJsonFromEntry(ms, entryName);
     }
+
+    /// <summary>
+    /// Reads a <c>.contentType.json</c> tar entry and returns only the first
+    /// JSON object.  The bundle format places two concatenated JSON objects in
+    /// each file; <see cref="JsonDocument.Parse"/> would reject the second one.
+    /// </summary>
+    private static JsonDocument ParseContentTypeJsonFromEntry(MemoryStream ms, string entryName)
+    {
+        string json  = ReadTarEntry(ms, entryName)!;
+        byte[] bytes = Encoding.UTF8.GetBytes(json);
+        var reader   = new System.Text.Json.Utf8JsonReader(bytes);
+        return JsonDocument.ParseValue(ref reader);
+    }
+
 
     [Fact]
     public void ContentTypeJson_HasContentTypeWrapper()
@@ -353,8 +371,11 @@ public class BundleWriterTests
 
             var (_, names) = WriteBundleToMemory([MakeHtmlContentType()]);
             Assert.Contains("manifest.csv", names);
-            int ctCount = names.Count(n =>
-                n.StartsWith("working/System Host/") && n.EndsWith(".contentType.json"));
+            // Each content type is written twice; count unique file names.
+            int ctCount = names
+                .Where(n => n.StartsWith("working/System Host/") && n.EndsWith(".contentType.json"))
+                .Distinct()
+                .Count();
             Assert.Equal(1, ctCount);
         }
         finally
@@ -989,8 +1010,7 @@ public class BundleWriterTests
     {
         var (ms, names) = WriteBundleWithSite("My Website");
         string entryName = names.First(n => n.EndsWith(".contentType.json"));
-        string json = ReadTarEntry(ms, entryName)!;
-        using var doc = JsonDocument.Parse(json);
+        using var doc = ParseContentTypeJsonFromEntry(ms, entryName);
 
         string host = doc.RootElement
             .GetProperty("contentType").GetProperty("host").GetString()!;
@@ -1006,8 +1026,7 @@ public class BundleWriterTests
     {
         var (ms, names) = WriteBundleWithSite("My Website");
         string entryName = names.First(n => n.EndsWith(".contentType.json"));
-        string json = ReadTarEntry(ms, entryName)!;
-        using var doc = JsonDocument.Parse(json);
+        using var doc = ParseContentTypeJsonFromEntry(ms, entryName);
 
         string siteName = doc.RootElement
             .GetProperty("contentType").GetProperty("siteName").GetString()!;
@@ -1176,8 +1195,7 @@ public class BundleWriterTests
 
         // Find the content type UUID used in the contentType.json
         string ctEntry = names.First(n => n.EndsWith(".contentType.json"));
-        string ctJson  = ReadTarEntry(ms, ctEntry)!;
-        using var ctDoc = JsonDocument.Parse(ctJson);
+        using var ctDoc = ParseContentTypeJsonFromEntry(ms, ctEntry);
         string typeId = ctDoc.RootElement
             .GetProperty("contentType").GetProperty("id").GetString()!;
 
@@ -1223,9 +1241,7 @@ public class BundleWriterTests
         // DotCMS expects a List serialization; an object causes deserialization failure on import.
         var (ms, names) = WriteBundleToMemory([MakeHtmlContentType()]);
         string ctEntry = names.First(n => n.EndsWith(".contentType.json"));
-        string ctJson  = ReadTarEntry(ms, ctEntry)!;
-
-        using var doc = JsonDocument.Parse(ctJson);
+        using var doc = ParseContentTypeJsonFromEntry(ms, ctEntry);
         JsonElement mappings = doc.RootElement.GetProperty("systemActionMappings");
         Assert.Equal(JsonValueKind.Array, mappings.ValueKind);
     }
@@ -1352,9 +1368,7 @@ public class BundleWriterTests
 
         var (ms, names) = WriteBundleToMemory([ct]);
         string entryName = names.First(n => n.EndsWith(".contentType.json"));
-        string json = ReadTarEntry(ms, entryName)!;
-
-        using var doc = JsonDocument.Parse(json);
+        using var doc = ParseContentTypeJsonFromEntry(ms, entryName);
         string? description = doc.RootElement
             .GetProperty("contentType")
             .GetProperty("description")
@@ -1457,4 +1471,340 @@ public class BundleWriterTests
         }
         finally { File.Delete(path); }
     }
+
+    // ------------------------------------------------------------------
+    // Content type JSON duplication tests
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Write_ContentTypeJson_FileAppearsTwiceInTar()
+    {
+        // The DotCMS push-publish format requires each .contentType.json to be
+        // written twice to the tar archive.
+        var (_, names) = WriteBundleToMemory([MakeHtmlContentType()]);
+
+        int totalCount = names.Count(n =>
+            n.StartsWith("working/") && n.EndsWith(".contentType.json"));
+
+        Assert.Equal(2, totalCount); // one content type → two tar entries
+    }
+
+    [Fact]
+    public void Write_ContentTypeJson_FileContainsTwoJsonObjects()
+    {
+        // Each .contentType.json entry must contain two consecutive JSON objects
+        // (old state + new state) concatenated without a separator.
+        var (ms, names) = WriteBundleToMemory([MakeHtmlContentType()]);
+        string entryName = names.First(n => n.EndsWith(".contentType.json"));
+        string json = ReadTarEntry(ms, entryName)!;
+
+        byte[] bytes = Encoding.UTF8.GetBytes(json);
+        var objects = new List<object?>();
+        int pos = 0;
+
+        // Count how many top-level JSON values can be parsed from the content.
+        while (pos < bytes.Length)
+        {
+            var r = new System.Text.Json.Utf8JsonReader(bytes.AsSpan(pos));
+            try
+            {
+                using var doc = JsonDocument.ParseValue(ref r);
+                objects.Add(null); // successfully parsed one object
+                pos += (int)r.BytesConsumed;
+                // skip any whitespace
+                while (pos < bytes.Length && bytes[pos] <= 0x20) pos++;
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                break;
+            }
+        }
+
+        Assert.Equal(2, objects.Count);
+    }
+
+    // ------------------------------------------------------------------
+    // Portal pages (htmlpageasset) tests
+    // ------------------------------------------------------------------
+
+    private static (MemoryStream stream, List<string> entryNames) WriteBundleWithPages(
+        IReadOnlyList<DnnPortalPage> pages,
+        string siteName = "Test Site")
+    {
+        var ms = new MemoryStream();
+        BundleWriter.Write([MakeHtmlContentType()], ms, null, siteName, null, pages);
+        ms.Position = 0;
+
+        var names = new List<string>();
+        using var gz  = new GZipStream(ms, CompressionMode.Decompress, leaveOpen: true);
+        using var tar = new TarReader(gz);
+
+        TarEntry? entry;
+        while ((entry = tar.GetNextEntry()) is not null)
+            names.Add(entry.Name);
+
+        ms.Position = 0;
+        return (ms, names);
+    }
+
+    [Fact]
+    public void Write_WithPages_HomepageProducesHtmlpageassetEntry()
+    {
+        var pages = new[]
+        {
+            new DnnPortalPage("78f7202a-f8d1-4b13-9682-583f6afb10ea",
+                "Home", "Home", "", "//Home", 0, true, "[G]Skins/Xcillion/Home.ascx"),
+        };
+
+        var (_, names) = WriteBundleWithPages(pages);
+
+        Assert.Contains(names, n => n.Contains("/1/") && n.EndsWith(".content.xml"));
+    }
+
+    [Fact]
+    public void Write_WithPages_HomepageContentXmlHasHtmlpageassetSubType()
+    {
+        var pages = new[]
+        {
+            new DnnPortalPage("78f7202a-f8d1-4b13-9682-583f6afb10ea",
+                "Home", "Home", "", "//Home", 0, true, ""),
+        };
+
+        var (ms, names) = WriteBundleWithPages(pages);
+        string entryName = names.First(n => n.Contains("/1/") && n.EndsWith(".content.xml")
+            && !n.Contains("host.xml"));
+        string xml = ReadTarEntry(ms, entryName)!;
+
+        Assert.Contains("<assetSubType>htmlpageasset</assetSubType>", xml);
+    }
+
+    [Fact]
+    public void Write_WithPages_HomepageContentXmlHasTitle()
+    {
+        var pages = new[]
+        {
+            new DnnPortalPage("aaa", "Home", "My Home Page", "", "//Home", 0, true, ""),
+        };
+
+        var (ms, names) = WriteBundleWithPages(pages);
+        // Only page content XML (not host)
+        string entryName = names.First(n => n.Contains("/1/") && n.EndsWith(".content.xml")
+            && !n.Contains("host.xml"));
+        string xml = ReadTarEntry(ms, entryName)!;
+
+        Assert.Contains("My Home Page", xml);
+    }
+
+    [Fact]
+    public void Write_WithPages_AdminPageIsExcluded()
+    {
+        var pages = new[]
+        {
+            new DnnPortalPage("aaa", "Home",  "Home",  "", "//Home",  0, true, ""),
+            new DnnPortalPage("bbb", "Admin", "Admin", "", "//Admin", 0, false, ""),
+        };
+
+        var (_, names) = WriteBundleWithPages(pages);
+
+        // Exactly one page content XML (excluding host entry).
+        int pageCount = names.Count(n => n.Contains("/1/") && n.EndsWith(".content.xml")
+            && !n.Contains("host.xml") && !n.Contains("htmlContent"));
+        Assert.Equal(1, pageCount);
+    }
+
+    [Fact]
+    public void Write_WithPages_SubPagesAreExcluded()
+    {
+        var pages = new[]
+        {
+            new DnnPortalPage("aaa", "Home",       "Home",       "", "//Home",           0, true, ""),
+            new DnnPortalPage("bbb", "My Profile", "My Profile", "", "//Activity//MyProfile", 1, true, ""),
+        };
+
+        var (_, names) = WriteBundleWithPages(pages);
+
+        // Only the Level-0 Home page should produce a content.xml entry.
+        int pageCount = names.Count(n => n.Contains("/1/") && n.EndsWith(".content.xml")
+            && !n.Contains("host.xml") && !n.Contains("htmlContent"));
+        Assert.Equal(1, pageCount);
+    }
+
+    [Fact]
+    public void Write_WithPages_ProducesWorkflowXmlEntry()
+    {
+        var pages = new[]
+        {
+            new DnnPortalPage("aaa", "Home", "Home", "", "//Home", 0, true, ""),
+        };
+
+        var (_, names) = WriteBundleWithPages(pages);
+
+        Assert.Contains(names, n => n.Contains("/1/") && n.EndsWith(".contentworkflow.xml"));
+    }
+
+    [Fact]
+    public void Write_WithPages_RootFolderXmlIsIncluded()
+    {
+        var pages = new[]
+        {
+            new DnnPortalPage("aaa", "Home", "Home", "", "//Home", 0, true, ""),
+        };
+
+        var (_, names) = WriteBundleWithPages(pages, "Test Site");
+
+        Assert.Contains(names, n => n.EndsWith(".folder.xml"));
+    }
+
+    [Fact]
+    public void Write_WithPages_ManifestIncludesContentletAndFolderRows()
+    {
+        var pages = new[]
+        {
+            new DnnPortalPage("aaa", "Home", "Home", "", "//Home", 0, true, ""),
+        };
+
+        var (ms, _) = WriteBundleWithPages(pages);
+        string manifest = ReadTarEntry(ms, "manifest.csv")!;
+
+        Assert.Contains("INCLUDED,contentlet,", manifest);
+        Assert.Contains("INCLUDED,folder,", manifest);
+    }
+
+    // ------------------------------------------------------------------
+    // Portal static files (FileAsset) tests
+    // ------------------------------------------------------------------
+
+    private static (MemoryStream stream, List<string> entryNames) WriteBundleWithFiles(
+        IReadOnlyList<DnnPortalFile> files,
+        string siteName = "Test Site")
+    {
+        var ms = new MemoryStream();
+        BundleWriter.Write([MakeHtmlContentType()], ms, null, siteName, null, null, files);
+        ms.Position = 0;
+
+        var names = new List<string>();
+        using var gz  = new GZipStream(ms, CompressionMode.Decompress, leaveOpen: true);
+        using var tar = new TarReader(gz);
+
+        TarEntry? entry;
+        while ((entry = tar.GetNextEntry()) is not null)
+            names.Add(entry.Name);
+
+        ms.Position = 0;
+        return (ms, names);
+    }
+
+    [Fact]
+    public void Write_WithPortalFiles_ProducesAssetBinaryEntry()
+    {
+        var files = new[]
+        {
+            new DnnPortalFile(
+                "e5dfe1f2-4cdc-46bd-ad32-7257a6b8105a",
+                "2af85195-c192-4a33-a14d-a8bb2dc6007e",
+                "home.css", "", "text/css",
+                Encoding.UTF8.GetBytes("body { margin: 0; }")),
+        };
+
+        var (_, names) = WriteBundleWithFiles(files);
+
+        // Binary should be under assets/{x}/{y}/{inode}/fileAsset/{filename}
+        Assert.Contains(names, n => n.StartsWith("assets/") && n.EndsWith("/home.css"));
+    }
+
+    [Fact]
+    public void Write_WithPortalFiles_ProducesContentXmlEntry()
+    {
+        var files = new[]
+        {
+            new DnnPortalFile(
+                "e5dfe1f2-4cdc-46bd-ad32-7257a6b8105a",
+                "2af85195-c192-4a33-a14d-a8bb2dc6007e",
+                "home.css", "", "text/css",
+                Encoding.UTF8.GetBytes("body {}")),
+        };
+
+        var (_, names) = WriteBundleWithFiles(files);
+
+        Assert.Contains(names, n => n.Contains("/1/") && n.EndsWith(".content.xml"));
+    }
+
+    [Fact]
+    public void Write_WithPortalFiles_ContentXmlHasFileAssetSubType()
+    {
+        var files = new[]
+        {
+            new DnnPortalFile(
+                "e5dfe1f2-4cdc-46bd-ad32-7257a6b8105a",
+                "2af85195-c192-4a33-a14d-a8bb2dc6007e",
+                "logo.png", "Images/", "image/png",
+                [0x89, 0x50, 0x4E, 0x47]),
+        };
+
+        var (ms, names) = WriteBundleWithFiles(files);
+        string entryName = names.First(n => n.Contains("/1/") && n.EndsWith(".content.xml")
+            && !n.Contains("host.xml"));
+        string xml = ReadTarEntry(ms, entryName)!;
+
+        Assert.Contains("<assetSubType>FileAsset</assetSubType>", xml);
+    }
+
+    [Fact]
+    public void Write_WithPortalFiles_AssetPathUsesFirstTwoCharsOfInode()
+    {
+        // inode "2af85195-..." → assets/2/a/2af85195-.../fileAsset/home.css
+        var files = new[]
+        {
+            new DnnPortalFile(
+                "e5dfe1f2-4cdc-46bd-ad32-7257a6b8105a",
+                "2af85195-c192-4a33-a14d-a8bb2dc6007e",
+                "home.css", "", "text/css",
+                Encoding.UTF8.GetBytes("/* css */")),
+        };
+
+        var (_, names) = WriteBundleWithFiles(files);
+
+        Assert.Contains(names,
+            n => n == "assets/2/a/2af85195-c192-4a33-a14d-a8bb2dc6007e/fileAsset/home.css");
+    }
+
+    [Fact]
+    public void Write_WithPortalFiles_SubFolderProducesFolderXmlEntry()
+    {
+        var files = new[]
+        {
+            new DnnPortalFile(
+                "6f574d5f-0880-4d5a-b4a2-74d2e10b5659",
+                "69f363b0-6512-48ad-b187-b6a450ffda7b",
+                "logo.png", "Images/", "image/png",
+                [0x00]),
+        };
+
+        var (_, names) = WriteBundleWithFiles(files, "Test Site");
+
+        // Sub-folder should produce a folder XML entry.
+        Assert.Contains(names, n => n.EndsWith(".folder.xml"));
+    }
+
+    [Fact]
+    public void Write_WithPortalFiles_FileAssetContentXmlReferencesDataSharedPath()
+    {
+        var files = new[]
+        {
+            new DnnPortalFile(
+                "e5dfe1f2-4cdc-46bd-ad32-7257a6b8105a",
+                "2af85195-c192-4a33-a14d-a8bb2dc6007e",
+                "home.css", "", "text/css",
+                Encoding.UTF8.GetBytes("/* css */")),
+        };
+
+        var (ms, names) = WriteBundleWithFiles(files);
+        string entryName = names.First(n => n.Contains("/1/") && n.EndsWith(".content.xml")
+            && !n.Contains("host.xml"));
+        string xml = ReadTarEntry(ms, entryName)!;
+
+        Assert.Contains("/data/shared/assets/", xml);
+        Assert.Contains("home.css", xml);
+    }
 }
+
