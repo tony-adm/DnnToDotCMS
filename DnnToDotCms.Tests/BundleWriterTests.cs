@@ -1242,6 +1242,20 @@ public class BundleWriterTests
     }
 
     [Fact]
+    public void Write_WithHtmlContents_WorkflowXmlHasNoAssignedTo()
+    {
+        // workflow_task.assigned_to has a FK constraint referencing cms_role(id).
+        // User IDs (e.g. "dotcms.org.1") are not valid cms_role IDs and cause a
+        // FK violation on bundle import.  The element must be absent so the DB
+        // column is left NULL, which satisfies the nullable FK column.
+        var (ms, names) = WriteBundleWithContents(MakeHtmlContents());
+        string entryName = names.First(n => n.Contains("/1/") && n.EndsWith(".contentworkflow.xml"));
+        string xml = ReadTarEntry(ms, entryName)!;
+
+        Assert.DoesNotContain("<assignedTo>", xml);
+    }
+
+    [Fact]
     public void Write_WithHtmlContents_ManifestIncludesContentletRows()
     {
         var (ms, _) = WriteBundleWithContents(MakeHtmlContents());

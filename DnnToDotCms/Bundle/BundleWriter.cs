@@ -732,7 +732,6 @@ public static class BundleWriter
                 <creationDate class="sql-timestamp">{now}</creationDate>
                 <modDate class="sql-timestamp">{now}</modDate>
                 <createdBy>dotcms.org.1</createdBy>
-                <assignedTo>dotcms.org.1</assignedTo>
                 <title>{xmlTitle}</title>
                 <status>{SystemWorkflowPublishedStatus}</status>
                 <webasset>{identifier}</webasset>
