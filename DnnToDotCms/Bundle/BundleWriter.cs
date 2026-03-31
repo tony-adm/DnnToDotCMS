@@ -62,8 +62,9 @@ public static class BundleWriter
     /// DNN containers (<c>_default/Containers/…/*.ascx</c>) are converted to
     /// DotCMS container XML entries, DNN skins (<c>_default/Skins/…/*.ascx</c>)
     /// are converted to DotCMS template XML entries, and remaining static
-    /// assets (CSS, JS, images, fonts) are embedded under a <c>themes/</c>
-    /// directory for reference.
+    /// assets (CSS, JS, images, fonts) are embedded under
+    /// <c>ROOT/application/themes/</c> in the bundle so that DotCMS places
+    /// them in the correct theme directory on import.
     /// </param>
     /// <param name="siteName">
     /// Optional DNN portal / site name (e.g. <c>"My Website"</c>).  When
@@ -180,7 +181,8 @@ public static class BundleWriter
         // Written to live/ so they are imported as published (not draft) assets.
         foreach (var (id, inode, name, html) in containerDefs)
         {
-            string xml = BuildContainerXml(id, inode, name, html, contentHostId);
+            string xml = BuildContainerXml(id, inode, name, html, contentHostId,
+                htmlContentTypeId ?? string.Empty);
             WriteTextEntry(tar, $"live/{contentWorkDir}/{id}.containers.container.xml", xml);
             manifestEntries.Add(("containers", id, inode, name, "", ""));
         }
@@ -299,7 +301,7 @@ public static class BundleWriter
                 // Write the contentlet XML.
                 string fileContentXml = BuildFileAssetXml(
                     identifier, inode, pf.FileName, assetPath,
-                    contentHostId);
+                    contentHostId, pf.FolderPath);
                 WriteTextEntry(
                     tar,
                     $"live/{contentWorkDir}/1/{identifier}.content.xml",
@@ -443,11 +445,38 @@ public static class BundleWriter
     // ------------------------------------------------------------------
 
     private static string BuildContainerXml(
-        string id, string inode, string title, string code, string hostId = "SYSTEM_HOST")
+        string id, string inode, string title, string code, string hostId = "SYSTEM_HOST",
+        string htmlContentTypeId = "")
     {
         string now      = DateTime.UtcNow.ToString(XmlTimestampFormat);
         string xmlCode  = System.Security.SecurityElement.Escape(code) ?? string.Empty;
         string xmlTitle = System.Security.SecurityElement.Escape(Truncate(title, MaxVarcharLength)) ?? string.Empty;
+
+        // Build the csList element that associates this container with the htmlContent
+        // content type.  Without this, DotCMS cannot connect the container to content
+        // items of that type, so the page renders empty.  The csList code uses the
+        // direct Velocity field variables ($!{title}, $!{body}) rather than the legacy
+        // $dotContent accessor that is only available in the container's <code> field.
+        string csListXml;
+        if (!string.IsNullOrEmpty(htmlContentTypeId))
+        {
+            string csId     = Guid.NewGuid().ToString();
+            string csCode   = TransformToCsListCode(code);
+            string xmlCsCode = System.Security.SecurityElement.Escape(csCode) ?? string.Empty;
+            csListXml = $"""
+                  <com.dotmarketing.beans.ContainerStructure>
+                    <id>{csId}</id>
+                    <structureId>{htmlContentTypeId}</structureId>
+                    <containerInode>{inode}</containerInode>
+                    <containerId>{id}</containerId>
+                    <code>{xmlCsCode}</code>
+                  </com.dotmarketing.beans.ContainerStructure>
+                """;
+        }
+        else
+        {
+            csListXml = string.Empty;
+        }
 
         return $"""
             <com.dotcms.publisher.pusher.wrapper.ContainerWrapper>
@@ -488,9 +517,25 @@ public static class BundleWriter
                 <versionTs class="sql-timestamp">{now}</versionTs>
               </cvi>
               <operation>PUBLISH</operation>
-              <csList/>
+              <csList>
+            {csListXml}
+              </csList>
             </com.dotcms.publisher.pusher.wrapper.ContainerWrapper>
             """;
+    }
+
+    /// <summary>
+    /// Transforms legacy <c>$dotContent.field</c> and <c>$!{dotContent.field}</c>
+    /// Velocity variable syntax into the direct <c>$!{field}</c> form used inside
+    /// container <c>csList</c> rendering code.
+    /// </summary>
+    private static string TransformToCsListCode(string code)
+    {
+        // $!{dotContent.fieldName} → $!{fieldName}
+        string result = Regex.Replace(code, @"\$!\{dotContent\.(\w+)\}", "$!{$1}");
+        // $dotContent.fieldName → $!{fieldName}
+        result = Regex.Replace(result, @"\$dotContent\.(\w+)", "$!{$1}");
+        return result;
     }
 
     // ------------------------------------------------------------------
@@ -1095,12 +1140,20 @@ public static class BundleWriter
         string inode,
         string fileName,
         string assetPath,
-        string hostId)
+        string hostId,
+        string folderPath = "")
     {
         string now          = DateTime.UtcNow.ToString(XmlTimestampFormat);
         string xmlFileName  = System.Security.SecurityElement.Escape(fileName)  ?? string.Empty;
         // The fileAsset field uses the on-disk storage path under /data/shared.
         string storagePath  = $"/data/shared/{assetPath}";
+
+        // Build the DotCMS parentPath from the DNN folder path.
+        // DNN uses relative paths like "" (root) or "Images/" (sub-folder).
+        // DotCMS parentPath must start and end with "/" so:  "" → "/"  "Images/" → "/Images/"
+        string parentPath = "/" + folderPath.TrimStart('/');
+        if (!parentPath.EndsWith('/'))
+            parentPath += '/';
 
         string segments = string.Concat(Enumerable.Repeat(EmptyConcurrentHashMapSegment, 16));
 
@@ -1179,7 +1232,7 @@ public static class BundleWriter
                 <id>{identifier}</id>
                 <assetName>{xmlFileName}</assetName>
                 <assetType>contentlet</assetType>
-                <parentPath>/application/</parentPath>
+                <parentPath>{parentPath}</parentPath>
                 <hostId>{hostId}</hostId>
                 <owner>dotcms.org.1</owner>
                 <createDate class="sql-timestamp">{now}</createDate>
@@ -1282,6 +1335,13 @@ public static class BundleWriter
     /// (e.g. <c>_default/Containers/Xcillion/Boxed.ascx</c>); sub-folder
     /// helpers such as <c>…/Common/AddFiles.ascx</c> are skipped.
     /// </summary>
+    /// <remarks>
+    /// Containers are collected in a first pass so that their identifiers are
+    /// known before template conversion begins.  The first container's ID is
+    /// passed to <see cref="ConvertAscxToTemplateHtml"/> so that DNN skin pane
+    /// divs (<c>&lt;div runat="server"&gt;</c>) are replaced with
+    /// <c>#parseContainer</c> directives that DotCMS can evaluate at render time.
+    /// </remarks>
     private static void CollectThemeDefinitions(
         string themesZipPath,
         List<(string id, string inode, string name, string html)> containerDefs,
@@ -1292,6 +1352,7 @@ public static class BundleWriter
 
         using var zip = ZipFile.OpenRead(themesZipPath);
 
+        // First pass: collect containers so their IDs are available for template conversion.
         foreach (ZipArchiveEntry entry in zip.Entries)
         {
             if (!entry.Name.EndsWith(".ascx", StringComparison.OrdinalIgnoreCase))
@@ -1299,28 +1360,41 @@ public static class BundleWriter
 
             string entryPath = entry.FullName.Replace('\\', '/');
 
-            if (entryPath.StartsWith(containersPrefix, StringComparison.OrdinalIgnoreCase))
-            {
-                // Only process ThemeName/ContainerName.ascx (exactly one slash after prefix)
-                string rest = entryPath[containersPrefix.Length..];
-                if (rest.Count(c => c == '/') != 1) continue;
+            if (!entryPath.StartsWith(containersPrefix, StringComparison.OrdinalIgnoreCase))
+                continue;
 
-                string name = Path.GetFileNameWithoutExtension(entry.Name);
-                using var reader = new StreamReader(entry.Open(), Encoding.UTF8);
-                string html = ConvertAscxToContainerHtml(reader.ReadToEnd());
-                containerDefs.Add((Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), name, html));
-            }
-            else if (entryPath.StartsWith(skinsPrefix, StringComparison.OrdinalIgnoreCase))
-            {
-                // Only process ThemeName/SkinName.ascx (exactly one slash after prefix)
-                string rest = entryPath[skinsPrefix.Length..];
-                if (rest.Count(c => c == '/') != 1) continue;
+            // Only process ThemeName/ContainerName.ascx (exactly one slash after prefix)
+            string rest = entryPath[containersPrefix.Length..];
+            if (rest.Count(c => c == '/') != 1) continue;
 
-                string name = Path.GetFileNameWithoutExtension(entry.Name);
-                using var reader = new StreamReader(entry.Open(), Encoding.UTF8);
-                string html = ConvertAscxToTemplateHtml(reader.ReadToEnd());
-                templateDefs.Add((Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), name, html));
-            }
+            string name = Path.GetFileNameWithoutExtension(entry.Name);
+            using var reader = new StreamReader(entry.Open(), Encoding.UTF8);
+            string html = ConvertAscxToContainerHtml(reader.ReadToEnd());
+            containerDefs.Add((Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), name, html));
+        }
+
+        // Use the first container's identifier so template panes can reference it.
+        string firstContainerId = containerDefs.Count > 0 ? containerDefs[0].id : string.Empty;
+
+        // Second pass: collect templates, wiring pane divs to #parseContainer.
+        foreach (ZipArchiveEntry entry in zip.Entries)
+        {
+            if (!entry.Name.EndsWith(".ascx", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            string entryPath = entry.FullName.Replace('\\', '/');
+
+            if (!entryPath.StartsWith(skinsPrefix, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            // Only process ThemeName/SkinName.ascx (exactly one slash after prefix)
+            string rest = entryPath[skinsPrefix.Length..];
+            if (rest.Count(c => c == '/') != 1) continue;
+
+            string name = Path.GetFileNameWithoutExtension(entry.Name);
+            using var reader = new StreamReader(entry.Open(), Encoding.UTF8);
+            string html = ConvertAscxToTemplateHtml(reader.ReadToEnd(), firstContainerId);
+            templateDefs.Add((Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), name, html));
         }
     }
 
@@ -1386,6 +1460,12 @@ public static class BundleWriter
         new(@"<div\s+[^>]*id=""ContentPane""[^>]*>(\s*</div>)?",
             RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
 
+    // Matches any <div ... runat="server" ...> pane element in a DNN skin (possibly self-closing).
+    // Used in template conversion to replace server-side panes with #parseContainer calls.
+    private static readonly Regex DnnRunatPaneDivRegex =
+        new(@"<div\s+[^>]*runat=""server""[^>]*>(\s*</div>)?",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
     // Matches any remaining self-closing <dnn:TAGNAME .../> controls.
     private static readonly Regex DnnSelfClosingTagRegex =
         new(@"<dnn:[A-Za-z]+\s[^>]*/?>", RegexOptions.Compiled | RegexOptions.IgnoreCase);
@@ -1425,6 +1505,14 @@ public static class BundleWriter
     /// Converts a DNN skin ASCX file into a DotCMS template body suitable for
     /// the <c>body</c> field of a template bundle entry.
     /// </summary>
+    /// <param name="ascx">Raw content of the DNN skin <c>.ascx</c> file.</param>
+    /// <param name="defaultContainerId">
+    /// Optional DotCMS container identifier.  When provided, DNN server-side
+    /// pane <c>&lt;div&gt;</c> elements (those with <c>runat="server"</c>) are
+    /// replaced with <c>#parseContainer('{id}', 'N')</c> Velocity directives so
+    /// that DotCMS renders the associated container content on the page.  When
+    /// omitted, pane divs are removed.
+    /// </param>
     /// <remarks>
     /// Transformations applied:
     /// <list type="bullet">
@@ -1435,11 +1523,16 @@ public static class BundleWriter
     ///     <c>&lt;dnn:LOGO&gt;</c> → <c>&lt;img src="/logo.png" alt="Logo"/&gt;</c>,
     ///     <c>&lt;dnn:MENU&gt;</c> → <c>&lt;!-- Navigation --&gt;</c>, etc.
     ///   </item>
+    ///   <item>
+    ///     DNN server-side pane <c>&lt;div runat="server"&gt;</c> elements are
+    ///     replaced with <c>#parseContainer</c> Velocity directives (or removed
+    ///     when no container ID is available).
+    ///   </item>
     ///   <item>All remaining <c>runat="server"</c> attributes are stripped.</item>
     ///   <item>Any unrecognised <c>&lt;dnn:…&gt;</c> controls are removed.</item>
     /// </list>
     /// </remarks>
-    public static string ConvertAscxToTemplateHtml(string ascx)
+    public static string ConvertAscxToTemplateHtml(string ascx, string defaultContainerId = "")
     {
         string html = DirectiveRegex.Replace(ascx, string.Empty);
         html = CodeBlockRegex.Replace(html, string.Empty);
@@ -1447,6 +1540,21 @@ public static class BundleWriter
         // Replace well-known DNN skin controls with HTML/comment equivalents.
         foreach (var (rx, replacement) in SkinControlReplacements)
             html = rx.Replace(html, replacement);
+
+        // Replace DNN server-side pane divs (runat="server") with #parseContainer
+        // directives so DotCMS renders container content in those zones.
+        // This must run before RunatServerRegex strips the runat attribute.
+        if (!string.IsNullOrEmpty(defaultContainerId))
+        {
+            int uuid = 0;
+            html = DnnRunatPaneDivRegex.Replace(html,
+                _ => $"#parseContainer('{defaultContainerId}', '{++uuid}')");
+        }
+        else
+        {
+            // No container available: remove pane divs entirely.
+            html = DnnRunatPaneDivRegex.Replace(html, string.Empty);
+        }
 
         html = RunatServerRegex.Replace(html, string.Empty);
         html = DnnSelfClosingTagRegex.Replace(html, string.Empty);
@@ -1490,13 +1598,19 @@ public static class BundleWriter
 
     private static string MapThemePath(string zipEntryPath)
     {
-        // "_default/Skins/Xcillion/Css/skin.css" → "themes/Xcillion/Css/skin.css"
-        // "_default/Containers/Xcillion/…"       → "themes/Xcillion/Containers/…"
+        // "_default/Skins/Xcillion/Css/skin.css"
+        //   → "ROOT/application/themes/Xcillion/Css/skin.css"
+        // "_default/Containers/Xcillion/…"
+        //   → "ROOT/application/themes/Xcillion/Containers/…"
+        //
+        // The ROOT/ prefix causes DotCMS to write these files into the
+        // /application/themes/ directory on the file system, which is where
+        // DotCMS expects theme static assets to live.
         const string skinsPrefix      = "_default/Skins/";
         const string containersPrefix = "_default/Containers/";
 
         if (zipEntryPath.StartsWith(skinsPrefix, StringComparison.OrdinalIgnoreCase))
-            return "themes/" + zipEntryPath[skinsPrefix.Length..];
+            return "ROOT/application/themes/" + zipEntryPath[skinsPrefix.Length..];
 
         if (zipEntryPath.StartsWith(containersPrefix, StringComparison.OrdinalIgnoreCase))
         {
@@ -1505,12 +1619,12 @@ public static class BundleWriter
             string rest = zipEntryPath[containersPrefix.Length..];
             int slash = rest.IndexOf('/');
             return slash < 0
-                ? "themes/" + rest
-                : $"themes/{rest[..slash]}/Containers/{rest[(slash + 1)..]}";
+                ? "ROOT/application/themes/" + rest
+                : $"ROOT/application/themes/{rest[..slash]}/Containers/{rest[(slash + 1)..]}";
         }
 
-        // Fallback: keep the original path prefixed with "themes/"
-        return "themes/" + zipEntryPath;
+        // Fallback: keep the original path under ROOT/application/themes/
+        return "ROOT/application/themes/" + zipEntryPath;
     }
 
     // ------------------------------------------------------------------

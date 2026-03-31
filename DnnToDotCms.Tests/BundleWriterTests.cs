@@ -1881,9 +1881,10 @@ public class BundleWriterTests
     }
 
     [Fact]
-    public void Write_WithPortalFiles_FileAssetContentXmlHasApplicationParentPath()
+    public void Write_WithPortalFiles_RootFileParentPathIsSiteRoot()
     {
-        // Static portal files should be placed in the "application" folder, not the root.
+        // A portal file at the DNN root (FolderPath = "") should land at
+        // parentPath="/", preserving the original folder structure in DotCMS.
         var files = new[]
         {
             new DnnPortalFile(
@@ -1898,7 +1899,29 @@ public class BundleWriterTests
             && !n.Contains("host.xml"));
         string xml = ReadTarEntry(ms, entryName)!;
 
-        Assert.Contains("<parentPath>/application/</parentPath>", xml);
+        Assert.Contains("<parentPath>/</parentPath>", xml);
+    }
+
+    [Fact]
+    public void Write_WithPortalFiles_SubFolderFileParentPathPreservesDnnFolder()
+    {
+        // A portal file in the DNN "Images/" folder should land at parentPath="/Images/"
+        // so that the DotCMS folder structure mirrors the original DNN layout.
+        var files = new[]
+        {
+            new DnnPortalFile(
+                "6f574d5f-0880-4d5a-b4a2-74d2e10b5659",
+                "69f363b0-6512-48ad-b187-b6a450ffda7b",
+                "logo.png", "Images/", "image/png",
+                [0x89, 0x50, 0x4E, 0x47]),
+        };
+
+        var (ms, names) = WriteBundleWithFiles(files);
+        string entryName = names.First(n => n.Contains("/1/") && n.EndsWith(".content.xml")
+            && !n.Contains("host.xml"));
+        string xml = ReadTarEntry(ms, entryName)!;
+
+        Assert.Contains("<parentPath>/Images/</parentPath>", xml);
         Assert.DoesNotContain("<parentPath>/</parentPath>", xml);
     }
 
