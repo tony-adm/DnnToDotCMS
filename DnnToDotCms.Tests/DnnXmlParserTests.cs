@@ -572,6 +572,38 @@ public class DnnXmlParserTests
     }
 
     [Fact]
+    public void ExtractHtmlBodyFromDnnXml_ReplacesPortalRootToken()
+    {
+        // {{PortalRoot}} is a DNN runtime token that expands to "/Portals/{id}/" at
+        // run time.  After migration to DotCMS, portal files live at the site root,
+        // so the token must be replaced with "/" to produce a valid relative URL.
+        const string xmlContent = """
+            <htmltext><content><![CDATA[&lt;img src=&quot;{{PortalRoot}}Images/logo.png&quot; /&gt;]]></content></htmltext>
+            """;
+
+        string? result = DnnXmlParser.ExtractHtmlBodyFromDnnXml(xmlContent);
+
+        Assert.NotNull(result);
+        Assert.DoesNotContain("{{PortalRoot}}", result);
+        Assert.Contains("/Images/logo.png", result);
+    }
+
+    [Fact]
+    public void ExtractHtmlBodyFromDnnXml_ReplacesPortalRootToken_CaseInsensitive()
+    {
+        // The token replacement should be case-insensitive.
+        const string xmlContent = """
+            <htmltext><content><![CDATA[&lt;a href=&quot;{{portalroot}}contact.aspx&quot;&gt;Contact&lt;/a&gt;]]></content></htmltext>
+            """;
+
+        string? result = DnnXmlParser.ExtractHtmlBodyFromDnnXml(xmlContent);
+
+        Assert.NotNull(result);
+        Assert.DoesNotContain("{{portalroot}}", result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("/contact.aspx", result);
+    }
+
+    [Fact]
     public void ParseHtmlContents_ReturnsEmptyWhenNoExportDb()
     {
         string tempDir = Path.GetTempFileName();

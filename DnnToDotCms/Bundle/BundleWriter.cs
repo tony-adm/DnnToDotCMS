@@ -391,7 +391,7 @@ public static class BundleWriter
         var bundleContentType = new DotCmsBundleContentType
         {
             Clazz           = ctClazz,
-            Name            = ct.Name,
+            Name            = ct.Name.Trim(),
             Id              = id,
             Description     = string.IsNullOrWhiteSpace(ct.Description)
                                   ? null
@@ -1544,7 +1544,7 @@ public static class BundleWriter
 
             string name = Path.GetFileNameWithoutExtension(entry.Name);
             using var reader = new StreamReader(entry.Open(), Encoding.UTF8);
-            string html = ConvertAscxToTemplateHtml(reader.ReadToEnd(), firstContainerId);
+            string html = ConvertAscxToTemplateHtml(reader.ReadToEnd(), firstContainerId, themeName);
             templateDefs.Add((Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), name, html, themeName));
         }
     }
@@ -1555,10 +1555,10 @@ public static class BundleWriter
 
     // Pre-compiled skin-control replacement pairs: (regex, replacement).
     // Each entry handles one well-known <dnn:TAGNAME .../> control.
+    // Note: <dnn:LOGO> is handled separately in ConvertAscxToTemplateHtml so it can
+    // reference the theme-specific logo path when a theme name is available.
     private static readonly (Regex Rx, string Replacement)[] SkinControlReplacements =
     [
-        (new(@"<dnn:LOGO\s[^>]*/?>",        RegexOptions.IgnoreCase | RegexOptions.Singleline),
-         @"<img src=""/logo.png"" alt=""Logo"" />"),
         (new(@"<dnn:MENU\s[^>]*/?>",        RegexOptions.IgnoreCase | RegexOptions.Singleline),
          "<!-- Navigation -->"),
         (new(@"<dnn:USER\s[^>]*/?>",        RegexOptions.IgnoreCase | RegexOptions.Singleline),
@@ -1652,6 +1652,10 @@ public static class BundleWriter
         return html.Trim();
     }
 
+    // Matches a <dnn:LOGO .../> control (possibly self-closing or with closing tag).
+    private static readonly Regex DnnLogoRegex =
+        new(@"<dnn:LOGO\s[^>]*/?>", RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
     /// <summary>
     /// Converts a DNN skin ASCX file into a DotCMS template body suitable for
     /// the <c>body</c> field of a template bundle entry.
@@ -1664,6 +1668,20 @@ public static class BundleWriter
     /// that DotCMS renders the associated container content on the page.  When
     /// omitted, pane divs are removed.
     /// </param>
+    /// <param name="themeName">
+    /// Optional theme name (e.g. <c>Xcillion</c>).  When provided:
+    /// <list type="bullet">
+    ///   <item>
+    ///     A <c>&lt;link&gt;</c> tag for the theme's <c>skin.css</c> file is
+    ///     prepended to the template body so that DotCMS loads the skin styles.
+    ///   </item>
+    ///   <item>
+    ///     <c>&lt;dnn:LOGO&gt;</c> is replaced with an <c>&lt;img&gt;</c> tag
+    ///     referencing <c>/application/themes/{themeName}/Images/logo.png</c>
+    ///     rather than the generic <c>/logo.png</c> path.
+    ///   </item>
+    /// </list>
+    /// </param>
     /// <remarks>
     /// Transformations applied:
     /// <list type="bullet">
@@ -1671,7 +1689,7 @@ public static class BundleWriter
     ///   <item>Inline code blocks are removed.</item>
     ///   <item>
     ///     Known DNN skin controls are replaced with HTML equivalents:
-    ///     <c>&lt;dnn:LOGO&gt;</c> → <c>&lt;img src="/logo.png" alt="Logo"/&gt;</c>,
+    ///     <c>&lt;dnn:LOGO&gt;</c> → <c>&lt;img src="/application/themes/{themeName}/Images/logo.png" alt="Logo"/&gt;</c>,
     ///     <c>&lt;dnn:MENU&gt;</c> → <c>&lt;!-- Navigation --&gt;</c>, etc.
     ///   </item>
     ///   <item>
@@ -1683,10 +1701,21 @@ public static class BundleWriter
     ///   <item>Any unrecognised <c>&lt;dnn:…&gt;</c> controls are removed.</item>
     /// </list>
     /// </remarks>
-    public static string ConvertAscxToTemplateHtml(string ascx, string defaultContainerId = "")
+    public static string ConvertAscxToTemplateHtml(
+        string ascx,
+        string defaultContainerId = "",
+        string themeName = "")
     {
         string html = DirectiveRegex.Replace(ascx, string.Empty);
         html = CodeBlockRegex.Replace(html, string.Empty);
+
+        // Replace <dnn:LOGO> with a theme-aware img tag.
+        // When a theme name is known, use the theme's Images/logo.png path;
+        // otherwise fall back to the generic /logo.png site-root placeholder.
+        string logoSrc = string.IsNullOrWhiteSpace(themeName)
+            ? "/logo.png"
+            : $"/application/themes/{themeName}/Images/logo.png";
+        html = DnnLogoRegex.Replace(html, $@"<img src=""{logoSrc}"" alt=""Logo"" />");
 
         // Replace well-known DNN skin controls with HTML/comment equivalents.
         foreach (var (rx, replacement) in SkinControlReplacements)
@@ -1710,7 +1739,19 @@ public static class BundleWriter
         html = RunatServerRegex.Replace(html, string.Empty);
         html = DnnSelfClosingTagRegex.Replace(html, string.Empty);
         html = DnnOpenCloseTagRegex.Replace(html, string.Empty);
-        return html.Trim();
+        html = html.Trim();
+
+        // Prepend a <link> tag for the theme's main skin.css so that DotCMS
+        // loads the skin styles when rendering the page.  DNN automatically
+        // included the skin CSS via its own framework; in DotCMS we must add
+        // an explicit stylesheet reference.
+        if (!string.IsNullOrWhiteSpace(themeName))
+        {
+            string cssLink = $@"<link rel=""stylesheet"" href=""/application/themes/{themeName}/skin.css"" />";
+            html = cssLink + "\n" + html;
+        }
+
+        return html;
     }
 
     // ------------------------------------------------------------------
