@@ -1600,8 +1600,12 @@ public static class BundleWriter
 
             // Resolve <!--#include file="..."--> SSI directives by inlining
             // the referenced file content from the same zip archive.
-            string skinDir = entryPath[..entryPath.LastIndexOf('/')];
-            ascx = ResolveSsiIncludes(ascx, skinDir, zip);
+            int lastSlashIdx = entryPath.LastIndexOf('/');
+            if (lastSlashIdx > 0)
+            {
+                string skinDir = entryPath[..lastSlashIdx];
+                ascx = ResolveSsiIncludes(ascx, skinDir, zip);
+            }
 
             string html = ConvertAscxToTemplateHtml(ascx, firstContainerId, themeName);
             templateDefs.Add((Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), name, html, themeName));
@@ -1636,7 +1640,11 @@ public static class BundleWriter
                     StringComparison.OrdinalIgnoreCase));
 
             if (included is null)
-                return string.Empty; // include target not found — remove directive
+            {
+                Console.Error.WriteLine(
+                    $"Warning: SSI include target not found in themes zip: '{fullPath}'");
+                return string.Empty;
+            }
 
             using var reader = new StreamReader(included.Open(), Encoding.UTF8);
             return reader.ReadToEnd();
