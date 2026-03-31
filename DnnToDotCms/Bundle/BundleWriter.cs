@@ -330,7 +330,14 @@ public static class BundleWriter
                     string folderXml    = BuildFolderXml(
                         folderInode, folderName, dotcmsPath, parentPath,
                         siteId, siteInode);
-                    WriteTextEntry(tar, $"ROOT/{folderInode}.folder.xml", folderXml);
+                    // Place the .folder.xml entry in a nested directory
+                    // that mirrors the folder hierarchy so DotCMS's
+                    // FolderHandler (which sorts by file-path length)
+                    // processes parent folders before their children.
+                    string entryDir = parentPath == "/"
+                        ? "ROOT"
+                        : "ROOT/" + parentPath.Trim('/');
+                    WriteTextEntry(tar, $"{entryDir}/{folderInode}.folder.xml", folderXml);
                     manifestEntries.Add(("folder", folderInode, folderInode, dotcmsPath, contentWorkDir, "/"));
                 }
             }
@@ -1880,7 +1887,14 @@ public static class BundleWriter
 
                 string folderXml = BuildFolderXml(
                     folderInode, folderName, dotcmsPath, parentPath, siteId, siteInode);
-                WriteTextEntry(tar, $"ROOT/{folderInode}.folder.xml", folderXml);
+                // Place the .folder.xml entry in a nested directory
+                // that mirrors the folder hierarchy so DotCMS's
+                // FolderHandler (which sorts by file-path length)
+                // processes parent folders before their children.
+                string entryDir = parentPath == "/"
+                    ? "ROOT"
+                    : "ROOT/" + parentPath.Trim('/');
+                WriteTextEntry(tar, $"{entryDir}/{folderInode}.folder.xml", folderXml);
                 manifestEntries.Add(("folder", folderInode, folderInode, dotcmsPath, contentWorkDir, "/"));
             }
         }
