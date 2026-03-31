@@ -1078,6 +1078,8 @@ public static class BundleWriter
                       <segmentShift>28</segmentShift>
                       <segmentMask>15</segmentMask>
                     </default>
+                    <string>modDate</string>
+                    <sql-timestamp>{now}</sql-timestamp>
                     <string>cachettl</string>
                     <string>0</string>
                     <string>inode</string>
@@ -1405,7 +1407,7 @@ public static class BundleWriter
                 <showOnMenu>false</showOnMenu>
                 <sortOrder>0</sortOrder>
                 <filesMasks></filesMasks>
-                <defaultFileType></defaultFileType>
+                <defaultFileType>{FileAssetContentTypeId}</defaultFileType>
                 <modDate class="sql-timestamp">{now}</modDate>
                 <modUser>dotcms.org.1</modUser>
               </folder>
