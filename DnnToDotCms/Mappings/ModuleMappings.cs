@@ -35,8 +35,13 @@ public static class ModuleMappings
                 return factory();
         }
 
-        // Generic fallback: create a simple HTML content type named after the module
-        string safe = string.IsNullOrWhiteSpace(moduleName) ? "GenericModule" : moduleName.Trim();
+        // Generic fallback: create a simple HTML content type named after the module.
+        // Strip leading/trailing dashes that some DNN module names begin or end with.
+        string safe = string.IsNullOrWhiteSpace(moduleName) ? "GenericModule" : moduleName.Trim('-').Trim();
+        if (string.IsNullOrWhiteSpace(safe))
+            safe = string.IsNullOrWhiteSpace(friendlyName) ? "GenericModule" : friendlyName.Trim('-').Trim();
+        if (string.IsNullOrWhiteSpace(safe))
+            safe = "GenericModule";
         string variable = ToCamelCase(safe);
         string name     = ToPascalCase(safe);
         return new DotCmsContentType
