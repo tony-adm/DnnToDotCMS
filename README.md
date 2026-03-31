@@ -29,7 +29,7 @@ DNN organises content in *modules* placed on pages. DotCMS organises content in 
   - `live/{site}/1/{uuid}.content.xml` — one file per HTML module content item
   - `live/{site}/1/{uuid}.contentworkflow.xml` — workflow state for each content item
   - `manifest.csv` — bundle manifest listing all items
-  - `themes/{ThemeName}/…` — static theme assets (CSS, JS, images, fonts) from `export_themes.zip`
+  - `ROOT/application/themes/{ThemeName}/…` — static theme assets (CSS, JS, images, fonts) placed in DotCMS's `/application/themes/` directory on import
 
 ## Supported Module Mappings
 
@@ -114,10 +114,10 @@ dotnet publish DnnToDotCms -c Release -o ./publish
 2. In DotCMS, go to **Dev Tools → Push & Publish → Bundle Import** (or use the Push Publish REST endpoint).
 3. Upload `site.tar.gz`. DotCMS will import all content types, containers, and templates listed in the bundle.
 
-> **Theme assets note:** The static files under `themes/` inside the bundle
-> (CSS, JS, images, fonts) are included for reference and are not automatically
-> imported by DotCMS's push-publish mechanism. After the bundle import, upload
-> them manually through **Site Browser** in DotCMS or via the Files API.
+> **Theme assets note:** Static skin files (CSS, JS, images, fonts) are bundled
+> under `ROOT/application/themes/{ThemeName}/` so that DotCMS automatically
+> places them in the `/application/themes/` directory on the server when the
+> bundle is imported.
 
 ## Input Formats
 
@@ -187,11 +187,13 @@ site.tar.gz
 ├── working/
 │   └── {site}/
 │       └── {uuid}.contentType.json                           ← one file per content type
-└── themes/
-    └── {ThemeName}/                                          ← static skin assets (CSS/JS/images)
-        ├── skin.css
-        ├── Bootstrap/css/bootstrap.min.css
-        └── …
+└── ROOT/
+    └── application/
+        └── themes/
+            └── {ThemeName}/                                      ← static skin assets (CSS/JS/images)
+                ├── skin.css
+                ├── Bootstrap/css/bootstrap.min.css
+                └── …
 ```
 
 ### Container XML format

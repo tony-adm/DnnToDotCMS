@@ -774,6 +774,78 @@ public class BundleWriterTests
     }
 
     // ------------------------------------------------------------------
+    // Static theme asset path tests
+    // ------------------------------------------------------------------
+
+    /// <summary>Creates a themes ZIP that contains one static CSS file under each prefix.</summary>
+    private static string BuildThemesZipWithStaticAssets()
+    {
+        string path = Path.GetTempFileName() + ".zip";
+        using var zip = ZipFile.Open(path, ZipArchiveMode.Create);
+
+        // CSS under a skin
+        ZipArchiveEntry skinCss = zip.CreateEntry("_default/Skins/MyTheme/skin.css");
+        using (var w = new StreamWriter(skinCss.Open()))
+            w.Write("body{}");
+
+        // Image under a container
+        ZipArchiveEntry containerImg = zip.CreateEntry("_default/Containers/MyTheme/title.png");
+        using (var w2 = new BinaryWriter(containerImg.Open()))
+            w2.Write(new byte[] { 0x89, 0x50, 0x4E, 0x47 });
+
+        return path;
+    }
+
+    [Fact]
+    public void Write_WithThemesZip_StaticSkinAssetsGoToApplicationThemesFolder()
+    {
+        // Static files from "_default/Skins/{ThemeName}/…" must land under
+        // "ROOT/application/themes/{ThemeName}/…", not at the archive root.
+        string path = BuildThemesZipWithStaticAssets();
+        try
+        {
+            var (_, names) = WriteBundleToMemory([MakeHtmlContentType()], path);
+
+            Assert.Contains(names, n => n.StartsWith("ROOT/application/themes/") && n.EndsWith(".css"));
+            Assert.DoesNotContain(names, n => n.StartsWith("ROOT/") && !n.StartsWith("ROOT/application/") && n.EndsWith(".css"));
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void Write_WithThemesZip_StaticContainerAssetsGoToApplicationThemesFolder()
+    {
+        // Static files from "_default/Containers/{ThemeName}/…" must also land
+        // under "ROOT/application/themes/{ThemeName}/Containers/…".
+        string path = BuildThemesZipWithStaticAssets();
+        try
+        {
+            var (_, names) = WriteBundleToMemory([MakeHtmlContentType()], path);
+
+            Assert.Contains(names, n => n.StartsWith("ROOT/application/themes/") && n.EndsWith(".png"));
+            Assert.DoesNotContain(names, n => n.StartsWith("ROOT/") && !n.StartsWith("ROOT/application/") && n.EndsWith(".png"));
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void Write_WithThemesZip_NoStaticFilesPlacedAtBundleRoot()
+    {
+        // No static asset file should be at the tar root level (no directory prefix).
+        // (manifest.csv is intentionally at the root — that is expected bundle behaviour.)
+        string path = BuildThemesZipWithStaticAssets();
+        try
+        {
+            var (_, names) = WriteBundleToMemory([MakeHtmlContentType()], path);
+
+            // All entries except "manifest.csv" must have at least one "/" in their path.
+            Assert.All(names.Where(n => n != "manifest.csv"),
+                n => Assert.Contains("/", n));
+        }
+        finally { File.Delete(path); }
+    }
+
+    // ------------------------------------------------------------------
     // Manifest format — inode column for containers and templates
     // ------------------------------------------------------------------
 
