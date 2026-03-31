@@ -373,23 +373,31 @@ public static class BundleWriter
             }
         }
 
-        // --- manifest.csv ----------------------------------------------------
-        WriteTextEntry(tar, "manifest.csv", BuildManifest(bundleId, manifestEntries));
-
-        // --- theme static assets (optional) ----------------------------------
+        // --- theme static files as FileAsset contentlets (optional) ----------
+        // Theme static files (CSS, JS, images, fonts) from export_themes.zip
+        // must be written as proper DotCMS FileAsset contentlets with folder
+        // hierarchy XML so that DotCMS's push-publish importer creates the
+        // /application/themes/ directory structure on the target server.
+        // Raw files under ROOT/ are NOT automatically imported; they require
+        // full contentlet metadata (content XML + workflow XML + binary asset)
+        // plus FolderWrapper XML entries for each directory level.
         if (themesZipPath is not null && File.Exists(themesZipPath))
         {
             try
             {
-                WriteThemeAssets(tar, themesZipPath);
+                WriteThemeFileAssets(
+                    tar, themesZipPath, contentHostId,
+                    siteId, siteInode, contentWorkDir, manifestEntries);
             }
             catch (Exception ex) when (ex is InvalidDataException or IOException)
             {
-                // A corrupt or invalid themes zip is non-fatal: warn and continue.
                 Console.Error.WriteLine(
                     $"Warning: Could not read theme assets from '{themesZipPath}': {ex.Message}");
             }
         }
+
+        // --- manifest.csv ----------------------------------------------------
+        WriteTextEntry(tar, "manifest.csv", BuildManifest(bundleId, manifestEntries));
     }
 
     // ------------------------------------------------------------------
@@ -1775,40 +1783,126 @@ public static class BundleWriter
     // Theme static-asset helper
     // ------------------------------------------------------------------
 
-    private static void WriteThemeAssets(TarWriter tar, string themesZipPath)
+    /// <summary>
+    /// Reads non-ASCX static files from <paramref name="themesZipPath"/>,
+    /// builds the DotCMS folder hierarchy, and writes each file as a proper
+    /// <c>FileAsset</c> contentlet so that DotCMS's push-publish importer
+    /// creates the <c>/application/themes/</c> directory tree and places the
+    /// files correctly.
+    /// </summary>
+    private static void WriteThemeFileAssets(
+        TarWriter tar,
+        string themesZipPath,
+        string hostId,
+        string? siteId,
+        string? siteInode,
+        string contentWorkDir,
+        List<(string type, string id, string inode, string name, string site, string folder)> manifestEntries)
     {
         using var zip = System.IO.Compression.ZipFile.OpenRead(themesZipPath);
 
+        // Collect all non-ASCX files with their mapped DotCMS relative paths.
+        // relPath is like "application/themes/Xcillion/Css/skin.css".
+        var themeFiles = new List<(string relPath, string fileName, byte[] content)>();
+
         foreach (var entry in zip.Entries)
         {
-            // Skip directory entries (name is empty or FullName ends with '/').
             if (string.IsNullOrEmpty(entry.Name) || entry.FullName.EndsWith('/'))
                 continue;
-
-            // Skip ASCX files – they are processed separately by CollectThemeDefinitions
-            // and converted to DotCMS container / template XML entries.
-            string ext = Path.GetExtension(entry.Name);
-            if (ext.Equals(".ascx", StringComparison.OrdinalIgnoreCase))
+            if (entry.Name.EndsWith(".ascx", StringComparison.OrdinalIgnoreCase))
                 continue;
 
-            // Include all other files (CSS, JS, images, fonts, HTML, XML, JSON, …)
-            // so that every essential theme file lands in the bundle.
-            // Build a clean relative path inside the bundle.
-            // DNN stores skins under "_default/Skins/{ThemeName}/…"
-            // → map to "ROOT/application/themes/{ThemeName}/…" in the bundle.
             string entryPath = entry.FullName.Replace('\\', '/');
             string bundlePath = MapThemePath(entryPath);
+
+            // Strip the "ROOT/" prefix to get the relative path.
+            const string rootPrefix = "ROOT/";
+            string relPath = bundlePath.StartsWith(rootPrefix, StringComparison.Ordinal)
+                ? bundlePath[rootPrefix.Length..]
+                : bundlePath;
 
             using var entryStream = entry.Open();
             using var ms = new MemoryStream();
             entryStream.CopyTo(ms);
-            ms.Position = 0;
 
-            var tarEntry = new UstarTarEntry(TarEntryType.RegularFile, bundlePath)
+            themeFiles.Add((relPath, entry.Name, ms.ToArray()));
+        }
+
+        if (themeFiles.Count == 0)
+            return;
+
+        // Build the folder hierarchy.  Collect every unique directory path
+        // (e.g. "application", "application/themes", "application/themes/Xcillion",
+        //  "application/themes/Xcillion/Css") and assign each a stable UUID.
+        var folderInodes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (relPath, _, _) in themeFiles)
+        {
+            string? dir = Path.GetDirectoryName(relPath)?.Replace('\\', '/');
+            if (string.IsNullOrEmpty(dir)) continue;
+
+            string[] parts = dir.Split('/');
+            for (int i = 1; i <= parts.Length; i++)
             {
-                DataStream = ms,
-            };
-            tar.WriteEntry(tarEntry);
+                string partialPath = string.Join("/", parts[..i]);
+                folderInodes.TryAdd(partialPath, Guid.NewGuid().ToString());
+            }
+        }
+
+        // Write FolderWrapper XML for each directory level when a site is available.
+        if (siteId is not null && siteInode is not null)
+        {
+            foreach (var (dirPath, folderInode) in folderInodes)
+            {
+                string folderName = dirPath.Split('/')[^1];
+                string dotcmsPath = "/" + dirPath + "/";
+                int lastSlash     = dirPath.LastIndexOf('/');
+                string parentPath = lastSlash >= 0
+                    ? "/" + dirPath[..lastSlash] + "/"
+                    : "/";
+
+                string folderXml = BuildFolderXml(
+                    folderInode, folderName, dotcmsPath, parentPath, siteId, siteInode);
+                WriteTextEntry(tar, $"ROOT/{folderInode}.folder.xml", folderXml);
+                manifestEntries.Add(("folder", folderInode, folderInode, dotcmsPath, contentWorkDir, "/"));
+            }
+        }
+
+        // Write each static file as a FileAsset contentlet.
+        foreach (var (relPath, fileName, content) in themeFiles)
+        {
+            string identifier = Guid.NewGuid().ToString();
+            string inode      = Guid.NewGuid().ToString();
+
+            // Determine the containing folder.
+            string? dir        = Path.GetDirectoryName(relPath)?.Replace('\\', '/');
+            string  folderPath = string.IsNullOrEmpty(dir) ? "" : dir + "/";
+            string  folderInode = !string.IsNullOrEmpty(dir) &&
+                                  folderInodes.TryGetValue(dir, out string? fi)
+                ? fi
+                : "SYSTEM_FOLDER";
+
+            // Write binary content.
+            string assetPath = BuildAssetPath(inode, fileName);
+            WriteBinaryEntry(tar, assetPath, content);
+
+            // Write contentlet XML.
+            string fileContentXml = BuildFileAssetXml(
+                identifier, inode, fileName, assetPath,
+                hostId, folderPath, folderInode);
+            WriteTextEntry(
+                tar,
+                $"live/{contentWorkDir}/1/{identifier}.content.xml",
+                fileContentXml);
+
+            // Write workflow XML.
+            string workflowXml = BuildContentWorkflowXml(identifier, fileName);
+            WriteTextEntry(
+                tar,
+                $"live/{contentWorkDir}/1/{identifier}.contentworkflow.xml",
+                workflowXml);
+
+            manifestEntries.Add(("contentlet", identifier, inode,
+                Truncate(fileName, MaxVarcharLength), contentWorkDir, "/"));
         }
     }
 

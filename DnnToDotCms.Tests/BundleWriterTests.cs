@@ -869,15 +869,19 @@ public class BundleWriterTests
     [Fact]
     public void Write_WithThemesZip_StaticSkinAssetsGoToApplicationThemesFolder()
     {
-        // Static files from "_default/Skins/{ThemeName}/…" must land under
-        // "ROOT/application/themes/{ThemeName}/…", not at the archive root.
+        // Static files from "_default/Skins/{ThemeName}/…" must be stored as
+        // proper FileAsset contentlets: binary under assets/ and content XML
+        // referencing the /application/themes/ folder path.
         string path = BuildThemesZipWithStaticAssets();
         try
         {
-            var (_, names) = WriteBundleToMemory([MakeHtmlContentType()], path);
+            var (ms, names) = WriteBundleToMemory([MakeHtmlContentType()], path);
 
-            Assert.Contains(names, n => n.StartsWith("ROOT/application/themes/") && n.EndsWith(".css"));
-            Assert.DoesNotContain(names, n => n.StartsWith("ROOT/") && !n.StartsWith("ROOT/application/") && n.EndsWith(".css"));
+            // CSS file bytes should be stored under assets/{x}/{y}/{inode}/fileAsset/skin.css
+            Assert.Contains(names, n => n.StartsWith("assets/") && n.EndsWith("/skin.css"));
+            // A content XML entry should exist with /application/themes/ in its parentPath.
+            Assert.Contains(names, n => n.StartsWith("live/") && n.EndsWith(".content.xml"));
+            Assert.DoesNotContain(names, n => n.StartsWith("ROOT/") && n.EndsWith(".css"));
         }
         finally { File.Delete(path); }
     }
@@ -885,15 +889,16 @@ public class BundleWriterTests
     [Fact]
     public void Write_WithThemesZip_StaticContainerAssetsGoToApplicationThemesFolder()
     {
-        // Static files from "_default/Containers/{ThemeName}/…" must also land
-        // under "ROOT/application/themes/{ThemeName}/Containers/…".
+        // Static files from "_default/Containers/{ThemeName}/…" must also be
+        // stored as FileAsset contentlets, not raw files under ROOT/.
         string path = BuildThemesZipWithStaticAssets();
         try
         {
-            var (_, names) = WriteBundleToMemory([MakeHtmlContentType()], path);
+            var (ms, names) = WriteBundleToMemory([MakeHtmlContentType()], path);
 
-            Assert.Contains(names, n => n.StartsWith("ROOT/application/themes/") && n.EndsWith(".png"));
-            Assert.DoesNotContain(names, n => n.StartsWith("ROOT/") && !n.StartsWith("ROOT/application/") && n.EndsWith(".png"));
+            // PNG file bytes should be stored under assets/{x}/{y}/{inode}/fileAsset/title.png
+            Assert.Contains(names, n => n.StartsWith("assets/") && n.EndsWith("/title.png"));
+            Assert.DoesNotContain(names, n => n.StartsWith("ROOT/") && n.EndsWith(".png"));
         }
         finally { File.Delete(path); }
     }
