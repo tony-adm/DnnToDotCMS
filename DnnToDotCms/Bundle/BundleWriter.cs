@@ -358,13 +358,16 @@ public static class BundleWriter
                 // resources to ROOT/application/images/ so that DotCMS serves them
                 // directly from /application/images/.  HTML content references the
                 // same path after the {{PortalRoot}}Images/ token replacement.
-                // The prefix is matched case-insensitively; its length is constant
-                // (7 chars) regardless of casing, so slicing at that offset is safe.
+                // Normalise the folder path to ensure a trailing slash so that the
+                // prefix check works whether DNN stored "Images" or "Images/".
                 const string imagesFolderPrefix = "Images/";
-                if (pf.FolderPath.StartsWith(imagesFolderPrefix, StringComparison.OrdinalIgnoreCase))
+                string normalizedFolderPath = pf.FolderPath;
+                if (normalizedFolderPath.Length > 0 && !normalizedFolderPath.EndsWith('/'))
+                    normalizedFolderPath += '/';
+                if (normalizedFolderPath.StartsWith(imagesFolderPrefix, StringComparison.OrdinalIgnoreCase))
                 {
                     // Preserve any sub-folder depth (e.g. "Images/Banners/" → "Banners/").
-                    string relativePath = pf.FolderPath[imagesFolderPrefix.Length..] + pf.FileName;
+                    string relativePath = normalizedFolderPath[imagesFolderPrefix.Length..] + pf.FileName;
                     WriteBinaryEntry(tar, "ROOT/application/images/" + relativePath, pf.Content);
                 }
             }
@@ -1778,14 +1781,21 @@ public static class BundleWriter
 
         foreach (var entry in zip.Entries)
         {
-            // Only carry over recognised static file types.
-            string ext = Path.GetExtension(entry.Name);
-            if (string.IsNullOrEmpty(ext) || !StaticExtensions.Contains(ext))
+            // Skip directory entries (name is empty or FullName ends with '/').
+            if (string.IsNullOrEmpty(entry.Name) || entry.FullName.EndsWith('/'))
                 continue;
 
+            // Skip ASCX files – they are processed separately by CollectThemeDefinitions
+            // and converted to DotCMS container / template XML entries.
+            string ext = Path.GetExtension(entry.Name);
+            if (ext.Equals(".ascx", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            // Include all other files (CSS, JS, images, fonts, HTML, XML, JSON, …)
+            // so that every essential theme file lands in the bundle.
             // Build a clean relative path inside the bundle.
             // DNN stores skins under "_default/Skins/{ThemeName}/…"
-            // → map to "themes/{ThemeName}/…" in the bundle.
+            // → map to "ROOT/application/themes/{ThemeName}/…" in the bundle.
             string entryPath = entry.FullName.Replace('\\', '/');
             string bundlePath = MapThemePath(entryPath);
 

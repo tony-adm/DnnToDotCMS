@@ -2553,4 +2553,109 @@ public class BundleWriterTests
         finally { File.Delete(zipPath); }
     }
 
+    // ------------------------------------------------------------------
+    // Theme zip – all non-ASCX file types included
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Write_WithThemesZip_NonStaticExtensionFilesAreIncluded()
+    {
+        // Essential theme files such as .html, .xml, and .json must be
+        // included in the bundle — not silently dropped because they are not
+        // in the StaticExtensions list.
+        string zipPath = Path.GetTempFileName() + ".zip";
+        try
+        {
+            using (var zip = ZipFile.Open(zipPath, ZipArchiveMode.Create))
+            {
+                // HTML layout file
+                ZipArchiveEntry html = zip.CreateEntry("_default/Skins/MyTheme/layout.html");
+                using (var w = new StreamWriter(html.Open()))
+                    w.Write("<html><body></body></html>");
+
+                // XML config file
+                ZipArchiveEntry xml = zip.CreateEntry("_default/Skins/MyTheme/theme.xml");
+                using (var w = new StreamWriter(xml.Open()))
+                    w.Write("<theme><name>MyTheme</name></theme>");
+
+                // JSON config file
+                ZipArchiveEntry json = zip.CreateEntry("_default/Skins/MyTheme/theme.json");
+                using (var w = new StreamWriter(json.Open()))
+                    w.Write("{}");
+
+                // Minimal ASCX stub (should be skipped – handled by CollectThemeDefinitions)
+                ZipArchiveEntry ascx = zip.CreateEntry("_default/Skins/MyTheme/Home.ascx");
+                using (var w = new StreamWriter(ascx.Open()))
+                    w.Write("""<div id="ContentPane" runat="server"></div>""");
+            }
+
+            var (_, names) = WriteBundleToMemory([MakeHtmlContentType()], zipPath);
+
+            Assert.Contains(names, n => n.EndsWith("layout.html"));
+            Assert.Contains(names, n => n.EndsWith("theme.xml"));
+            Assert.Contains(names, n => n.EndsWith("theme.json"));
+        }
+        finally { File.Delete(zipPath); }
+    }
+
+    [Fact]
+    public void Write_WithThemesZip_AscxFilesNotWrittenAsRawFiles()
+    {
+        // ASCX files are processed by CollectThemeDefinitions and converted to
+        // container/template XML.  They must NOT also appear as raw .ascx entries.
+        string zipPath = BuildThemesZip();
+        try
+        {
+            var (_, names) = WriteBundleToMemory([MakeHtmlContentType()], zipPath);
+
+            Assert.DoesNotContain(names, n => n.EndsWith(".ascx"));
+        }
+        finally { File.Delete(zipPath); }
+    }
+
+    // ------------------------------------------------------------------
+    // Images/ folder – FolderPath without trailing slash
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Write_WithPortalFiles_ImagesFolderPathWithoutSlashAlsoWrittenToApplicationImages()
+    {
+        // DNN may store the folder path as "Images" (no trailing slash) in some
+        // export versions.  The bundle writer must still place such files under
+        // ROOT/application/images/ so that converted HTML references resolve.
+        var files = new[]
+        {
+            new DnnPortalFile(
+                "6f574d5f-0880-4d5a-b4a2-74d2e10b5659",
+                "69f363b0-6512-48ad-b187-b6a450ffda7b",
+                "logo.png", "Images",   // ← no trailing slash
+                "image/png",
+                [0x89, 0x50, 0x4E, 0x47]),
+        };
+
+        var (_, names) = WriteBundleWithFiles(files);
+
+        Assert.Contains("ROOT/application/images/logo.png", names);
+    }
+
+    [Fact]
+    public void Write_WithPortalFiles_ImagesFolderSubdirPathWithoutSlashPreservesSubdir()
+    {
+        // Same normalisation for nested paths: "Images/Banners" (no trailing slash)
+        // must still produce ROOT/application/images/Banners/{filename}.
+        var files = new[]
+        {
+            new DnnPortalFile(
+                "aaaaaaaa-0000-0000-0000-000000000002",
+                "bbbbbbbb-0000-0000-0000-000000000002",
+                "hero.jpg", "Images/Banners",   // ← no trailing slash
+                "image/jpeg",
+                [0xFF, 0xD8, 0xFF]),
+        };
+
+        var (_, names) = WriteBundleWithFiles(files);
+
+        Assert.Contains("ROOT/application/images/Banners/hero.jpg", names);
+    }
+
 }
