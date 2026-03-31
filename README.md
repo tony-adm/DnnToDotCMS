@@ -172,7 +172,21 @@ dotnet run --project DnnToDotCms -- samples/sample-html-module.xml
 
 ## Output Format
 
-The tool produces a **DotCMS push-publish bundle** (`.tar.gz`). The bundle contains:
+The tool produces a **DotCMS push-publish bundle** (`.tar.gz`).
+
+`site.tar.gz` is the native file format that DotCMS uses for its **Push & Publish** feature — the mechanism DotCMS provides for transferring site content between environments (e.g. from staging to production, or from an external source into a fresh DotCMS instance). Generating this file is the goal of the entire conversion: it packages everything DotCMS needs to reconstruct the migrated site in a single, self-contained archive.
+
+When DotCMS imports the bundle it performs the following steps automatically:
+
+1. **Reads `manifest.csv`** — the index that tells DotCMS which objects are in the bundle and in what order to process them.
+2. **Creates content types** (from the `.contentType.json` files) — the structural schemas that describe how content is stored and displayed.
+3. **Creates containers and templates** (from the `.container.xml` and `.template.xml` files) — the layout building blocks that render pages.
+4. **Publishes content items** (from the `.content.xml` files) — the actual page content converted from DNN HTML modules.
+5. **Writes static application files** (from entries under `ROOT/`) — CSS, JS, images, and fonts are extracted directly onto the server's file system so they are immediately served as static assets.
+
+The result is that a single upload to **Dev Tools → Push & Publish → Bundle Import** migrates the full DNN site into DotCMS without any manual steps.
+
+The bundle contains:
 
 ```
 site.tar.gz
