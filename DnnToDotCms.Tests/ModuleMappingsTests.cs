@@ -60,6 +60,9 @@ public class ModuleMappingsTests
     [InlineData("DotNetNuke.Modules.MemberDirectory",        "DotNetNukeModulesMemberDirectory")]
     [InlineData("DotNetNuke.Modules.CoreMessaging",          "DotNetNukeModulesCoreMessaging")]
     [InlineData("Resource Manager",                          "ResourceManager")]
+    [InlineData("- LeadingDash",                             "LeadingDash")]
+    [InlineData("-  - Multiple Dashes",                      "MultipleDashes")]
+    [InlineData("  -  SpacesAndDash  ",                      "SpacesAndDash")]
     public void GetContentType_FallbackName_HasNoSpacesOrHyphens(
         string moduleName, string expectedName)
     {
@@ -69,6 +72,17 @@ public class ModuleMappingsTests
         Assert.DoesNotContain(" ",  ct.Name);
         Assert.DoesNotContain("-",  ct.Name);
         Assert.DoesNotContain(".",  ct.Name);
+    }
+
+    [Theory]
+    [InlineData("---")]
+    [InlineData("   ")]
+    [InlineData("-")]
+    public void GetContentType_ModuleNameOnlySpecialChars_ReturnsFallback(string moduleName)
+    {
+        DotCmsContentType ct = ModuleMappings.GetContentType(moduleName);
+
+        Assert.Equal("GenericModule", ct.Name);
     }
 
     [Fact]

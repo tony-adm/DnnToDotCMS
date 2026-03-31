@@ -116,9 +116,9 @@ public static class BundleWriter
 
         // Pre-collect container and template definitions from the themes zip so
         // that their IDs are known before the manifest.csv is written.
-        // Tuple: (identifier, inode, name, html)
+        // Tuple: (identifier, inode, name, html, themeName)
         var containerDefs = new List<(string id, string inode, string name, string html)>();
-        var templateDefs  = new List<(string id, string inode, string name, string html)>();
+        var templateDefs  = new List<(string id, string inode, string name, string html, string themeName)>();
 
         if (themesZipPath is not null && File.Exists(themesZipPath))
         {
@@ -189,9 +189,9 @@ public static class BundleWriter
 
         // --- templates (from DNN skins) --------------------------------------
         // Written to live/ so they are imported as published (not draft) assets.
-        foreach (var (id, inode, name, html) in templateDefs)
+        foreach (var (id, inode, name, html, themeName) in templateDefs)
         {
-            string xml = BuildTemplateXml(id, inode, name, html, contentHostId);
+            string xml = BuildTemplateXml(id, inode, name, html, contentHostId, themeName);
             WriteTextEntry(tar, $"live/{contentWorkDir}/{id}.template.template.xml", xml);
             manifestEntries.Add(("template", id, inode, name, "", ""));
         }
@@ -289,10 +289,48 @@ public static class BundleWriter
         // --- portal static files (from DNN export_files.zip) -----------------
         if (portalFiles is not null && portalFiles.Count > 0)
         {
+            // Build a lookup from DNN folder path to DotCMS folder inode/identifier.
+            // Sub-folders (non-empty FolderPath) need explicit FolderWrapper XML
+            // entries so DotCMS creates them on import.  Root-level files use
+            // SYSTEM_FOLDER (the site root).
+            var folderInodes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (DnnPortalFile pf in portalFiles)
+            {
+                if (!string.IsNullOrEmpty(pf.FolderPath) &&
+                    !folderInodes.ContainsKey(pf.FolderPath))
+                {
+                    folderInodes[pf.FolderPath] = Guid.NewGuid().ToString();
+                }
+            }
+
+            // Write folder XML entries for each unique sub-folder so DotCMS
+            // creates the folder structure before placing file assets inside.
+            if (siteId is not null && siteInode is not null)
+            {
+                foreach (var (dnnFolderPath, folderInode) in folderInodes)
+                {
+                    string folderName   = dnnFolderPath.TrimEnd('/').Split('/').Last();
+                    string dotcmsPath   = "/" + dnnFolderPath.TrimStart('/');
+                    if (!dotcmsPath.EndsWith('/')) dotcmsPath += '/';
+                    string parentPath   = "/";
+                    string folderXml    = BuildFolderXml(
+                        folderInode, folderName, dotcmsPath, parentPath,
+                        siteId, siteInode);
+                    WriteTextEntry(tar, $"ROOT/{folderInode}.folder.xml", folderXml);
+                    manifestEntries.Add(("folder", folderInode, folderInode, dotcmsPath, contentWorkDir, "/"));
+                }
+            }
+
             foreach (DnnPortalFile pf in portalFiles)
             {
                 string identifier = pf.UniqueId;
                 string inode      = pf.VersionGuid;
+
+                // Resolve the folder inode: root files use SYSTEM_FOLDER; sub-folder
+                // files use the pre-generated inode for that folder.
+                string folderInode = string.IsNullOrEmpty(pf.FolderPath)
+                    ? "SYSTEM_FOLDER"
+                    : (folderInodes.TryGetValue(pf.FolderPath, out string? fi) ? fi : "SYSTEM_FOLDER");
 
                 // Write the actual file bytes under assets/{x}/{y}/{inode}/fileAsset/{filename}
                 string assetPath = BuildAssetPath(inode, pf.FileName);
@@ -301,7 +339,7 @@ public static class BundleWriter
                 // Write the contentlet XML.
                 string fileContentXml = BuildFileAssetXml(
                     identifier, inode, pf.FileName, assetPath,
-                    contentHostId, pf.FolderPath);
+                    contentHostId, pf.FolderPath, folderInode);
                 WriteTextEntry(
                     tar,
                     $"live/{contentWorkDir}/1/{identifier}.content.xml",
@@ -543,11 +581,18 @@ public static class BundleWriter
     // ------------------------------------------------------------------
 
     private static string BuildTemplateXml(
-        string id, string inode, string title, string body, string hostId = "SYSTEM_HOST")
+        string id, string inode, string title, string body, string hostId = "SYSTEM_HOST",
+        string themeName = "")
     {
         string now      = DateTime.UtcNow.ToString(XmlTimestampFormat);
         string xmlBody  = System.Security.SecurityElement.Escape(body) ?? string.Empty;
         string xmlTitle = System.Security.SecurityElement.Escape(Truncate(title, MaxVarcharLength)) ?? string.Empty;
+        // Resolve the DotCMS application theme path.  Static assets from the DNN
+        // skin are written to ROOT/application/themes/{themeName}/ so the template
+        // must reference that same path for DotCMS to include the theme's CSS/JS.
+        string themeValue = string.IsNullOrWhiteSpace(themeName)
+            ? string.Empty
+            : $"/application/themes/{themeName}";
 
         return $"""
             <com.dotcms.publisher.pusher.wrapper.TemplateWrapper>
@@ -579,7 +624,7 @@ public static class BundleWriter
                 <drawedBody>null</drawedBody>
                 <countAddContainer>0</countAddContainer>
                 <countContainers>0</countContainers>
-                <theme></theme>
+                <theme>{themeValue}</theme>
                 <header>null</header>
                 <footer>null</footer>
               </template>
@@ -1089,7 +1134,11 @@ public static class BundleWriter
         var sb = new StringBuilder();
         for (int i = 0; i < contentletIds.Count; i++)
         {
-            string relationType = Guid.NewGuid().ToString();
+            // The relation_type must match the second argument of the corresponding
+            // #parseContainer directive in the template body, which uses sequential
+            // integers starting at 1.  Using a random GUID would leave the container
+            // slots empty when DotCMS renders the page.
+            string relationType = (i + 1).ToString();
             sb.Append($"""
 
                   <map>
@@ -1141,7 +1190,8 @@ public static class BundleWriter
         string fileName,
         string assetPath,
         string hostId,
-        string folderPath = "")
+        string folderPath = "",
+        string folderInode = "SYSTEM_FOLDER")
     {
         string now          = DateTime.UtcNow.ToString(XmlTimestampFormat);
         string xmlFileName  = System.Security.SecurityElement.Escape(fileName)  ?? string.Empty;
@@ -1205,13 +1255,13 @@ public static class BundleWriter
                     <java.util.concurrent.ConcurrentHashMap_-KeySetView>
                       <map/>
                       <value class="boolean">true</value>
-                    </java.util.concurrent.ConcurrentHashMap_-KeySetView>
+                     </java.util.concurrent.ConcurrentHashMap_-KeySetView>
                     <string>languageId</string>
                     <long>1</long>
                     <string>fileAsset</string>
                     <file>{storagePath}</file>
                     <string>folder</string>
-                    <string>SYSTEM_FOLDER</string>
+                    <string>{folderInode}</string>
                     <string>sortOrder</string>
                     <long>0</long>
                     <string>modUser</string>
@@ -1265,6 +1315,103 @@ public static class BundleWriter
     }
 
     // ------------------------------------------------------------------
+    // FolderWrapper XML builder
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Builds a DotCMS <c>FolderWrapper</c> XML for a site sub-folder.
+    /// DotCMS's push-publish handler (FolderHandler) reads these entries and
+    /// creates the folder on the receiving server before importing any file
+    /// assets that belong in it.
+    /// </summary>
+    /// <param name="folderInode">UUID used as both inode and identifier for the folder.</param>
+    /// <param name="folderName">Simple folder name, e.g. <c>Images</c>.</param>
+    /// <param name="folderPath">Full path including leading and trailing slash, e.g. <c>/Images/</c>.</param>
+    /// <param name="parentPath">Parent path, <c>/</c> for a top-level folder.</param>
+    /// <param name="hostId">Identifier of the target site.</param>
+    /// <param name="hostInode">Inode of the target site (used in the host sub-element).</param>
+    private static string BuildFolderXml(
+        string folderInode,
+        string folderName,
+        string folderPath,
+        string parentPath,
+        string hostId,
+        string hostInode)
+    {
+        string now      = DateTime.UtcNow.ToString(XmlTimestampFormat);
+        string segments = string.Concat(Enumerable.Repeat(EmptyConcurrentHashMapSegment, 16));
+
+        return $"""
+            <com.dotcms.publisher.pusher.wrapper.FolderWrapper>
+              <folder>
+                <inode>{folderInode}</inode>
+                <owner>dotcms.org.1</owner>
+                <iDate class="sql-timestamp">{now}</iDate>
+                <type>folder</type>
+                <identifier>{folderInode}</identifier>
+                <name>{folderName}</name>
+                <title>{folderName}</title>
+                <hostId>{hostId}</hostId>
+                <showOnMenu>false</showOnMenu>
+                <sortOrder>0</sortOrder>
+                <filesMasks></filesMasks>
+                <defaultFileType></defaultFileType>
+                <modDate class="sql-timestamp">{now}</modDate>
+                <modUser>dotcms.org.1</modUser>
+              </folder>
+              <folderId>
+                <id>{folderInode}</id>
+                <assetName>{folderName}</assetName>
+                <assetType>folder</assetType>
+                <parentPath>{parentPath}</parentPath>
+                <hostId>{hostId}</hostId>
+                <owner>dotcms.org.1</owner>
+                <createDate class="sql-timestamp">{now}</createDate>
+                <path>{folderPath}</path>
+              </folderId>
+              <host>
+                <map class="com.dotmarketing.portlets.contentlet.model.Contentlet$ContentletHashMap" serialization="custom">
+                  <unserializable-parents/>
+                  <concurrent-hash-map>
+                    <default>
+                      <segments>
+            {segments}
+                      </segments>
+                      <segmentShift>28</segmentShift>
+                      <segmentMask>15</segmentMask>
+                    </default>
+                    <string>type</string>
+                    <string>host</string>
+                    <string>identifier</string>
+                    <string>{hostId}</string>
+                    <null/>
+                    <null/>
+                  </concurrent-hash-map>
+                  <com.dotmarketing.portlets.contentlet.model.Contentlet_-ContentletHashMap>
+                    <default>
+                      <outer-class reference="../../../.."/>
+                    </default>
+                  </com.dotmarketing.portlets.contentlet.model.Contentlet_-ContentletHashMap>
+                </map>
+                <lowIndexPriority>false</lowIndexPriority>
+                <variantId>DEFAULT</variantId>
+              </host>
+              <hostId>
+                <id>{hostId}</id>
+                <assetName>{hostInode}.content</assetName>
+                <assetType>contentlet</assetType>
+                <parentPath>/</parentPath>
+                <hostId>SYSTEM_HOST</hostId>
+                <owner>dotcms.org.1</owner>
+                <createDate class="sql-timestamp">{now}</createDate>
+                <assetSubType>Host</assetSubType>
+              </hostId>
+              <operation>PUBLISH</operation>
+            </com.dotcms.publisher.pusher.wrapper.FolderWrapper>
+            """;
+    }
+
+    // ------------------------------------------------------------------
     // Page / file helper utilities
     // ------------------------------------------------------------------
 
@@ -1296,10 +1443,10 @@ public static class BundleWriter
     /// name without extension (e.g. <c>Home</c> from <c>Home.ascx</c>).
     /// </summary>
     private static Dictionary<string, string> BuildSkinToTemplateMap(
-        IReadOnlyList<(string id, string inode, string name, string html)> templateDefs)
+        IReadOnlyList<(string id, string inode, string name, string html, string themeName)> templateDefs)
     {
         var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (id, _, name, _) in templateDefs)
+        foreach (var (id, _, name, _, _) in templateDefs)
             map.TryAdd(name, id);
         return map;
     }
@@ -1345,7 +1492,7 @@ public static class BundleWriter
     private static void CollectThemeDefinitions(
         string themesZipPath,
         List<(string id, string inode, string name, string html)> containerDefs,
-        List<(string id, string inode, string name, string html)> templateDefs)
+        List<(string id, string inode, string name, string html, string themeName)> templateDefs)
     {
         const string containersPrefix = "_default/Containers/";
         const string skinsPrefix      = "_default/Skins/";
@@ -1391,10 +1538,14 @@ public static class BundleWriter
             string rest = entryPath[skinsPrefix.Length..];
             if (rest.Count(c => c == '/') != 1) continue;
 
+            // Extract the theme name (the directory between skinsPrefix and SkinName.ascx).
+            int slash = rest.IndexOf('/');
+            string themeName = slash >= 0 ? rest[..slash] : string.Empty;
+
             string name = Path.GetFileNameWithoutExtension(entry.Name);
             using var reader = new StreamReader(entry.Open(), Encoding.UTF8);
             string html = ConvertAscxToTemplateHtml(reader.ReadToEnd(), firstContainerId);
-            templateDefs.Add((Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), name, html));
+            templateDefs.Add((Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), name, html, themeName));
         }
     }
 

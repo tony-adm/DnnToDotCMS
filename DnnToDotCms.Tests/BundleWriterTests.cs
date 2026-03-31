@@ -1885,11 +1885,34 @@ public class BundleWriterTests
     }
 
     [Fact]
-    public void Write_WithPortalFiles_FileAssetContentXmlFolderIsSystemFolder()
+    public void Write_WithPortalFiles_RootFileAssetContentXmlFolderIsSystemFolder()
     {
-        // All file-asset contentlets must use SYSTEM_FOLDER so that DotCMS
-        // falls back to the site as the identifier parent (avoids the
-        // "You can only create an identifier on a host of folder. Trying null" error).
+        // A file at the DNN root (FolderPath = "") must use SYSTEM_FOLDER so that
+        // DotCMS places it at the site root in the content tree.
+        var files = new[]
+        {
+            new DnnPortalFile(
+                "e5dfe1f2-4cdc-46bd-ad32-7257a6b8105a",
+                "2af85195-c192-4a33-a14d-a8bb2dc6007e",
+                "home.css", "", "text/css",
+                Encoding.UTF8.GetBytes("/* css */")),
+        };
+
+        var (ms, names) = WriteBundleWithFiles(files, "Test Site");
+
+        string entryName = names.First(n => n.Contains("/1/") && n.EndsWith(".content.xml")
+            && !n.Contains("host.xml"));
+        string xml = ReadTarEntry(ms, entryName)!;
+        string folderValue = ExtractXmlStringField(xml, "folder");
+
+        Assert.Equal("SYSTEM_FOLDER", folderValue);
+    }
+
+    [Fact]
+    public void Write_WithPortalFiles_SubFolderFileAssetContentXmlFolderIsUuid()
+    {
+        // A file in a DNN sub-folder (FolderPath = "Images/") must reference a
+        // generated folder UUID so DotCMS places it in the correct sub-folder.
         var files = new[]
         {
             new DnnPortalFile(
@@ -1906,7 +1929,55 @@ public class BundleWriterTests
         string xml = ReadTarEntry(ms, entryName)!;
         string folderValue = ExtractXmlStringField(xml, "folder");
 
-        Assert.Equal("SYSTEM_FOLDER", folderValue);
+        // Sub-folder files must use a generated UUID, not SYSTEM_FOLDER.
+        Assert.NotEqual("SYSTEM_FOLDER", folderValue);
+        Assert.True(Guid.TryParse(folderValue, out _),
+            $"folder value should be a UUID, got: {folderValue}");
+    }
+
+    [Fact]
+    public void Write_WithPortalFiles_SubFolderWritesFolderXmlEntry()
+    {
+        // When a portal file lives in a sub-folder, a FolderWrapper XML entry
+        // must be included in the bundle so DotCMS creates the folder before
+        // importing the file asset.
+        var files = new[]
+        {
+            new DnnPortalFile(
+                "6f574d5f-0880-4d5a-b4a2-74d2e10b5659",
+                "69f363b0-6512-48ad-b187-b6a450ffda7b",
+                "logo.png", "Images/", "image/png",
+                [0x00]),
+        };
+
+        var (ms, names) = WriteBundleWithFiles(files, "Test Site");
+
+        // A .folder.xml entry must appear under ROOT/.
+        Assert.Contains(names, n => n.StartsWith("ROOT/") && n.EndsWith(".folder.xml"));
+    }
+
+    [Fact]
+    public void Write_WithPortalFiles_FolderXmlContainsCorrectPath()
+    {
+        // The generated FolderWrapper XML must reference the DNN folder path so
+        // DotCMS creates the folder at the right location in the content tree.
+        var files = new[]
+        {
+            new DnnPortalFile(
+                "6f574d5f-0880-4d5a-b4a2-74d2e10b5659",
+                "69f363b0-6512-48ad-b187-b6a450ffda7b",
+                "logo.png", "Images/", "image/png",
+                [0x00]),
+        };
+
+        var (ms, names) = WriteBundleWithFiles(files, "Test Site");
+
+        string folderEntry = names.First(n => n.StartsWith("ROOT/") && n.EndsWith(".folder.xml"));
+        string xml = ReadTarEntry(ms, folderEntry)!;
+
+        Assert.Contains("<name>Images</name>", xml);
+        Assert.Contains("<path>/Images/</path>", xml);
+        Assert.Contains("<parentPath>/</parentPath>", xml);
     }
 
     [Fact]
@@ -2170,5 +2241,113 @@ public class BundleWriterTests
         finally { File.Delete(zipPath); }
     }
 
+    [Fact]
+    public void Write_WithPageAndMatchingContent_MultiTreeRelationTypeIsSequentialInteger()
+    {
+        // The relation_type in multiTree entries must match the second argument of
+        // the #parseContainer directives in the template body.  The template uses
+        // sequential integers ("1", "2", …), so the relation_type must do the same.
+        string tabId = "seq-rel-type-test";
+        var pages = new[]
+        {
+            new DnnPortalPage(tabId, "Home", "Home", "", "//Home", 0, true, ""),
+        };
+        var contents = new[]
+        {
+            new DnnHtmlContent("First",  "<p>first</p>",  TabUniqueId: tabId),
+            new DnnHtmlContent("Second", "<p>second</p>", TabUniqueId: tabId),
+        };
+
+        string zipPath = BuildThemesZip();
+        try
+        {
+            var (ms, names) = WriteBundleWithPagesAndContents(pages, contents,
+                themesZipPath: zipPath);
+
+            string? pageXml = null;
+            foreach (string name in names.Where(n =>
+                n.Contains("/1/") && n.EndsWith(".content.xml") && !n.Contains("host.xml")))
+            {
+                string candidate = ReadTarEntry(ms, name)!;
+                if (candidate.Contains("<assetSubType>htmlpageasset</assetSubType>"))
+                {
+                    pageXml = candidate;
+                    break;
+                }
+            }
+
+            Assert.NotNull(pageXml);
+            // Both sequential relation_type values must appear in the page XML.
+            Assert.Contains("<string>relation_type</string>", pageXml!);
+            // "1" must appear as a relation_type value (first contentlet)
+            int idx1 = pageXml!.IndexOf("<string>relation_type</string>", StringComparison.Ordinal);
+            Assert.True(idx1 >= 0);
+            string afterFirst = pageXml[(idx1 + "<string>relation_type</string>".Length)..];
+            Assert.Contains("<string>1</string>", afterFirst);
+            // "2" must appear as a relation_type value (second contentlet)
+            int idx2 = pageXml.IndexOf("<string>relation_type</string>", idx1 + 1, StringComparison.Ordinal);
+            Assert.True(idx2 >= 0);
+            string afterSecond = pageXml[(idx2 + "<string>relation_type</string>".Length)..];
+            Assert.Contains("<string>2</string>", afterSecond);
+        }
+        finally { File.Delete(zipPath); }
+    }
+
+    // ------------------------------------------------------------------
+    // Template theme tests
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Write_WithTheme_TemplateXmlContainsThemePath()
+    {
+        // When templates are collected from a themes zip, each template's XML
+        // must include a <theme> element pointing to the DotCMS application theme
+        // path derived from the skin directory name.
+        string zipPath = BuildThemesZip();
+        try
+        {
+            var ms = new MemoryStream();
+            BundleWriter.Write([MakeHtmlContentType()], ms, zipPath, "Test Site");
+            ms.Position = 0;
+
+            var names = new List<string>();
+            using (var gz  = new GZipStream(ms, CompressionMode.Decompress, leaveOpen: true))
+            using (var tar = new TarReader(gz))
+            {
+                TarEntry? entry;
+                while ((entry = tar.GetNextEntry()) is not null)
+                    names.Add(entry.Name);
+            }
+            ms.Position = 0;
+
+            string templateEntry = names.First(n => n.EndsWith(".template.template.xml"));
+            string xml = ReadTarEntry(ms, templateEntry)!;
+
+            // The theme path must reference /application/themes/{themeName}
+            Assert.Contains("<theme>/application/themes/TestTheme</theme>", xml);
+        }
+        finally { File.Delete(zipPath); }
+    }
+
+    [Fact]
+    public void Write_WithoutTheme_TemplateXmlHasEmptyTheme()
+    {
+        // Without a themes zip, any template written must have an empty <theme>.
+        var ms = new MemoryStream();
+        BundleWriter.Write([MakeHtmlContentType()], ms, themesZipPath: null, siteName: "Test Site");
+        ms.Position = 0;
+
+        var names = new List<string>();
+        using (var gz  = new GZipStream(ms, CompressionMode.Decompress, leaveOpen: true))
+        using (var tar = new TarReader(gz))
+        {
+            TarEntry? entry;
+            while ((entry = tar.GetNextEntry()) is not null)
+                names.Add(entry.Name);
+        }
+
+        // No template entries should be present (no themes zip → no templates).
+        Assert.DoesNotContain(names, n => n.EndsWith(".template.template.xml"));
+    }
 
 }
