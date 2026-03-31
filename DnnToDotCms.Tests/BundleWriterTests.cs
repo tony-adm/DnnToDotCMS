@@ -2768,4 +2768,73 @@ public class BundleWriterTests
             xml.Contains("<name>C</name>") && xml.Contains("<parentPath>/A/B/</parentPath>"));
     }
 
+    // ------------------------------------------------------------------
+    // Folder XML nesting – DotCMS FolderHandler path-length sort
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Write_WithPortalFiles_RootFolderXmlEntryIsDirectlyUnderRoot()
+    {
+        // A top-level portal folder (parentPath="/") must have its .folder.xml
+        // entry directly under ROOT/ so DotCMS's sort-by-path-length processes
+        // it before any nested children.
+        var files = new[]
+        {
+            new DnnPortalFile(
+                "11111111-0000-0000-0000-000000000001",
+                "22222222-0000-0000-0000-000000000001",
+                "logo.png", "Images/", "image/png",
+                Encoding.UTF8.GetBytes("img")),
+        };
+
+        var (_, names) = WriteBundleWithFiles(files, "Test Site");
+
+        var folderEntry = names.First(n => n.StartsWith("ROOT/") && n.EndsWith(".folder.xml"));
+        // Should be ROOT/{uuid}.folder.xml — only one slash after ROOT
+        int slashCount = folderEntry.Count(c => c == '/');
+        Assert.Equal(1, slashCount);
+    }
+
+    [Fact]
+    public void Write_WithPortalFiles_NestedFolderXmlEntriesHaveIncreasingPathDepth()
+    {
+        // For nested folders like "A/B/C/", the .folder.xml entries must be
+        // placed in progressively deeper directories so DotCMS's FolderHandler
+        // (which sorts by file-path length) processes parents before children.
+        //   A/ → ROOT/{uuid}.folder.xml
+        //   A/B/ → ROOT/A/{uuid}.folder.xml
+        //   A/B/C/ → ROOT/A/B/{uuid}.folder.xml
+        var files = new[]
+        {
+            new DnnPortalFile(
+                "33333333-0000-0000-0000-000000000001",
+                "44444444-0000-0000-0000-000000000001",
+                "deep.txt", "A/B/C/", "text/plain",
+                Encoding.UTF8.GetBytes("deep")),
+        };
+
+        var (ms, names) = WriteBundleWithFiles(files, "Test Site");
+
+        var folderEntries = names.Where(n => n.StartsWith("ROOT/") && n.EndsWith(".folder.xml")).ToList();
+        Assert.True(folderEntries.Count >= 3,
+            $"Expected at least 3 folder entries, got {folderEntries.Count}");
+
+        // Sort by path length (as DotCMS does) and verify parents come first.
+        var sorted = folderEntries.OrderBy(n => n.Length).ToList();
+        var xmls = sorted.Select(e => ReadTarEntry(ms, e)!).ToList();
+
+        // First (shortest): folder A, under ROOT/
+        Assert.Contains("<name>A</name>", xmls[0]);
+        Assert.StartsWith("ROOT/", sorted[0]);
+        Assert.DoesNotContain("/A/", sorted[0]);  // no nested dir
+
+        // Second: folder B, under ROOT/A/
+        Assert.Contains("<name>B</name>", xmls[1]);
+        Assert.StartsWith("ROOT/A/", sorted[1]);
+
+        // Third (longest): folder C, under ROOT/A/B/
+        Assert.Contains("<name>C</name>", xmls[2]);
+        Assert.StartsWith("ROOT/A/B/", sorted[2]);
+    }
+
 }
