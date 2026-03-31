@@ -1841,9 +1841,9 @@ public static class BundleWriter
             if (string.IsNullOrEmpty(dir)) continue;
 
             string[] parts = dir.Split('/');
-            for (int i = 1; i <= parts.Length; i++)
+            for (int depth = 1; depth <= parts.Length; depth++)
             {
-                string partialPath = string.Join("/", parts[..i]);
+                string partialPath = string.Join("/", parts[..depth]);
                 folderInodes.TryAdd(partialPath, Guid.NewGuid().ToString());
             }
         }
@@ -1877,8 +1877,8 @@ public static class BundleWriter
             string? dir        = Path.GetDirectoryName(relPath)?.Replace('\\', '/');
             string  folderPath = string.IsNullOrEmpty(dir) ? "" : dir + "/";
             string  folderInode = !string.IsNullOrEmpty(dir) &&
-                                  folderInodes.TryGetValue(dir, out string? fi)
-                ? fi
+                                  folderInodes.TryGetValue(dir, out string? foundInode)
+                ? foundInode
                 : "SYSTEM_FOLDER";
 
             // Write binary content.
