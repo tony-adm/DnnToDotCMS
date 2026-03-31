@@ -1596,9 +1596,59 @@ public static class BundleWriter
 
             string name = Path.GetFileNameWithoutExtension(entry.Name);
             using var reader = new StreamReader(entry.Open(), Encoding.UTF8);
-            string html = ConvertAscxToTemplateHtml(reader.ReadToEnd(), firstContainerId, themeName);
+            string ascx = reader.ReadToEnd();
+
+            // Resolve <!--#include file="..."--> SSI directives by inlining
+            // the referenced file content from the same zip archive.
+            int lastSlashIdx = entryPath.LastIndexOf('/');
+            if (lastSlashIdx > 0)
+            {
+                string skinDir = entryPath[..lastSlashIdx];
+                ascx = ResolveSsiIncludes(ascx, skinDir, zip);
+            }
+
+            string html = ConvertAscxToTemplateHtml(ascx, firstContainerId, themeName);
             templateDefs.Add((Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), name, html, themeName));
         }
+    }
+
+    // Regex matching <!--#include file="..." --> SSI directives.
+    private static readonly Regex SsiIncludeRegex =
+        new(@"<!--\s*#include\s+file=""([^""]+)""\s*-->",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    /// <summary>
+    /// Resolves <c>&lt;!--#include file="..."--&gt;</c> Server-Side Include
+    /// directives by reading the referenced file from <paramref name="zip"/>
+    /// and inlining its content.  Paths are resolved relative to
+    /// <paramref name="skinDir"/> (the directory containing the ASCX file).
+    /// </summary>
+    public static string ResolveSsiIncludes(
+        string ascx, string skinDir, ZipArchive zip)
+    {
+        return SsiIncludeRegex.Replace(ascx, match =>
+        {
+            string relPath = match.Groups[1].Value.Replace('\\', '/');
+            string fullPath = skinDir + "/" + relPath;
+
+            // Look for the entry using case-insensitive comparison because
+            // DNN on Windows is case-insensitive.
+            ZipArchiveEntry? included = zip.Entries.FirstOrDefault(e =>
+                string.Equals(
+                    e.FullName.Replace('\\', '/'),
+                    fullPath,
+                    StringComparison.OrdinalIgnoreCase));
+
+            if (included is null)
+            {
+                Console.Error.WriteLine(
+                    $"Warning: SSI include target not found in themes zip: '{fullPath}'");
+                return string.Empty;
+            }
+
+            using var reader = new StreamReader(included.Open(), Encoding.UTF8);
+            return reader.ReadToEnd();
+        });
     }
 
     // ------------------------------------------------------------------
@@ -1676,6 +1726,16 @@ public static class BundleWriter
     // Matches any remaining open/close <dnn:TAGNAME> ... </dnn:TAGNAME> pairs.
     private static readonly Regex DnnOpenCloseTagRegex =
         new(@"</?dnn:[A-Za-z]+[^>]*>", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    // Matches <dnn:DnnCssInclude ... FilePath="..." .../> and captures the FilePath value.
+    private static readonly Regex DnnCssIncludeRegex =
+        new(@"<dnn:DnnCssInclude\s[^>]*FilePath=""([^""]+)""[^>]*/?>",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+    // Matches <dnn:DnnJsInclude ... FilePath="..." .../> and captures the FilePath value.
+    private static readonly Regex DnnJsIncludeRegex =
+        new(@"<dnn:DnnJsInclude\s[^>]*FilePath=""([^""]+)""[^>]*/?>",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
 
     /// <summary>
     /// Converts a DNN container ASCX file into a DotCMS container Velocity
@@ -1773,6 +1833,20 @@ public static class BundleWriter
         foreach (var (rx, replacement) in SkinControlReplacements)
             html = rx.Replace(html, replacement);
 
+        // Convert <dnn:DnnCssInclude FilePath="..." /> and <dnn:DnnJsInclude
+        // FilePath="..." /> to standard HTML <link>/<script> tags.  The
+        // FilePath attribute is relative to the skin folder, which maps to
+        // /application/themes/{themeName}/ in DotCMS.  This must run before
+        // the generic DNN-tag cleanup that follows.
+        if (!string.IsNullOrWhiteSpace(themeName))
+        {
+            string themeBase = $"/application/themes/{themeName}/";
+            html = DnnCssIncludeRegex.Replace(html,
+                m => $@"<link rel=""stylesheet"" href=""{themeBase}{m.Groups[1].Value}"" />");
+            html = DnnJsIncludeRegex.Replace(html,
+                m => $@"<script src=""{themeBase}{m.Groups[1].Value}""></script>");
+        }
+
         // Replace DNN server-side pane divs (runat="server") with #parseContainer
         // directives so DotCMS renders container content in those zones.
         // This must run before RunatServerRegex strips the runat attribute.
@@ -1796,8 +1870,10 @@ public static class BundleWriter
         // Prepend a <link> tag for the theme's main skin.css so that DotCMS
         // loads the skin styles when rendering the page.  DNN automatically
         // included the skin CSS via its own framework; in DotCMS we must add
-        // an explicit stylesheet reference.
-        if (!string.IsNullOrWhiteSpace(themeName))
+        // an explicit stylesheet reference.  Skip the prepend when a
+        // DnnCssInclude directive already emitted a skin.css link above.
+        if (!string.IsNullOrWhiteSpace(themeName) &&
+            !html.Contains($"/application/themes/{themeName}/skin.css", StringComparison.OrdinalIgnoreCase))
         {
             string cssLink = $@"<link rel=""stylesheet"" href=""/application/themes/{themeName}/skin.css"" />";
             html = cssLink + "\n" + html;
