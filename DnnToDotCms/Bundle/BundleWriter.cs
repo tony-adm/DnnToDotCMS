@@ -293,13 +293,21 @@ public static class BundleWriter
             // Sub-folders (non-empty FolderPath) need explicit FolderWrapper XML
             // entries so DotCMS creates them on import.  Root-level files use
             // SYSTEM_FOLDER (the site root).
+            // For nested paths (e.g. "Menus/SubFolder/") every intermediate
+            // directory must also be present so DotCMS's parent-path check
+            // (identifier_parent_path_check) succeeds.
             var folderInodes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (DnnPortalFile pf in portalFiles)
             {
-                if (!string.IsNullOrEmpty(pf.FolderPath) &&
-                    !folderInodes.ContainsKey(pf.FolderPath))
+                if (string.IsNullOrEmpty(pf.FolderPath))
+                    continue;
+
+                string trimmed = pf.FolderPath.TrimEnd('/');
+                string[] parts = trimmed.Split('/');
+                for (int depth = 1; depth <= parts.Length; depth++)
                 {
-                    folderInodes[pf.FolderPath] = Guid.NewGuid().ToString();
+                    string partialPath = string.Join("/", parts[..depth]) + "/";
+                    folderInodes.TryAdd(partialPath, Guid.NewGuid().ToString());
                 }
             }
 
@@ -312,7 +320,13 @@ public static class BundleWriter
                     string folderName   = dnnFolderPath.TrimEnd('/').Split('/').Last();
                     string dotcmsPath   = "/" + dnnFolderPath.TrimStart('/');
                     if (!dotcmsPath.EndsWith('/')) dotcmsPath += '/';
-                    string parentPath   = "/";
+                    // Compute the real parent path so DotCMS's
+                    // identifier_parent_path_check constraint is satisfied.
+                    string trimmedDir   = dnnFolderPath.TrimEnd('/');
+                    int lastSlash       = trimmedDir.LastIndexOf('/');
+                    string parentPath   = lastSlash >= 0
+                        ? "/" + trimmedDir[..lastSlash] + "/"
+                        : "/";
                     string folderXml    = BuildFolderXml(
                         folderInode, folderName, dotcmsPath, parentPath,
                         siteId, siteInode);
@@ -328,9 +342,13 @@ public static class BundleWriter
 
                 // Resolve the folder inode: root files use SYSTEM_FOLDER; sub-folder
                 // files use the pre-generated inode for that folder.
+                // Normalise the key to include a trailing slash to match the
+                // dictionary which always stores paths with a trailing slash.
+                string normalizedKey = string.IsNullOrEmpty(pf.FolderPath) ? ""
+                    : pf.FolderPath.TrimEnd('/') + "/";
                 string folderInode = string.IsNullOrEmpty(pf.FolderPath)
                     ? "SYSTEM_FOLDER"
-                    : (folderInodes.TryGetValue(pf.FolderPath, out string? fi) ? fi : "SYSTEM_FOLDER");
+                    : (folderInodes.TryGetValue(normalizedKey, out string? fi) ? fi : "SYSTEM_FOLDER");
 
                 // Write the actual file bytes under assets/{x}/{y}/{inode}/fileAsset/{filename}
                 string assetPath = BuildAssetPath(inode, pf.FileName);

@@ -2663,4 +2663,109 @@ public class BundleWriterTests
         Assert.Contains("ROOT/application/images/Banners/hero.jpg", names);
     }
 
+    // ------------------------------------------------------------------
+    // Nested portal folders – parent folder hierarchy
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Write_WithPortalFiles_NestedFolderCreatesIntermediateParentFolderEntries()
+    {
+        // When a portal file lives in a nested folder like "Menus/SubFolder/",
+        // the bundle must include FolderWrapper XML entries for both "Menus/"
+        // (the intermediate parent) and "Menus/SubFolder/" (the leaf).
+        var files = new[]
+        {
+            new DnnPortalFile(
+                "11111111-0000-0000-0000-000000000001",
+                "22222222-0000-0000-0000-000000000001",
+                "nav.xml", "Menus/SubFolder/", "text/xml",
+                Encoding.UTF8.GetBytes("<nav/>")),
+        };
+
+        var (ms, names) = WriteBundleWithFiles(files, "Test Site");
+
+        // Must have at least 2 folder XML entries: one for Menus/ and one for Menus/SubFolder/.
+        var folderEntries = names.Where(n => n.StartsWith("ROOT/") && n.EndsWith(".folder.xml")).ToList();
+        Assert.True(folderEntries.Count >= 2,
+            $"Expected at least 2 folder entries, got {folderEntries.Count}: {string.Join(", ", folderEntries)}");
+
+        // Verify the parent folder (Menus/) exists with parentPath="/".
+        bool foundParent = false;
+        foreach (string entry in folderEntries)
+        {
+            string xml = ReadTarEntry(ms, entry)!;
+            if (xml.Contains("<name>Menus</name>") && xml.Contains("<path>/Menus/</path>"))
+            {
+                Assert.Contains("<parentPath>/</parentPath>", xml);
+                foundParent = true;
+            }
+        }
+        Assert.True(foundParent, "Missing FolderWrapper entry for intermediate parent folder 'Menus'.");
+    }
+
+    [Fact]
+    public void Write_WithPortalFiles_NestedFolderHasCorrectParentPath()
+    {
+        // The child folder "Menus/SubFolder/" must reference parentPath="/Menus/"
+        // (not "/") so DotCMS's identifier_parent_path_check constraint is satisfied.
+        var files = new[]
+        {
+            new DnnPortalFile(
+                "11111111-0000-0000-0000-000000000001",
+                "22222222-0000-0000-0000-000000000001",
+                "nav.xml", "Menus/SubFolder/", "text/xml",
+                Encoding.UTF8.GetBytes("<nav/>")),
+        };
+
+        var (ms, names) = WriteBundleWithFiles(files, "Test Site");
+
+        var folderEntries = names.Where(n => n.StartsWith("ROOT/") && n.EndsWith(".folder.xml")).ToList();
+
+        bool foundChild = false;
+        foreach (string entry in folderEntries)
+        {
+            string xml = ReadTarEntry(ms, entry)!;
+            if (xml.Contains("<name>SubFolder</name>") && xml.Contains("<path>/Menus/SubFolder/</path>"))
+            {
+                Assert.Contains("<parentPath>/Menus/</parentPath>", xml);
+                foundChild = true;
+            }
+        }
+        Assert.True(foundChild, "Missing FolderWrapper entry for nested folder 'Menus/SubFolder' with correct parentPath.");
+    }
+
+    [Fact]
+    public void Write_WithPortalFiles_DeeplyNestedFolderCreatesAllIntermediateFolders()
+    {
+        // A 3-level deep folder like "A/B/C/" must produce folder entries for
+        // "A/", "A/B/", and "A/B/C/" with correct parent paths.
+        var files = new[]
+        {
+            new DnnPortalFile(
+                "33333333-0000-0000-0000-000000000001",
+                "44444444-0000-0000-0000-000000000001",
+                "deep.txt", "A/B/C/", "text/plain",
+                Encoding.UTF8.GetBytes("deep")),
+        };
+
+        var (ms, names) = WriteBundleWithFiles(files, "Test Site");
+
+        var folderEntries = names.Where(n => n.StartsWith("ROOT/") && n.EndsWith(".folder.xml")).ToList();
+        Assert.True(folderEntries.Count >= 3,
+            $"Expected at least 3 folder entries for A/B/C/, got {folderEntries.Count}");
+
+        // Collect all folder XMLs for inspection.
+        var folderXmls = folderEntries.Select(e => ReadTarEntry(ms, e)!).ToList();
+
+        // A/ → parentPath="/"
+        Assert.Contains(folderXmls, xml =>
+            xml.Contains("<name>A</name>") && xml.Contains("<parentPath>/</parentPath>"));
+        // A/B/ → parentPath="/A/"
+        Assert.Contains(folderXmls, xml =>
+            xml.Contains("<name>B</name>") && xml.Contains("<parentPath>/A/</parentPath>"));
+        // A/B/C/ → parentPath="/A/B/"
+        Assert.Contains(folderXmls, xml =>
+            xml.Contains("<name>C</name>") && xml.Contains("<parentPath>/A/B/</parentPath>"));
+    }
+
 }
