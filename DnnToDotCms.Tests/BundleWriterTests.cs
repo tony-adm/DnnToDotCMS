@@ -1968,10 +1968,11 @@ public class BundleWriterTests
             // The multiTree should be populated, not self-closing.
             Assert.DoesNotContain("<multiTree/>", pageXml);
             Assert.Contains("<multiTree>", pageXml);
-            Assert.Contains("<com.dotmarketing.beans.MultiTree>", pageXml);
-            Assert.Contains("<parent1>", pageXml);
-            Assert.Contains("<parent2>", pageXml);
-            Assert.Contains("<child>", pageXml);
+            // Each entry is serialized as a <map> with <entry> children (List<Map<String,Object>>).
+            Assert.Contains("<map>", pageXml);
+            Assert.Contains("<string>parent1</string>", pageXml);
+            Assert.Contains("<string>parent2</string>", pageXml);
+            Assert.Contains("<string>child</string>", pageXml);
         }
         finally { File.Delete(zipPath); }
     }
@@ -2067,7 +2068,9 @@ public class BundleWriterTests
             }
 
             Assert.NotNull(pageXml);
-            Assert.Contains($"<child>{contentletId}</child>", pageXml);
+            // The child contentlet ID must appear inside the multiTree map entry.
+            Assert.Contains($"<string>child</string>", pageXml);
+            Assert.Contains($"<string>{contentletId}</string>", pageXml);
         }
         finally { File.Delete(zipPath); }
     }

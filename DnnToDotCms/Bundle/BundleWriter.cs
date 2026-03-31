@@ -1047,15 +1047,36 @@ public static class BundleWriter
             string relationType = Guid.NewGuid().ToString();
             sb.Append($"""
 
-                  <com.dotmarketing.beans.MultiTree>
-                    <parent1>{pageId}</parent1>
-                    <parent2>{containerId}</parent2>
-                    <child>{contentletIds[i]}</child>
-                    <relationType>{relationType}</relationType>
-                    <treeOrder>{i}</treeOrder>
-                    <variantName>DEFAULT</variantName>
-                    <personalization>dot:default</personalization>
-                  </com.dotmarketing.beans.MultiTree>
+                  <map>
+                    <entry>
+                      <string>parent1</string>
+                      <string>{pageId}</string>
+                    </entry>
+                    <entry>
+                      <string>parent2</string>
+                      <string>{containerId}</string>
+                    </entry>
+                    <entry>
+                      <string>child</string>
+                      <string>{contentletIds[i]}</string>
+                    </entry>
+                    <entry>
+                      <string>relation_type</string>
+                      <string>{relationType}</string>
+                    </entry>
+                    <entry>
+                      <string>tree_order</string>
+                      <int>{i}</int>
+                    </entry>
+                    <entry>
+                      <string>personalization</string>
+                      <string>dot:default</string>
+                    </entry>
+                    <entry>
+                      <string>variantId</string>
+                      <string>DEFAULT</string>
+                    </entry>
+                  </map>
               """);
         }
         return sb.ToString();
