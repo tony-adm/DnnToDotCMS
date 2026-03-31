@@ -2837,4 +2837,48 @@ public class BundleWriterTests
         Assert.StartsWith("ROOT/A/B/", sorted[2]);
     }
 
+    [Fact]
+    public void Write_WithPages_PageXmlContainsModDate()
+    {
+        // DotCMS uses modDate from the contentlet map during push-publish
+        // import to preserve the modification timestamp.  Pages must include
+        // it just like content and file-asset contentlets do.
+        var pages = new[]
+        {
+            new DnnPortalPage("aaa", "Home", "Home", "", "//Home", 0, true, ""),
+        };
+
+        var (ms, names) = WriteBundleWithPages(pages);
+        string entryName = names.First(n => n.Contains("/1/") && n.EndsWith(".content.xml")
+            && !n.Contains("host.xml"));
+        string xml = ReadTarEntry(ms, entryName)!;
+
+        Assert.Contains("<string>modDate</string>", xml);
+        Assert.Contains("<sql-timestamp>", xml);
+    }
+
+    [Fact]
+    public void Write_WithPortalFiles_FolderXmlContainsDefaultFileType()
+    {
+        // DotCMS requires the folder's defaultFileType to reference the
+        // FileAsset content type so that file browser operations work
+        // correctly.  An empty value can cause folder creation to fail.
+        var files = new[]
+        {
+            new DnnPortalFile(
+                "6f574d5f-0880-4d5a-b4a2-74d2e10b5659",
+                "69f363b0-6512-48ad-b187-b6a450ffda7b",
+                "logo.png", "Images/", "image/png",
+                [0x00]),
+        };
+
+        var (ms, names) = WriteBundleWithFiles(files, "Test Site");
+
+        string folderEntry = names.First(n => n.StartsWith("ROOT/") && n.EndsWith(".folder.xml"));
+        string xml = ReadTarEntry(ms, folderEntry)!;
+
+        // The FileAsset content type UUID.
+        Assert.Contains("<defaultFileType>33888b6f-7a8e-4069-b1b6-5c1aa9d0a48d</defaultFileType>", xml);
+    }
+
 }
