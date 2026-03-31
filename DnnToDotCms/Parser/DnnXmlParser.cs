@@ -367,12 +367,17 @@ public static class DnnXmlParser
             if (string.IsNullOrWhiteSpace(decoded))
                 return null;
 
-            // Replace the DNN portal-root token {{PortalRoot}} with a site-root
-            // slash so that image and asset URLs become valid DotCMS paths.
+            // Replace the DNN portal-root token {{PortalRoot}} with valid DotCMS paths.
             // In DNN, {{PortalRoot}} expands to "/Portals/{id}/" at runtime.
-            // After migration, portal files are served from the DotCMS site root,
-            // so replacing the token with "/" produces the correct relative URL
-            // (e.g. "{{PortalRoot}}Images/logo.png" → "/Images/logo.png").
+            // After migration, files in the DNN Images/ folder are served from the DotCMS
+            // static resource directory /application/images/, so that specific prefix is
+            // replaced first (more specific wins) to produce correct image URLs.
+            // e.g. "{{PortalRoot}}Images/logo.png" → "/application/images/logo.png"
+            decoded = decoded.Replace("{{PortalRoot}}Images/", "/application/images/", StringComparison.OrdinalIgnoreCase);
+
+            // Replace any remaining portal-root tokens (non-Images paths) with the
+            // site root so other asset references stay valid.
+            // e.g. "{{PortalRoot}}home.css" → "/home.css"
             decoded = decoded.Replace("{{PortalRoot}}", "/", StringComparison.OrdinalIgnoreCase);
 
             return decoded.Trim();

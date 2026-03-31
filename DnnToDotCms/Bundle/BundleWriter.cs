@@ -353,6 +353,20 @@ public static class BundleWriter
 
                 manifestEntries.Add(("contentlet", identifier, inode,
                     Truncate(pf.FileName, MaxVarcharLength), contentWorkDir, "/"));
+
+                // Files from the DNN Images/ folder are also written as static web
+                // resources to ROOT/application/images/ so that DotCMS serves them
+                // directly from /application/images/.  HTML content references the
+                // same path after the {{PortalRoot}}Images/ token replacement.
+                // The prefix is matched case-insensitively; its length is constant
+                // (7 chars) regardless of casing, so slicing at that offset is safe.
+                const string imagesFolderPrefix = "Images/";
+                if (pf.FolderPath.StartsWith(imagesFolderPrefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    // Preserve any sub-folder depth (e.g. "Images/Banners/" → "Banners/").
+                    string relativePath = pf.FolderPath[imagesFolderPrefix.Length..] + pf.FileName;
+                    WriteBinaryEntry(tar, "ROOT/application/images/" + relativePath, pf.Content);
+                }
             }
         }
 

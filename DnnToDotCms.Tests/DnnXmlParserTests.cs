@@ -575,8 +575,8 @@ public class DnnXmlParserTests
     public void ExtractHtmlBodyFromDnnXml_ReplacesPortalRootToken()
     {
         // {{PortalRoot}} is a DNN runtime token that expands to "/Portals/{id}/" at
-        // run time.  After migration to DotCMS, portal files live at the site root,
-        // so the token must be replaced with "/" to produce a valid relative URL.
+        // run time.  After migration to DotCMS, files in the DNN Images/ folder are
+        // served from /application/images/, so the token must be replaced accordingly.
         const string xmlContent = """
             <htmltext><content><![CDATA[&lt;img src=&quot;{{PortalRoot}}Images/logo.png&quot; /&gt;]]></content></htmltext>
             """;
@@ -585,7 +585,23 @@ public class DnnXmlParserTests
 
         Assert.NotNull(result);
         Assert.DoesNotContain("{{PortalRoot}}", result);
-        Assert.Contains("/Images/logo.png", result);
+        Assert.Contains("/application/images/logo.png", result);
+    }
+
+    [Fact]
+    public void ExtractHtmlBodyFromDnnXml_NonImagesPortalRootReplacedWithSlash()
+    {
+        // {{PortalRoot}} tokens for non-Images paths (e.g. root-level CSS) must
+        // still be replaced with "/" to produce a valid site-root relative URL.
+        const string xmlContent = """
+            <htmltext><content><![CDATA[&lt;link href=&quot;{{PortalRoot}}home.css&quot; /&gt;]]></content></htmltext>
+            """;
+
+        string? result = DnnXmlParser.ExtractHtmlBodyFromDnnXml(xmlContent);
+
+        Assert.NotNull(result);
+        Assert.DoesNotContain("{{PortalRoot}}", result);
+        Assert.Contains("/home.css", result);
     }
 
     [Fact]
@@ -601,6 +617,23 @@ public class DnnXmlParserTests
         Assert.NotNull(result);
         Assert.DoesNotContain("{{portalroot}}", result, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("/contact.aspx", result);
+    }
+
+    [Fact]
+    public void ExtractHtmlBodyFromDnnXml_ImagesPortalRootReplacedWithApplicationImages()
+    {
+        // {{PortalRoot}}Images/ must be replaced with /application/images/ so that
+        // HTML content links to images at the correct DotCMS static resource path.
+        const string xmlContent = """
+            <htmltext><content><![CDATA[&lt;img src=&quot;{{PortalRoot}}Images/banner.jpg&quot; /&gt;]]></content></htmltext>
+            """;
+
+        string? result = DnnXmlParser.ExtractHtmlBodyFromDnnXml(xmlContent);
+
+        Assert.NotNull(result);
+        Assert.DoesNotContain("{{PortalRoot}}", result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("/application/images/banner.jpg", result);
+        Assert.DoesNotContain("/Images/banner.jpg", result);
     }
 
     [Fact]

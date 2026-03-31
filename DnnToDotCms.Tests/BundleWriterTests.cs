@@ -62,7 +62,7 @@ public class BundleWriterTests
         using var tar = new TarReader(gz);
 
         TarEntry? entry;
-        while ((entry = tar.GetNextEntry()) is not null)
+        while ((entry = tar.GetNextEntry(copyData: true)) is not null)
             names.Add(entry.Name);
 
         ms.Position = 0;
@@ -77,7 +77,7 @@ public class BundleWriterTests
         using var tar = new TarReader(gz);
 
         TarEntry? entry;
-        while ((entry = tar.GetNextEntry()) is not null)
+        while ((entry = tar.GetNextEntry(copyData: true)) is not null)
         {
             if (entry.Name == entryName && entry.DataStream is not null)
             {
@@ -102,7 +102,7 @@ public class BundleWriterTests
         // Must decompress without exception
         using var gz = new GZipStream(ms, CompressionMode.Decompress);
         using var tar = new TarReader(gz);
-        Assert.NotNull(tar.GetNextEntry());
+        Assert.NotNull(tar.GetNextEntry(copyData: true));
     }
 
     [Fact]
@@ -419,7 +419,7 @@ public class BundleWriterTests
 
         var ids = new List<string>();
         TarEntry? entry;
-        while ((entry = tar.GetNextEntry()) is not null)
+        while ((entry = tar.GetNextEntry(copyData: true)) is not null)
         {
             if (entry.Name.StartsWith("working/System Host/") &&
                 entry.Name.EndsWith(".contentType.json"))
@@ -1003,7 +1003,7 @@ public class BundleWriterTests
         using var tar = new TarReader(gz);
 
         TarEntry? entry;
-        while ((entry = tar.GetNextEntry()) is not null)
+        while ((entry = tar.GetNextEntry(copyData: true)) is not null)
             names.Add(entry.Name);
 
         ms.Position = 0;
@@ -1256,7 +1256,7 @@ public class BundleWriterTests
         using var tar = new TarReader(gz);
 
         TarEntry? entry;
-        while ((entry = tar.GetNextEntry()) is not null)
+        while ((entry = tar.GetNextEntry(copyData: true)) is not null)
             names.Add(entry.Name);
 
         ms.Position = 0;
@@ -1479,7 +1479,7 @@ public class BundleWriterTests
         using var gz  = new GZipStream(ms, CompressionMode.Decompress, leaveOpen: true);
         using var tar = new TarReader(gz);
         TarEntry? entry;
-        while ((entry = tar.GetNextEntry()) is not null)
+        while ((entry = tar.GetNextEntry(copyData: true)) is not null)
             names.Add(entry.Name);
 
         Assert.DoesNotContain(names, n => n.EndsWith(".content.xml") && n.Contains("/1/"));
@@ -1722,7 +1722,7 @@ public class BundleWriterTests
         using var tar = new TarReader(gz);
 
         TarEntry? entry;
-        while ((entry = tar.GetNextEntry()) is not null)
+        while ((entry = tar.GetNextEntry(copyData: true)) is not null)
             names.Add(entry.Name);
 
         ms.Position = 0;
@@ -1873,7 +1873,7 @@ public class BundleWriterTests
         using var tar = new TarReader(gz);
 
         TarEntry? entry;
-        while ((entry = tar.GetNextEntry()) is not null)
+        while ((entry = tar.GetNextEntry(copyData: true)) is not null)
             names.Add(entry.Name);
 
         ms.Position = 0;
@@ -2138,6 +2138,64 @@ public class BundleWriterTests
         Assert.DoesNotContain("<parentPath>/</parentPath>", xml);
     }
 
+    [Fact]
+    public void Write_WithPortalFiles_ImagesFolderFilesAlsoWrittenToApplicationImages()
+    {
+        // Files from the DNN "Images/" folder must also appear as static files under
+        // ROOT/application/images/ in the bundle so that DotCMS serves them directly
+        // from /application/images/ — the path referenced in converted HTML content.
+        var files = new[]
+        {
+            new DnnPortalFile(
+                "6f574d5f-0880-4d5a-b4a2-74d2e10b5659",
+                "69f363b0-6512-48ad-b187-b6a450ffda7b",
+                "logo.png", "Images/", "image/png",
+                [0x89, 0x50, 0x4E, 0x47]),
+        };
+
+        var (_, names) = WriteBundleWithFiles(files);
+
+        Assert.Contains("ROOT/application/images/logo.png", names);
+    }
+
+    [Fact]
+    public void Write_WithPortalFiles_RootFilesNotWrittenToApplicationImages()
+    {
+        // Files at the DNN site root (FolderPath = "") must NOT appear under
+        // ROOT/application/images/ — only Images/ sub-folder files go there.
+        var files = new[]
+        {
+            new DnnPortalFile(
+                "e5dfe1f2-4cdc-46bd-ad32-7257a6b8105a",
+                "2af85195-c192-4a33-a14d-a8bb2dc6007e",
+                "home.css", "", "text/css",
+                Encoding.UTF8.GetBytes("/* css */")),
+        };
+
+        var (_, names) = WriteBundleWithFiles(files);
+
+        Assert.DoesNotContain(names, n => n.StartsWith("ROOT/application/images/"));
+    }
+
+    [Fact]
+    public void Write_WithPortalFiles_ImagesFolderSubdirFilePreservesSubdirInApplicationImages()
+    {
+        // A file in a DNN sub-folder of Images/ (e.g. Images/Banners/) should land
+        // at ROOT/application/images/Banners/{filename} preserving the sub-structure.
+        var files = new[]
+        {
+            new DnnPortalFile(
+                "aaaaaaaa-0000-0000-0000-000000000001",
+                "bbbbbbbb-0000-0000-0000-000000000001",
+                "banner.jpg", "Images/Banners/", "image/jpeg",
+                [0xFF, 0xD8, 0xFF]),
+        };
+
+        var (_, names) = WriteBundleWithFiles(files);
+
+        Assert.Contains("ROOT/application/images/Banners/banner.jpg", names);
+    }
+
     // ------------------------------------------------------------------
     // Page multiTree population tests
     // ------------------------------------------------------------------
@@ -2158,7 +2216,7 @@ public class BundleWriterTests
         using var tar = new TarReader(gz);
 
         TarEntry? entry;
-        while ((entry = tar.GetNextEntry()) is not null)
+        while ((entry = tar.GetNextEntry(copyData: true)) is not null)
             names.Add(entry.Name);
 
         ms.Position = 0;
@@ -2385,7 +2443,7 @@ public class BundleWriterTests
             using (var tar = new TarReader(gz))
             {
                 TarEntry? entry;
-                while ((entry = tar.GetNextEntry()) is not null)
+                while ((entry = tar.GetNextEntry(copyData: true)) is not null)
                     names.Add(entry.Name);
             }
             ms.Position = 0;
@@ -2412,7 +2470,7 @@ public class BundleWriterTests
         using (var tar = new TarReader(gz))
         {
             TarEntry? entry;
-            while ((entry = tar.GetNextEntry()) is not null)
+            while ((entry = tar.GetNextEntry(copyData: true)) is not null)
                 names.Add(entry.Name);
         }
 
@@ -2437,7 +2495,7 @@ public class BundleWriterTests
             using (var tar = new TarReader(gz))
             {
                 TarEntry? entry;
-                while ((entry = tar.GetNextEntry()) is not null)
+                while ((entry = tar.GetNextEntry(copyData: true)) is not null)
                     names.Add(entry.Name);
             }
             ms.Position = 0;
@@ -2480,7 +2538,7 @@ public class BundleWriterTests
             using (var tar = new TarReader(gz))
             {
                 TarEntry? entry;
-                while ((entry = tar.GetNextEntry()) is not null)
+                while ((entry = tar.GetNextEntry(copyData: true)) is not null)
                     names.Add(entry.Name);
             }
             ms.Position = 0;
