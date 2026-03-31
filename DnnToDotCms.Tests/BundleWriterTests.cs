@@ -806,6 +806,199 @@ public class BundleWriterTests
     }
 
     // ------------------------------------------------------------------
+    // DnnCssInclude / DnnJsInclude → <link> / <script> conversion
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_ConvertsDnnCssIncludeToLinkTag()
+    {
+        const string ascx = """
+            <dnn:DnnCssInclude ID="BootstrapCSS" runat="server"
+                FilePath="bootstrap/css/bootstrap.min.css" PathNameAlias="SkinPath" Priority="12" />
+            <div id="body"></div>
+            """;
+
+        string result = BundleWriter.ConvertAscxToTemplateHtml(ascx, themeName: "Xcillion");
+
+        Assert.Contains(
+            @"<link rel=""stylesheet"" href=""/application/themes/Xcillion/bootstrap/css/bootstrap.min.css"" />",
+            result);
+        Assert.DoesNotContain("DnnCssInclude", result);
+    }
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_ConvertsDnnJsIncludeToScriptTag()
+    {
+        const string ascx = """
+            <dnn:DnnJsInclude ID="BootstrapJS" runat="server"
+                FilePath="bootstrap/js/bootstrap.min.js" PathNameAlias="SkinPath" />
+            <div id="body"></div>
+            """;
+
+        string result = BundleWriter.ConvertAscxToTemplateHtml(ascx, themeName: "Xcillion");
+
+        Assert.Contains(
+            @"<script src=""/application/themes/Xcillion/bootstrap/js/bootstrap.min.js""></script>",
+            result);
+        Assert.DoesNotContain("DnnJsInclude", result);
+    }
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_SkipsSkinCssPrependWhenDnnCssIncludeProvidesSkinCss()
+    {
+        // When a DnnCssInclude already specifies skin.css, the automatic
+        // skin.css <link> prepend must be skipped to avoid duplicates.
+        const string ascx = """
+            <dnn:DnnCssInclude ID="SkinCSS" runat="server" FilePath="skin.css" PathNameAlias="SkinPath" />
+            <div id="body"></div>
+            """;
+
+        string result = BundleWriter.ConvertAscxToTemplateHtml(ascx, themeName: "Xcillion");
+
+        // Exactly one skin.css reference should appear.
+        int count = 0;
+        int idx = -1;
+        while ((idx = result.IndexOf("skin.css", idx + 1, StringComparison.Ordinal)) >= 0)
+            count++;
+        Assert.Equal(1, count);
+    }
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_WithoutThemeName_DnnCssIncludeStrippedByGenericCleanup()
+    {
+        // Without a theme name the DnnCssInclude tags cannot be rewritten,
+        // so they fall through to the generic DNN-tag cleanup.
+        const string ascx = """
+            <dnn:DnnCssInclude ID="SkinCSS" runat="server" FilePath="skin.css" PathNameAlias="SkinPath" />
+            <div id="body"></div>
+            """;
+
+        string result = BundleWriter.ConvertAscxToTemplateHtml(ascx);
+
+        Assert.DoesNotContain("DnnCssInclude", result);
+        Assert.DoesNotContain("<link", result);
+    }
+
+    // ------------------------------------------------------------------
+    // SSI include resolution
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void ResolveSsiIncludes_InlinesReferencedFileFromZip()
+    {
+        string path = Path.GetTempFileName() + ".zip";
+        try
+        {
+            using (var zip = ZipFile.Open(path, ZipArchiveMode.Create))
+            {
+                ZipArchiveEntry main = zip.CreateEntry("_default/Skins/TestTheme/Home.ascx");
+                using (var w = new StreamWriter(main.Open()))
+                    w.Write("""<div>before</div><!--#include file="Common/AddFiles.ascx"--><div>after</div>""");
+
+                ZipArchiveEntry inc = zip.CreateEntry("_default/Skins/TestTheme/Common/AddFiles.ascx");
+                using (var w = new StreamWriter(inc.Open()))
+                    w.Write("<link>INLINED</link>");
+            }
+
+            using var archive = ZipFile.OpenRead(path);
+            ZipArchiveEntry homeEntry = archive.GetEntry("_default/Skins/TestTheme/Home.ascx")!;
+            using var reader = new StreamReader(homeEntry.Open(), Encoding.UTF8);
+            string ascx = reader.ReadToEnd();
+
+            string result = BundleWriter.ResolveSsiIncludes(
+                ascx, "_default/Skins/TestTheme", archive);
+
+            Assert.Contains("<div>before</div>", result);
+            Assert.Contains("<link>INLINED</link>", result);
+            Assert.Contains("<div>after</div>", result);
+            Assert.DoesNotContain("#include", result);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void ResolveSsiIncludes_RemovesDirectiveWhenFileNotFound()
+    {
+        string path = Path.GetTempFileName() + ".zip";
+        try
+        {
+            using (var zip = ZipFile.Open(path, ZipArchiveMode.Create))
+            {
+                ZipArchiveEntry main = zip.CreateEntry("_default/Skins/TestTheme/Home.ascx");
+                using (var w = new StreamWriter(main.Open()))
+                    w.Write("""<div>main</div><!--#include file="Missing.ascx"-->""");
+            }
+
+            using var archive = ZipFile.OpenRead(path);
+            ZipArchiveEntry homeEntry = archive.GetEntry("_default/Skins/TestTheme/Home.ascx")!;
+            using var reader = new StreamReader(homeEntry.Open(), Encoding.UTF8);
+            string ascx = reader.ReadToEnd();
+
+            string result = BundleWriter.ResolveSsiIncludes(
+                ascx, "_default/Skins/TestTheme", archive);
+
+            Assert.Contains("<div>main</div>", result);
+            Assert.DoesNotContain("#include", result);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void Write_WithSsiIncludeInSkin_InlinedCssIncludesAppearInTemplateBody()
+    {
+        // End-to-end: a skin ASCX that #includes an AddFiles.ascx containing
+        // DnnCssInclude tags should produce a template with proper <link> tags.
+        string path = Path.GetTempFileName() + ".zip";
+        try
+        {
+            using (var zip = ZipFile.Open(path, ZipArchiveMode.Create))
+            {
+                ZipArchiveEntry container =
+                    zip.CreateEntry("_default/Containers/TestTheme/Boxed.ascx");
+                using (var w = new StreamWriter(container.Open()))
+                    w.Write("""<div id="ContentPane" runat="server"></div>""");
+
+                ZipArchiveEntry skin =
+                    zip.CreateEntry("_default/Skins/TestTheme/Home.ascx");
+                using (var w = new StreamWriter(skin.Open()))
+                    w.Write("""
+                        <%@ Control Inherits="DotNetNuke.UI.Skins.Skin" %>
+                        <div id="ContentPane" runat="server"></div>
+                        <!--#include file="Common/AddFiles.ascx"-->
+                        """);
+
+                ZipArchiveEntry addFiles =
+                    zip.CreateEntry("_default/Skins/TestTheme/Common/AddFiles.ascx");
+                using (var w = new StreamWriter(addFiles.Open()))
+                    w.Write("""
+                        <dnn:DnnCssInclude ID="BootstrapCSS" runat="server"
+                            FilePath="bootstrap/css/bootstrap.min.css" PathNameAlias="SkinPath" Priority="12" />
+                        <dnn:DnnCssInclude ID="SkinCSS" runat="server"
+                            FilePath="skin.css" PathNameAlias="SkinPath" />
+                        <dnn:DnnJsInclude ID="ScriptJS" runat="server"
+                            FilePath="js/scripts.js" PathNameAlias="SkinPath" />
+                        """);
+            }
+
+            var (ms, names) = WriteBundleToMemory([MakeHtmlContentType()], path);
+
+            // Read the template XML to verify it contains the converted CSS/JS links.
+            string templateXml = names
+                .Where(n => n.EndsWith(".template.template.xml"))
+                .Select(n => ReadTarEntry(ms, n)!)
+                .First();
+
+            Assert.Contains("/application/themes/TestTheme/bootstrap/css/bootstrap.min.css", templateXml);
+            Assert.Contains("/application/themes/TestTheme/skin.css", templateXml);
+            Assert.Contains("/application/themes/TestTheme/js/scripts.js", templateXml);
+            Assert.DoesNotContain("DnnCssInclude", templateXml);
+            Assert.DoesNotContain("DnnJsInclude", templateXml);
+            Assert.DoesNotContain("#include", templateXml);
+        }
+        finally { File.Delete(path); }
+    }
+
+    // ------------------------------------------------------------------
     // Sub-folder ASCX files are excluded from conversion
     // ------------------------------------------------------------------
 
