@@ -204,7 +204,7 @@ static void PrintUsage()
             • working/System Host/{uuid}.containers.container.xml  — one file per DNN container
             • working/System Host/{uuid}.template.template.xml     — one file per DNN skin
             • manifest.csv                                         — bundle manifest
-            • themes/{ThemeName}/…                                 — static theme assets
+            • ROOT/application/themes/{ThemeName}/…                — static theme assets
               (CSS, JS, images and fonts from export_themes.zip)
 
         Examples:

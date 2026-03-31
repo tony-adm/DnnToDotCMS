@@ -53,6 +53,24 @@ public class ModuleMappingsTests
         Assert.NotEmpty(ct.Fields);
     }
 
+    [Theory]
+    [InlineData("Member Directory",                          "MemberDirectory")]
+    [InlineData("My-Module",                                 "MyModule")]
+    [InlineData("My Module - Content",                       "MyModuleContent")]
+    [InlineData("DotNetNuke.Modules.MemberDirectory",        "DotNetNukeModulesMemberDirectory")]
+    [InlineData("DotNetNuke.Modules.CoreMessaging",          "DotNetNukeModulesCoreMessaging")]
+    [InlineData("Resource Manager",                          "ResourceManager")]
+    public void GetContentType_FallbackName_HasNoSpacesOrHyphens(
+        string moduleName, string expectedName)
+    {
+        DotCmsContentType ct = ModuleMappings.GetContentType(moduleName);
+
+        Assert.Equal(expectedName, ct.Name);
+        Assert.DoesNotContain(" ",  ct.Name);
+        Assert.DoesNotContain("-",  ct.Name);
+        Assert.DoesNotContain(".",  ct.Name);
+    }
+
     [Fact]
     public void GetContentType_HtmlModule_HasTitleAndBodyFields()
     {

@@ -63,6 +63,34 @@ public class DnnConverterTests
     }
 
     [Fact]
+    public void Convert_UnknownModuleWithSpaces_NameHasNoSpaces()
+    {
+        DotCmsContentType ct = DnnConverter.Convert(MakeModule("Member Directory"));
+
+        Assert.Equal("MemberDirectory", ct.Name);
+        Assert.DoesNotContain(" ", ct.Name);
+    }
+
+    [Fact]
+    public void Convert_UnknownModuleWithHyphen_NameHasNoHyphen()
+    {
+        DotCmsContentType ct = DnnConverter.Convert(MakeModule("My-Module"));
+
+        Assert.Equal("MyModule", ct.Name);
+        Assert.DoesNotContain("-", ct.Name);
+    }
+
+    [Fact]
+    public void Convert_UnknownModuleWithSpaceAndHyphen_NameIsCleanPascalCase()
+    {
+        DotCmsContentType ct = DnnConverter.Convert(MakeModule("My Module - Content"));
+
+        Assert.Equal("MyModuleContent", ct.Name);
+        Assert.DoesNotContain(" ", ct.Name);
+        Assert.DoesNotContain("-", ct.Name);
+    }
+
+    [Fact]
     public void Convert_DotSeparatedModuleName_ProducesValidVariable()
     {
         // The module name below intentionally preserves the typo from the
@@ -80,6 +108,15 @@ public class DnnConverterTests
         DotCmsContentType ct = DnnConverter.Convert(MakeModule("dotnetnuke.modules.memberdirctory"));
 
         Assert.Equal("dotnetnukeModulesMemberdirctory", ct.Variable);
+    }
+
+    [Fact]
+    public void Convert_DotSeparatedModuleName_ProducesPascalCaseName()
+    {
+        DotCmsContentType ct = DnnConverter.Convert(MakeModule("DotNetNuke.Modules.MemberDirectory"));
+
+        Assert.Equal("DotNetNukeModulesMemberDirectory", ct.Name);
+        Assert.DoesNotContain(".", ct.Name);
     }
 
     // ------------------------------------------------------------------

@@ -38,9 +38,10 @@ public static class ModuleMappings
         // Generic fallback: create a simple HTML content type named after the module
         string safe = string.IsNullOrWhiteSpace(moduleName) ? "GenericModule" : moduleName.Trim();
         string variable = ToCamelCase(safe);
+        string name     = ToPascalCase(safe);
         return new DotCmsContentType
         {
-            Name        = safe,
+            Name        = name,
             Variable    = variable,
             Description = $"Converted from DNN {safe} module",
             Icon        = "fa fa-cube",
@@ -460,5 +461,36 @@ public static class ModuleMappings
             result = "module" + char.ToUpperInvariant(result[0]) + result[1..];
 
         return result;
+    }
+
+    /// <summary>
+    /// Convert an arbitrary string to PascalCase by splitting on any run of
+    /// non-alphanumeric characters (spaces, hyphens, dots, underscores, …)
+    /// and title-casing each word.  The result contains only letters and
+    /// digits, making it safe to use as a DotCMS content-type name.
+    /// </summary>
+    private static string ToPascalCase(string name)
+    {
+        string[] parts = Regex.Split(name.Trim(), @"[^a-zA-Z0-9]+")
+                               .Where(p => !string.IsNullOrEmpty(p))
+                               .ToArray();
+        if (parts.Length == 0) return "GenericModule";
+
+        var result = new System.Text.StringBuilder();
+        foreach (string part in parts)
+        {
+            if (!string.IsNullOrEmpty(part))
+                result.Append(char.ToUpperInvariant(part[0]))
+                      .Append(part.Length > 1 ? part[1..] : string.Empty);
+        }
+
+        string pascalName = Regex.Replace(result.ToString(), @"[^a-zA-Z0-9]", string.Empty);
+        if (string.IsNullOrEmpty(pascalName)) return "GenericModule";
+
+        // Content-type names must start with a letter.
+        if (char.IsDigit(pascalName[0]))
+            pascalName = "Module" + char.ToUpperInvariant(pascalName[0]) + pascalName[1..];
+
+        return pascalName;
     }
 }
