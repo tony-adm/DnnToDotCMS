@@ -328,6 +328,11 @@ public static class DnnXmlParser
             if (string.IsNullOrWhiteSpace(fileName)) continue;
 
             string folderPath  = folderVal?.AsString ?? string.Empty;
+            // Normalise folder path: DNN may omit the trailing slash in some export
+            // versions (e.g. "Images" instead of "Images/").  Always ensure a
+            // trailing slash on non-empty paths so downstream code works uniformly.
+            if (folderPath.Length > 0 && !folderPath.EndsWith('/'))
+                folderPath += '/';
             string mimeType    = ctVal?.AsString     ?? "application/octet-stream";
             string uniqueId    = uidVal.AsGuid.ToString();
             string versionGuid = versionVal.AsGuid.ToString();
