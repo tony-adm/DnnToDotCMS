@@ -209,6 +209,23 @@ public class BundleWriterTests
     }
 
     [Fact]
+    public void ContentTypeJson_ContentType_NameHasNoLeadingOrTrailingSpaces()
+    {
+        // Content-type names must be trimmed; a name with surrounding whitespace
+        // causes DotCMS to display the content type with leading spaces in the UI.
+        var ct = MakeHtmlContentType();
+        ct.Name = "  HTMLContent  ";   // deliberately add leading/trailing whitespace
+
+        var (ms, names) = WriteBundleToMemory([ct]);
+        using var doc = ParseFirstContentTypeJson(ms, names);
+
+        string name = doc.RootElement
+            .GetProperty("contentType").GetProperty("name").GetString()!;
+
+        Assert.Equal("HTMLContent", name);
+    }
+
+    [Fact]
     public void ContentTypeJson_ContentType_HasImmutableClazz()
     {
         var (ms, names) = WriteBundleToMemory([MakeHtmlContentType()]);
@@ -733,6 +750,59 @@ public class BundleWriterTests
         Assert.Contains("id=\"siteWrapper\"", result);
         Assert.Contains("id=\"header\"", result);
         Assert.Contains("id=\"footer\"", result);
+    }
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_WithThemeName_PrependsSkinCssLink()
+    {
+        // When a theme name is supplied, a <link> tag for the theme's skin.css
+        // must be prepended to the template body so DotCMS loads the skin styles.
+        const string ascx = """<div id="body"></div>""";
+
+        string result = BundleWriter.ConvertAscxToTemplateHtml(ascx, themeName: "Xcillion");
+
+        Assert.Contains(@"<link rel=""stylesheet"" href=""/application/themes/Xcillion/skin.css""", result);
+        // The CSS link must appear before the body content.
+        int cssIndex  = result.IndexOf("skin.css", StringComparison.Ordinal);
+        int bodyIndex = result.IndexOf("id=\"body\"", StringComparison.Ordinal);
+        Assert.True(cssIndex < bodyIndex, "skin.css link must precede the template body.");
+    }
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_WithoutThemeName_DoesNotPrependCssLink()
+    {
+        // Without a theme name no CSS link should be injected.
+        const string ascx = """<div id="body"></div>""";
+
+        string result = BundleWriter.ConvertAscxToTemplateHtml(ascx);
+
+        Assert.DoesNotContain("<link", result);
+    }
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_WithThemeName_LogoUsesThemePath()
+    {
+        // <dnn:LOGO> must be replaced with an <img> pointing to the theme's
+        // Images/logo.png when a theme name is provided.
+        const string ascx = """<div><dnn:LOGO runat="server" id="logo" /></div>""";
+
+        string result = BundleWriter.ConvertAscxToTemplateHtml(ascx, themeName: "Xcillion");
+
+        Assert.Contains("/application/themes/Xcillion/Images/logo.png", result);
+        Assert.DoesNotContain("dnn:LOGO", result);
+    }
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_WithoutThemeName_LogoUsesGenericPath()
+    {
+        // Without a theme name the <dnn:LOGO> fallback path /logo.png is used.
+        const string ascx = """<div><dnn:LOGO runat="server" id="logo" /></div>""";
+
+        string result = BundleWriter.ConvertAscxToTemplateHtml(ascx);
+
+        Assert.Contains("/logo.png", result);
+        Assert.DoesNotContain("dnn:LOGO", result);
+        Assert.DoesNotContain("/application/themes/", result);
     }
 
     // ------------------------------------------------------------------
@@ -2348,6 +2418,81 @@ public class BundleWriterTests
 
         // No template entries should be present (no themes zip → no templates).
         Assert.DoesNotContain(names, n => n.EndsWith(".template.template.xml"));
+    }
+
+    [Fact]
+    public void Write_WithTheme_TemplateBodyContainsSkinCssLink()
+    {
+        // The converted template body must include a <link> tag for skin.css so
+        // that DotCMS loads the theme styles when rendering pages.
+        string zipPath = BuildThemesZip();
+        try
+        {
+            var ms = new MemoryStream();
+            BundleWriter.Write([MakeHtmlContentType()], ms, zipPath, "Test Site");
+            ms.Position = 0;
+
+            var names = new List<string>();
+            using (var gz  = new GZipStream(ms, CompressionMode.Decompress, leaveOpen: true))
+            using (var tar = new TarReader(gz))
+            {
+                TarEntry? entry;
+                while ((entry = tar.GetNextEntry()) is not null)
+                    names.Add(entry.Name);
+            }
+            ms.Position = 0;
+
+            string templateEntry = names.First(n => n.EndsWith(".template.template.xml"));
+            string xml = ReadTarEntry(ms, templateEntry)!;
+
+            // The template body must contain a skin.css link for the theme.
+            Assert.Contains("skin.css", xml);
+            Assert.Contains("/application/themes/TestTheme/skin.css", xml);
+        }
+        finally { File.Delete(zipPath); }
+    }
+
+    [Fact]
+    public void Write_WithTheme_TemplateBodyLogoUsesThemePath()
+    {
+        // When a <dnn:LOGO> control appears in the skin, it must be replaced
+        // with an <img> pointing to the theme's Images/logo.png path.
+        string zipPath = Path.GetTempFileName() + ".zip";
+        try
+        {
+            using (var zip = ZipFile.Open(zipPath, ZipArchiveMode.Create))
+            {
+                ZipArchiveEntry skin = zip.CreateEntry("_default/Skins/TestTheme/Home.ascx");
+                using (var w = new StreamWriter(skin.Open()))
+                    w.Write("""<div><dnn:LOGO runat="server" id="logo" /></div>""");
+
+                ZipArchiveEntry container = zip.CreateEntry("_default/Containers/TestTheme/C.ascx");
+                using (var w = new StreamWriter(container.Open()))
+                    w.Write("""<div id="ContentPane" runat="server"></div>""");
+            }
+
+            var ms = new MemoryStream();
+            BundleWriter.Write([MakeHtmlContentType()], ms, zipPath, "Test Site");
+            ms.Position = 0;
+
+            var names = new List<string>();
+            using (var gz  = new GZipStream(ms, CompressionMode.Decompress, leaveOpen: true))
+            using (var tar = new TarReader(gz))
+            {
+                TarEntry? entry;
+                while ((entry = tar.GetNextEntry()) is not null)
+                    names.Add(entry.Name);
+            }
+            ms.Position = 0;
+
+            string templateEntry = names.First(n => n.EndsWith(".template.template.xml"));
+            string xml = ReadTarEntry(ms, templateEntry)!;
+
+            Assert.Contains("/application/themes/TestTheme/Images/logo.png", xml);
+            // The generic /logo.png path (not under the theme) must not appear.
+            Assert.DoesNotContain("src=&quot;/logo.png&quot;", xml);
+        }
+        finally { File.Delete(zipPath); }
     }
 
 }

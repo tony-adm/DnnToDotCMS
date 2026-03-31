@@ -364,7 +364,18 @@ public static class DnnXmlParser
             // The CDATA value still has HTML entities encoded (e.g. &lt;, &quot;).
             // Decode them to get the actual HTML markup.
             string decoded = System.Net.WebUtility.HtmlDecode(content.Value);
-            return string.IsNullOrWhiteSpace(decoded) ? null : decoded.Trim();
+            if (string.IsNullOrWhiteSpace(decoded))
+                return null;
+
+            // Replace the DNN portal-root token {{PortalRoot}} with a site-root
+            // slash so that image and asset URLs become valid DotCMS paths.
+            // In DNN, {{PortalRoot}} expands to "/Portals/{id}/" at runtime.
+            // After migration, portal files are served from the DotCMS site root,
+            // so replacing the token with "/" produces the correct relative URL
+            // (e.g. "{{PortalRoot}}Images/logo.png" → "/Images/logo.png").
+            decoded = decoded.Replace("{{PortalRoot}}", "/", StringComparison.OrdinalIgnoreCase);
+
+            return decoded.Trim();
         }
         catch
         {
