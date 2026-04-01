@@ -943,8 +943,8 @@ public class BundleWriterTests
         int homeCssIndex = result.IndexOf("Home.css", StringComparison.Ordinal);
         Assert.True(skinCssIndex >= 0, "skin.css link must be present.");
         Assert.True(homeCssIndex >= 0, "Home.css link must be present.");
-        Assert.True(homeCssIndex < skinCssIndex,
-            "Per-skin CSS link should precede skin.css link (both prepended, per-skin last).");
+        Assert.True(skinCssIndex < homeCssIndex,
+            "skin.css link must precede per-skin CSS link (DNN loads base skin styles first).");
     }
 
     [Fact]
