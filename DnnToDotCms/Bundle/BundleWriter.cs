@@ -413,7 +413,8 @@ public static class BundleWriter
             {
                 WriteThemeFileAssets(
                     tar, themesZipPath, contentHostId,
-                    siteId, siteInode, contentWorkDir, manifestEntries);
+                    siteId, siteInode, contentWorkDir, manifestEntries,
+                    templateDefs);
             }
             catch (Exception ex) when (ex is InvalidDataException or IOException)
             {
@@ -1913,16 +1914,16 @@ public static class BundleWriter
         // BEFORE the skin.css injection below so that skin.css ends
         // up first in the output (matching DNN's load order: skin.css base
         // styles first, per-skin overrides second).  Skip when the skin
-        // name is "skin" (already covered), when already referenced, or
-        // when an availableThemeFiles set is provided and the file is not
-        // present in the export.
+        // name is "skin" (already covered) or when already referenced.
+        // Unlike skin.css, the per-skin link is always injected regardless
+        // of availableThemeFiles because WriteThemeFileAssets creates a
+        // placeholder CSS file when the export does not include one.
         if (!string.IsNullOrWhiteSpace(themeName) &&
             !string.IsNullOrWhiteSpace(skinName) &&
             !string.Equals(skinName, "skin", StringComparison.OrdinalIgnoreCase))
         {
             string skinCssHref = $"/application/themes/{themeName}/{skinName}.css";
-            if (!alreadyReferenced(skinCssHref) &&
-                (availableThemeFiles is null || availableThemeFiles.Contains(skinCssHref.TrimStart('/'))))
+            if (!alreadyReferenced(skinCssHref))
             {
                 string skinCssLink = $@"<link rel=""stylesheet"" href=""{skinCssHref}"" />";
                 cssTags.Add(skinCssLink);
@@ -1965,7 +1966,10 @@ public static class BundleWriter
     /// builds the DotCMS folder hierarchy, and writes each file as a proper
     /// <c>FileAsset</c> contentlet so that DotCMS's push-publish importer
     /// creates the <c>/application/themes/</c> directory tree and places the
-    /// files correctly.
+    /// files correctly.  When <paramref name="templateDefs"/> is supplied,
+    /// placeholder per-skin CSS files (e.g. <c>Home.css</c> for
+    /// <c>Home.ascx</c>) are created for any skin template that does not
+    /// already have a matching CSS file in the export.
     /// </summary>
     private static void WriteThemeFileAssets(
         TarWriter tar,
@@ -1974,7 +1978,8 @@ public static class BundleWriter
         string? siteId,
         string? siteInode,
         string contentWorkDir,
-        List<(string type, string id, string inode, string name, string site, string folder)> manifestEntries)
+        List<(string type, string id, string inode, string name, string site, string folder)> manifestEntries,
+        IReadOnlyList<(string id, string inode, string name, string html, string header, string themeName)>? templateDefs = null)
     {
         using var zip = System.IO.Compression.ZipFile.OpenRead(themesZipPath);
 
@@ -2003,6 +2008,39 @@ public static class BundleWriter
             entryStream.CopyTo(ms);
 
             themeFiles.Add((relPath, entry.Name, ms.ToArray()));
+        }
+
+        // Create placeholder per-skin CSS files for templates that do not
+        // already have a matching CSS file in the export.  DNN auto-loads
+        // {SkinName}.css alongside each skin ASCX; the link is always
+        // injected in the template HTML so the file must exist in DotCMS.
+        if (templateDefs is not null)
+        {
+            var existingPaths = new HashSet<string>(
+                themeFiles.Select(f => f.relPath),
+                StringComparer.OrdinalIgnoreCase);
+
+            foreach (var (_, _, name, _, _, themeName) in templateDefs)
+            {
+                if (string.IsNullOrWhiteSpace(themeName) ||
+                    string.IsNullOrWhiteSpace(name) ||
+                    string.Equals(name, "skin", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                string cssRelPath = $"application/themes/{themeName}/{name}.css";
+                if (!existingPaths.Contains(cssRelPath))
+                {
+                    string fileName = $"{name}.css";
+                    // USTAR tar format has a max path length of 256 characters.
+                    // BuildAssetPath adds ~58 characters of overhead, so skip
+                    // placeholder creation when the filename is too long.
+                    if (fileName.Length > 190)
+                        continue;
+                    byte[] emptyContent = "/* Per-skin CSS placeholder */\n"u8.ToArray();
+                    themeFiles.Add((cssRelPath, fileName, emptyContent));
+                    existingPaths.Add(cssRelPath);
+                }
+            }
         }
 
         if (themeFiles.Count == 0)
