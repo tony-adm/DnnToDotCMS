@@ -1607,7 +1607,7 @@ public static class BundleWriter
                 ascx = ResolveSsiIncludes(ascx, skinDir, zip);
             }
 
-            string html = ConvertAscxToTemplateHtml(ascx, firstContainerId, themeName);
+            string html = ConvertAscxToTemplateHtml(ascx, firstContainerId, themeName, name);
             templateDefs.Add((Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), name, html, themeName));
         }
     }
@@ -1816,7 +1816,8 @@ public static class BundleWriter
     public static string ConvertAscxToTemplateHtml(
         string ascx,
         string defaultContainerId = "",
-        string themeName = "")
+        string themeName = "",
+        string skinName = "")
     {
         string html = DirectiveRegex.Replace(ascx, string.Empty);
         html = CodeBlockRegex.Replace(html, string.Empty);
@@ -1877,6 +1878,22 @@ public static class BundleWriter
         {
             string cssLink = $@"<link rel=""stylesheet"" href=""/application/themes/{themeName}/skin.css"" />";
             html = cssLink + "\n" + html;
+        }
+
+        // DNN also automatically loads a per-skin CSS file that matches the
+        // skin filename (e.g. Home.css for Home.ascx).  Inject the link when
+        // both a theme and skin name are known, and the file isn't already
+        // referenced (skin.css is handled above, so skip when the names match).
+        if (!string.IsNullOrWhiteSpace(themeName) &&
+            !string.IsNullOrWhiteSpace(skinName) &&
+            !string.Equals(skinName, "skin", StringComparison.OrdinalIgnoreCase))
+        {
+            string skinCssHref = $"/application/themes/{themeName}/{skinName}.css";
+            if (!html.Contains(skinCssHref, StringComparison.OrdinalIgnoreCase))
+            {
+                string skinCssLink = $@"<link rel=""stylesheet"" href=""{skinCssHref}"" />";
+                html = skinCssLink + "\n" + html;
+            }
         }
 
         return html;
