@@ -1607,7 +1607,7 @@ public static class BundleWriter
                 ascx = ResolveSsiIncludes(ascx, skinDir, zip);
             }
 
-            string html = ConvertAscxToTemplateHtml(ascx, firstContainerId, themeName);
+            string html = ConvertAscxToTemplateHtml(ascx, firstContainerId, themeName, name);
             templateDefs.Add((Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), name, html, themeName));
         }
     }
@@ -1816,7 +1816,8 @@ public static class BundleWriter
     public static string ConvertAscxToTemplateHtml(
         string ascx,
         string defaultContainerId = "",
-        string themeName = "")
+        string themeName = "",
+        string skinName = "")
     {
         string html = DirectiveRegex.Replace(ascx, string.Empty);
         html = CodeBlockRegex.Replace(html, string.Empty);
@@ -1867,10 +1868,30 @@ public static class BundleWriter
         html = DnnOpenCloseTagRegex.Replace(html, string.Empty);
         html = html.Trim();
 
+        // DNN automatically loads a per-skin CSS file that matches the
+        // skin filename (e.g. Home.css for Home.ascx).  Prepend the link
+        // BEFORE the skin.css injection below so that skin.css ends up
+        // first in the output (matching DNN's load order: skin.css base
+        // styles first, per-skin overrides second).  Skip when the skin
+        // name is "skin" (already covered) or when already referenced.
+        if (!string.IsNullOrWhiteSpace(themeName) &&
+            !string.IsNullOrWhiteSpace(skinName) &&
+            !string.Equals(skinName, "skin", StringComparison.OrdinalIgnoreCase))
+        {
+            string skinCssHref = $"/application/themes/{themeName}/{skinName}.css";
+            if (!html.Contains(skinCssHref, StringComparison.OrdinalIgnoreCase))
+            {
+                string skinCssLink = $@"<link rel=""stylesheet"" href=""{skinCssHref}"" />";
+                html = skinCssLink + "\n" + html;
+            }
+        }
+
         // Prepend a <link> tag for the theme's main skin.css so that DotCMS
         // loads the skin styles when rendering the page.  DNN automatically
         // included the skin CSS via its own framework; in DotCMS we must add
-        // an explicit stylesheet reference.  Skip the prepend when a
+        // an explicit stylesheet reference.  Because this prepend runs after
+        // the per-skin link above, skin.css will appear first in the final
+        // output — matching DNN's load order.  Skip the prepend when a
         // DnnCssInclude directive already emitted a skin.css link above.
         if (!string.IsNullOrWhiteSpace(themeName) &&
             !html.Contains($"/application/themes/{themeName}/skin.css", StringComparison.OrdinalIgnoreCase))

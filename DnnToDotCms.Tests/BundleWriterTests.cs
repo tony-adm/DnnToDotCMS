@@ -880,6 +880,94 @@ public class BundleWriterTests
     }
 
     // ------------------------------------------------------------------
+    // Per-skin CSS injection (e.g. Home.css for Home.ascx)
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_WithSkinName_PrependsSkinSpecificCssLink()
+    {
+        // DNN auto-loads [SkinName].css from the skin folder alongside
+        // the skin's ASCX file.  The converter must inject this link.
+        const string ascx = """<div id="body"></div>""";
+
+        string result = BundleWriter.ConvertAscxToTemplateHtml(
+            ascx, themeName: "Xcillion", skinName: "Home");
+
+        Assert.Contains(
+            @"<link rel=""stylesheet"" href=""/application/themes/Xcillion/Home.css""",
+            result);
+    }
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_SkinNameSkin_DoesNotDuplicateSkinCss()
+    {
+        // When the skin name is literally "skin", the per-skin link would
+        // duplicate the skin.css link already injected – it must be skipped.
+        const string ascx = """<div id="body"></div>""";
+
+        string result = BundleWriter.ConvertAscxToTemplateHtml(
+            ascx, themeName: "Xcillion", skinName: "skin");
+
+        int count = 0;
+        int idx = -1;
+        while ((idx = result.IndexOf("skin.css", idx + 1, StringComparison.Ordinal)) >= 0)
+            count++;
+        Assert.Equal(1, count);
+    }
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_WithoutSkinName_DoesNotInjectPerSkinCss()
+    {
+        // When no skin name is supplied, only the shared skin.css link
+        // should appear – no per-skin link should be added.
+        const string ascx = """<div id="body"></div>""";
+
+        string result = BundleWriter.ConvertAscxToTemplateHtml(
+            ascx, themeName: "Xcillion");
+
+        Assert.Contains("skin.css", result);
+        Assert.DoesNotContain("Home.css", result);
+    }
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_SkinCssPrecedesSkinSpecificCss()
+    {
+        // skin.css must appear before the per-skin CSS to mirror DNN's
+        // loading order where global skin styles load first.
+        const string ascx = """<div id="body"></div>""";
+
+        string result = BundleWriter.ConvertAscxToTemplateHtml(
+            ascx, themeName: "Xcillion", skinName: "Home");
+
+        int skinCssIndex = result.IndexOf("skin.css", StringComparison.Ordinal);
+        int homeCssIndex = result.IndexOf("Home.css", StringComparison.Ordinal);
+        Assert.True(skinCssIndex >= 0, "skin.css link must be present.");
+        Assert.True(homeCssIndex >= 0, "Home.css link must be present.");
+        Assert.True(skinCssIndex < homeCssIndex,
+            "skin.css link must precede per-skin CSS link (DNN loads base skin styles first).");
+    }
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_SkipsDuplicatePerSkinCssWhenAlreadyPresent()
+    {
+        // If the per-skin CSS is already referenced (e.g. via a
+        // DnnCssInclude), it should not be injected a second time.
+        const string ascx = """
+            <dnn:DnnCssInclude ID="HomeCSS" runat="server" FilePath="Home.css" PathNameAlias="SkinPath" />
+            <div id="body"></div>
+            """;
+
+        string result = BundleWriter.ConvertAscxToTemplateHtml(
+            ascx, themeName: "Xcillion", skinName: "Home");
+
+        int count = 0;
+        int idx = -1;
+        while ((idx = result.IndexOf("Home.css", idx + 1, StringComparison.Ordinal)) >= 0)
+            count++;
+        Assert.Equal(1, count);
+    }
+
+    // ------------------------------------------------------------------
     // SSI include resolution
     // ------------------------------------------------------------------
 
