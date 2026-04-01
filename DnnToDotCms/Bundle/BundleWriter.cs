@@ -2214,7 +2214,10 @@ public static class BundleWriter
     public static string DeterministicId(string seed)
     {
         byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(seed));
-        // Set UUID version 5 (name-based SHA) and RFC 4122 variant bits.
+        // Shape the first 16 bytes into a UUID-like value with version
+        // and variant bits set for compatibility with UUID parsers.
+        // Note: this is NOT a strict RFC 4122 UUID v5 (which uses SHA-1);
+        // SHA-256 provides better collision resistance.
         hash[6] = (byte)((hash[6] & 0x0F) | 0x50);
         hash[8] = (byte)((hash[8] & 0x3F) | 0x80);
         return new Guid(hash[..16]).ToString();
