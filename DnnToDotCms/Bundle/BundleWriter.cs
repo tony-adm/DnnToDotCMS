@@ -415,21 +415,39 @@ public static class BundleWriter
                 manifestEntries.Add(("contentlet", identifier, inode,
                     Truncate(pf.FileName, MaxVarcharLength), contentWorkDir, "/"));
 
-                // Files from the DNN Images/ folder are also written as static web
-                // resources to ROOT/application/images/ so that DotCMS serves them
-                // directly from /application/images/.  HTML content references the
-                // same path after the {{PortalRoot}}Images/ token replacement.
-                // Normalise the folder path to ensure a trailing slash so that the
-                // prefix check works whether DNN stored "Images" or "Images/".
-                const string imagesFolderPrefix = "Images/";
+                // Portal files are also written as static web resources under
+                // ROOT/ so that URL references in migrated HTML content resolve
+                // correctly.  DNN HTML uses {{PortalRoot}} tokens that map to:
+                //   {{PortalRoot}}Images/x  →  /application/images/x  (special)
+                //   {{PortalRoot}}Other/x   →  /Other/x               (general)
+                //   {{PortalRoot}}file.css  →  /file.css              (root)
+                //
+                // Theme-related folders (Containers/, Skins/) are already
+                // processed from export_themes.zip by WriteThemeFileAssets and
+                // are not referenced via {{PortalRoot}} tokens, so they are
+                // excluded from static-resource writing.
                 string normalizedFolderPath = pf.FolderPath;
                 if (normalizedFolderPath.Length > 0 && !normalizedFolderPath.EndsWith('/'))
                     normalizedFolderPath += '/';
-                if (normalizedFolderPath.StartsWith(imagesFolderPrefix, StringComparison.OrdinalIgnoreCase))
+
+                if (normalizedFolderPath.StartsWith("Containers/", StringComparison.OrdinalIgnoreCase) ||
+                    normalizedFolderPath.StartsWith("Skins/", StringComparison.OrdinalIgnoreCase))
                 {
-                    // Preserve any sub-folder depth (e.g. "Images/Banners/" → "Banners/").
-                    string relativePath = normalizedFolderPath[imagesFolderPrefix.Length..] + pf.FileName;
+                    // Theme-related folder — skip static resource writing.
+                }
+                else if (normalizedFolderPath.StartsWith("Images/", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Images/ maps to /application/images/ to match the
+                    // {{PortalRoot}}Images/ replacement in ExtractHtmlBodyFromDnnXml.
+                    string relativePath = normalizedFolderPath["Images/".Length..] + pf.FileName;
                     WriteBinaryEntry(tar, "ROOT/application/images/" + relativePath, pf.Content);
+                }
+                else
+                {
+                    // All other folders and root-level files are written to
+                    // ROOT/{folderPath}/{fileName}, matching the general
+                    // {{PortalRoot}} → "/" replacement.
+                    WriteBinaryEntry(tar, "ROOT/" + normalizedFolderPath + pf.FileName, pf.Content);
                 }
             }
         }
