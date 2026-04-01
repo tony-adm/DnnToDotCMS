@@ -266,9 +266,9 @@ public static class DnnXmlParser
             // Create a content entry for EVERY tab the module appears on.
             // Shared modules (e.g. footer) appear on many tabs in DNN and
             // their content must be present on each corresponding DotCMS page.
-            if (moduleTabIds.TryGetValue(moduleId, out List<string>? tabs2) && tabs2.Count > 0)
+            if (moduleTabIds.TryGetValue(moduleId, out List<string>? associatedTabs) && associatedTabs.Count > 0)
             {
-                foreach (string tabUniqueId in tabs2)
+                foreach (string tabUniqueId in associatedTabs)
                 {
                     results.Add(new DnnHtmlContent(
                         Title:       displayTitle,
