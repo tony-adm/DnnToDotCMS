@@ -1582,6 +1582,27 @@ public static class BundleWriter
         // Use the first container's identifier so template panes can reference it.
         string firstContainerId = containerDefs.Count > 0 ? containerDefs[0].id : string.Empty;
 
+        // Build a set of available non-ASCX theme file paths so that
+        // ConvertAscxToTemplateHtml only injects CSS link tags for files
+        // that actually exist in the export (DNN auto-loads per-skin CSS
+        // only when the file is present on disk).
+        var availableThemeFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (ZipArchiveEntry entry in zip.Entries)
+        {
+            if (string.IsNullOrEmpty(entry.Name) || entry.FullName.EndsWith('/'))
+                continue;
+            if (entry.Name.EndsWith(".ascx", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            string entryPath = entry.FullName.Replace('\\', '/');
+            string bundlePath = MapThemePath(entryPath);
+            const string rootPrefix = "ROOT/";
+            string relPath = bundlePath.StartsWith(rootPrefix, StringComparison.Ordinal)
+                ? bundlePath[rootPrefix.Length..]
+                : bundlePath;
+            availableThemeFiles.Add(relPath);
+        }
+
         // Second pass: collect templates, wiring pane divs to #parseContainer.
         foreach (ZipArchiveEntry entry in zip.Entries)
         {
@@ -1614,7 +1635,7 @@ public static class BundleWriter
                 ascx = ResolveSsiIncludes(ascx, skinDir, zip);
             }
 
-            var (html, header) = ConvertAscxToTemplateHtml(ascx, firstContainerId, themeName, name);
+            var (html, header) = ConvertAscxToTemplateHtml(ascx, firstContainerId, themeName, name, availableThemeFiles);
             templateDefs.Add((Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), name, html, header, themeName));
         }
     }
@@ -1824,7 +1845,8 @@ public static class BundleWriter
         string ascx,
         string defaultContainerId = "",
         string themeName = "",
-        string skinName = "")
+        string skinName = "",
+        IReadOnlySet<string>? availableThemeFiles = null)
     {
         string html = DirectiveRegex.Replace(ascx, string.Empty);
         html = CodeBlockRegex.Replace(html, string.Empty);
@@ -1890,13 +1912,16 @@ public static class BundleWriter
         // BEFORE the skin.css injection below so that skin.css ends
         // up first in the output (matching DNN's load order: skin.css base
         // styles first, per-skin overrides second).  Skip when the skin
-        // name is "skin" (already covered) or when already referenced.
+        // name is "skin" (already covered), when already referenced, or
+        // when an availableThemeFiles set is provided and the file is not
+        // present in the export.
         if (!string.IsNullOrWhiteSpace(themeName) &&
             !string.IsNullOrWhiteSpace(skinName) &&
             !string.Equals(skinName, "skin", StringComparison.OrdinalIgnoreCase))
         {
             string skinCssHref = $"/application/themes/{themeName}/{skinName}.css";
-            if (!alreadyReferenced(skinCssHref))
+            if (!alreadyReferenced(skinCssHref) &&
+                (availableThemeFiles is null || availableThemeFiles.Contains(skinCssHref.TrimStart('/'))))
             {
                 string skinCssLink = $@"<link rel=""stylesheet"" href=""{skinCssHref}"" />";
                 cssTags.Add(skinCssLink);
@@ -1907,12 +1932,18 @@ public static class BundleWriter
         // automatically included the skin CSS via its own framework; in
         // DotCMS we must add it explicitly.  Insert at position 0 so
         // skin.css appears first — matching DNN's load order.  Skip when
-        // a DnnCssInclude directive already emitted a skin.css link above.
-        if (!string.IsNullOrWhiteSpace(themeName) &&
-            !alreadyReferenced($"/application/themes/{themeName}/skin.css"))
+        // a DnnCssInclude directive already emitted a skin.css link above,
+        // or when an availableThemeFiles set is provided and skin.css is
+        // not present in the export.
+        if (!string.IsNullOrWhiteSpace(themeName))
         {
-            string cssLink = $@"<link rel=""stylesheet"" href=""/application/themes/{themeName}/skin.css"" />";
-            cssTags.Insert(0, cssLink);
+            string skinCssHref = $"/application/themes/{themeName}/skin.css";
+            if (!alreadyReferenced(skinCssHref) &&
+                (availableThemeFiles is null || availableThemeFiles.Contains(skinCssHref.TrimStart('/'))))
+            {
+                string cssLink = $@"<link rel=""stylesheet"" href=""{skinCssHref}"" />";
+                cssTags.Insert(0, cssLink);
+            }
         }
 
         // Prepend collected CSS <link> tags to the body so they appear
