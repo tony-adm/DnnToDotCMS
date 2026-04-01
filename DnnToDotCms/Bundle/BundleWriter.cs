@@ -1973,23 +1973,20 @@ public static class BundleWriter
     // ------------------------------------------------------------------
 
     /// <summary>
-    /// Reads non-ASCX static files from <paramref name="themesZipPath"/>,
-    /// builds the DotCMS folder hierarchy, and writes each file as a proper
-    /// <c>FileAsset</c> contentlet so that DotCMS's push-publish importer
-    /// creates the <c>/application/themes/</c> directory tree and places the
-    /// files correctly.  When <paramref name="templateDefs"/> is supplied,
-    /// placeholder per-skin CSS files (e.g. <c>Home.css</c> for
-    /// <c>Home.ascx</c>) are created for any skin template that does not
-    /// already have a matching CSS file in the export.
-    /// </summary>
-    /// <summary>
-    /// Write theme static file assets to the bundle.  When
-    /// <paramref name="portalFiles"/> are provided, any per-skin CSS
-    /// placeholder that matches a portal file by name will use the real
-    /// content from the portal file instead of an empty placeholder.
-    /// Consumed portal-file identifiers are added to
-    /// <paramref name="consumedPortalFileIds"/> so callers can avoid
-    /// writing those files a second time at the site root.
+    /// Write theme static file assets to the bundle.  Reads non-ASCX static
+    /// files from <paramref name="themesZipPath"/>, builds the DotCMS folder
+    /// hierarchy, and writes each file as a proper <c>FileAsset</c> contentlet
+    /// so that DotCMS's push-publish importer creates the
+    /// <c>/application/themes/</c> directory tree and places the files
+    /// correctly.  When <paramref name="templateDefs"/> is supplied, per-skin
+    /// CSS files (e.g. <c>Home.css</c> for <c>Home.ascx</c>) are created for
+    /// any skin template that does not already have a matching CSS file in the
+    /// theme export.  When <paramref name="portalFiles"/> are provided, any
+    /// per-skin CSS file that matches a portal file by name will use the real
+    /// content from the portal file instead of an empty placeholder.  Consumed
+    /// portal-file identifiers are added to
+    /// <paramref name="consumedPortalFileIds"/> so callers can avoid writing
+    /// those files a second time at the site root.
     /// </summary>
     private static void WriteThemeFileAssets(
         TarWriter tar,
