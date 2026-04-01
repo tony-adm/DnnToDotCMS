@@ -118,7 +118,7 @@ public static class BundleWriter
         // that their IDs are known before the manifest.csv is written.
         // Tuple: (identifier, inode, name, html, themeName)
         var containerDefs = new List<(string id, string inode, string name, string html)>();
-        var templateDefs  = new List<(string id, string inode, string name, string html, string themeName)>();
+        var templateDefs  = new List<(string id, string inode, string name, string html, string header, string themeName)>();
 
         if (themesZipPath is not null && File.Exists(themesZipPath))
         {
@@ -189,9 +189,9 @@ public static class BundleWriter
 
         // --- templates (from DNN skins) --------------------------------------
         // Written to live/ so they are imported as published (not draft) assets.
-        foreach (var (id, inode, name, html, themeName) in templateDefs)
+        foreach (var (id, inode, name, html, header, themeName) in templateDefs)
         {
-            string xml = BuildTemplateXml(id, inode, name, html, contentHostId, themeName);
+            string xml = BuildTemplateXml(id, inode, name, html, contentHostId, themeName, header);
             WriteTextEntry(tar, $"live/{contentWorkDir}/{id}.template.template.xml", xml);
             manifestEntries.Add(("template", id, inode, name, "", ""));
         }
@@ -632,11 +632,18 @@ public static class BundleWriter
 
     private static string BuildTemplateXml(
         string id, string inode, string title, string body, string hostId = "SYSTEM_HOST",
-        string themeName = "")
+        string themeName = "", string headerContent = "")
     {
         string now      = DateTime.UtcNow.ToString(XmlTimestampFormat);
         string xmlBody  = System.Security.SecurityElement.Escape(body) ?? string.Empty;
         string xmlTitle = System.Security.SecurityElement.Escape(Truncate(title, MaxVarcharLength)) ?? string.Empty;
+        // The header field is rendered by DotCMS inside the HTML <head> section.
+        // CSS <link> tags extracted from DNN skins belong here so browsers
+        // receive them in <head> — matching DNN's behaviour where the client-
+        // resource framework registered stylesheets in <head>.
+        string xmlHeader = string.IsNullOrWhiteSpace(headerContent)
+            ? "null"
+            : (System.Security.SecurityElement.Escape(headerContent) ?? "null");
         // Resolve the DotCMS application theme path.  Static assets from the DNN
         // skin are written to ROOT/application/themes/{themeName}/ so the template
         // must reference that same path for DotCMS to include the theme's CSS/JS.
@@ -675,7 +682,7 @@ public static class BundleWriter
                 <countAddContainer>0</countAddContainer>
                 <countContainers>0</countContainers>
                 <theme>{themeValue}</theme>
-                <header>null</header>
+                <header>{xmlHeader}</header>
                 <footer>null</footer>
               </template>
               <vi class="com.dotmarketing.portlets.templates.model.TemplateVersionInfo">
@@ -1495,10 +1502,10 @@ public static class BundleWriter
     /// name without extension (e.g. <c>Home</c> from <c>Home.ascx</c>).
     /// </summary>
     private static Dictionary<string, string> BuildSkinToTemplateMap(
-        IReadOnlyList<(string id, string inode, string name, string html, string themeName)> templateDefs)
+        IReadOnlyList<(string id, string inode, string name, string html, string header, string themeName)> templateDefs)
     {
         var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (id, _, name, _, _) in templateDefs)
+        foreach (var (id, _, name, _, _, _) in templateDefs)
             map.TryAdd(name, id);
         return map;
     }
@@ -1544,7 +1551,7 @@ public static class BundleWriter
     private static void CollectThemeDefinitions(
         string themesZipPath,
         List<(string id, string inode, string name, string html)> containerDefs,
-        List<(string id, string inode, string name, string html, string themeName)> templateDefs)
+        List<(string id, string inode, string name, string html, string header, string themeName)> templateDefs)
     {
         const string containersPrefix = "_default/Containers/";
         const string skinsPrefix      = "_default/Skins/";
@@ -1607,8 +1614,8 @@ public static class BundleWriter
                 ascx = ResolveSsiIncludes(ascx, skinDir, zip);
             }
 
-            string html = ConvertAscxToTemplateHtml(ascx, firstContainerId, themeName, name);
-            templateDefs.Add((Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), name, html, themeName));
+            var (html, header) = ConvertAscxToTemplateHtml(ascx, firstContainerId, themeName, name);
+            templateDefs.Add((Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), name, html, header, themeName));
         }
     }
 
@@ -1813,7 +1820,7 @@ public static class BundleWriter
     ///   <item>Any unrecognised <c>&lt;dnn:…&gt;</c> controls are removed.</item>
     /// </list>
     /// </remarks>
-    public static string ConvertAscxToTemplateHtml(
+    public static (string Body, string Header) ConvertAscxToTemplateHtml(
         string ascx,
         string defaultContainerId = "",
         string themeName = "",
@@ -1834,16 +1841,27 @@ public static class BundleWriter
         foreach (var (rx, replacement) in SkinControlReplacements)
             html = rx.Replace(html, replacement);
 
-        // Convert <dnn:DnnCssInclude FilePath="..." /> and <dnn:DnnJsInclude
-        // FilePath="..." /> to standard HTML <link>/<script> tags.  The
-        // FilePath attribute is relative to the skin folder, which maps to
+        // Collect CSS <link> tags for the template header (rendered in the
+        // HTML <head> section by DotCMS) instead of leaving them inline in
+        // the body.  DNN registers CSS via its client-resource framework and
+        // emits the links in <head>; DotCMS's template "header" field is the
+        // equivalent mechanism.  JS <script> tags remain in the body.
+        var headerTags = new List<string>();
+
+        // Convert <dnn:DnnCssInclude FilePath="..." /> to <link> tags
+        // collected for the header, and <dnn:DnnJsInclude FilePath="..." />
+        // to inline <script> tags in the body.  The FilePath attribute is
+        // relative to the skin folder, which maps to
         // /application/themes/{themeName}/ in DotCMS.  This must run before
         // the generic DNN-tag cleanup that follows.
         if (!string.IsNullOrWhiteSpace(themeName))
         {
             string themeBase = $"/application/themes/{themeName}/";
-            html = DnnCssIncludeRegex.Replace(html,
-                m => $@"<link rel=""stylesheet"" href=""{themeBase}{m.Groups[1].Value}"" />");
+            html = DnnCssIncludeRegex.Replace(html, m =>
+            {
+                headerTags.Add($@"<link rel=""stylesheet"" href=""{themeBase}{m.Groups[1].Value}"" />");
+                return string.Empty;
+            });
             html = DnnJsIncludeRegex.Replace(html,
                 m => $@"<script src=""{themeBase}{m.Groups[1].Value}""></script>");
         }
@@ -1868,10 +1886,16 @@ public static class BundleWriter
         html = DnnOpenCloseTagRegex.Replace(html, string.Empty);
         html = html.Trim();
 
+        // Helper to check whether a href is already referenced in the body
+        // or in the header tags collected so far.
+        bool alreadyReferenced(string href) =>
+            html.Contains(href, StringComparison.OrdinalIgnoreCase) ||
+            headerTags.Any(t => t.Contains(href, StringComparison.OrdinalIgnoreCase));
+
         // DNN automatically loads a per-skin CSS file that matches the
-        // skin filename (e.g. Home.css for Home.ascx).  Prepend the link
-        // BEFORE the skin.css injection below so that skin.css ends up
-        // first in the output (matching DNN's load order: skin.css base
+        // skin filename (e.g. Home.css for Home.ascx).  Add the link to the
+        // header BEFORE the skin.css injection below so that skin.css ends
+        // up first in the output (matching DNN's load order: skin.css base
         // styles first, per-skin overrides second).  Skip when the skin
         // name is "skin" (already covered) or when already referenced.
         if (!string.IsNullOrWhiteSpace(themeName) &&
@@ -1879,28 +1903,28 @@ public static class BundleWriter
             !string.Equals(skinName, "skin", StringComparison.OrdinalIgnoreCase))
         {
             string skinCssHref = $"/application/themes/{themeName}/{skinName}.css";
-            if (!html.Contains(skinCssHref, StringComparison.OrdinalIgnoreCase))
+            if (!alreadyReferenced(skinCssHref))
             {
                 string skinCssLink = $@"<link rel=""stylesheet"" href=""{skinCssHref}"" />";
-                html = skinCssLink + "\n" + html;
+                headerTags.Add(skinCssLink);
             }
         }
 
-        // Prepend a <link> tag for the theme's main skin.css so that DotCMS
-        // loads the skin styles when rendering the page.  DNN automatically
+        // Add a <link> tag for the theme's main skin.css to the header so
+        // that DotCMS loads the skin styles in <head>.  DNN automatically
         // included the skin CSS via its own framework; in DotCMS we must add
-        // an explicit stylesheet reference.  Because this prepend runs after
-        // the per-skin link above, skin.css will appear first in the final
-        // output — matching DNN's load order.  Skip the prepend when a
+        // it to the template header.  Insert at position 0 so skin.css
+        // appears first — matching DNN's load order.  Skip when a
         // DnnCssInclude directive already emitted a skin.css link above.
         if (!string.IsNullOrWhiteSpace(themeName) &&
-            !html.Contains($"/application/themes/{themeName}/skin.css", StringComparison.OrdinalIgnoreCase))
+            !alreadyReferenced($"/application/themes/{themeName}/skin.css"))
         {
             string cssLink = $@"<link rel=""stylesheet"" href=""/application/themes/{themeName}/skin.css"" />";
-            html = cssLink + "\n" + html;
+            headerTags.Insert(0, cssLink);
         }
 
-        return html;
+        string header = string.Join("\n", headerTags);
+        return (html, header);
     }
 
     // ------------------------------------------------------------------

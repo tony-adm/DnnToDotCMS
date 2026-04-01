@@ -686,9 +686,9 @@ public class BundleWriterTests
             <div id="siteWrapper"></div>
             """;
 
-        string result = BundleWriter.ConvertAscxToTemplateHtml(ascx);
+        var (body, _) = BundleWriter.ConvertAscxToTemplateHtml(ascx);
 
-        Assert.DoesNotContain("<%@", result);
+        Assert.DoesNotContain("<%@", body);
     }
 
     [Fact]
@@ -698,10 +698,10 @@ public class BundleWriterTests
             <div><dnn:LOGO runat="server" id="dnnLogo" /></div>
             """;
 
-        string result = BundleWriter.ConvertAscxToTemplateHtml(ascx);
+        var (body, _) = BundleWriter.ConvertAscxToTemplateHtml(ascx);
 
-        Assert.Contains("<img", result);
-        Assert.DoesNotContain("dnn:LOGO", result);
+        Assert.Contains("<img", body);
+        Assert.DoesNotContain("dnn:LOGO", body);
     }
 
     [Fact]
@@ -711,10 +711,10 @@ public class BundleWriterTests
             <nav><dnn:MENU runat="server" MenuStyle="Suckerfish" /></nav>
             """;
 
-        string result = BundleWriter.ConvertAscxToTemplateHtml(ascx);
+        var (body, _) = BundleWriter.ConvertAscxToTemplateHtml(ascx);
 
-        Assert.Contains("<!-- Navigation -->", result);
-        Assert.DoesNotContain("dnn:MENU", result);
+        Assert.Contains("<!-- Navigation -->", body);
+        Assert.DoesNotContain("dnn:MENU", body);
     }
 
     [Fact]
@@ -726,11 +726,11 @@ public class BundleWriterTests
             <div id="body"></div>
             """;
 
-        string result = BundleWriter.ConvertAscxToTemplateHtml(ascx);
+        var (body, _) = BundleWriter.ConvertAscxToTemplateHtml(ascx);
 
-        Assert.DoesNotContain("dnn:STYLES", result);
-        Assert.DoesNotContain("dnn:jQuery", result);
-        Assert.Contains("id=\"body\"", result);
+        Assert.DoesNotContain("dnn:STYLES", body);
+        Assert.DoesNotContain("dnn:jQuery", body);
+        Assert.Contains("id=\"body\"", body);
     }
 
     [Fact]
@@ -745,27 +745,25 @@ public class BundleWriterTests
             </div>
             """;
 
-        string result = BundleWriter.ConvertAscxToTemplateHtml(ascx);
+        var (body, _) = BundleWriter.ConvertAscxToTemplateHtml(ascx);
 
-        Assert.Contains("id=\"siteWrapper\"", result);
-        Assert.Contains("id=\"header\"", result);
-        Assert.Contains("id=\"footer\"", result);
+        Assert.Contains("id=\"siteWrapper\"", body);
+        Assert.Contains("id=\"header\"", body);
+        Assert.Contains("id=\"footer\"", body);
     }
 
     [Fact]
     public void ConvertAscxToTemplateHtml_WithThemeName_PrependsSkinCssLink()
     {
         // When a theme name is supplied, a <link> tag for the theme's skin.css
-        // must be prepended to the template body so DotCMS loads the skin styles.
+        // must appear in the template header so DotCMS loads the skin styles in <head>.
         const string ascx = """<div id="body"></div>""";
 
-        string result = BundleWriter.ConvertAscxToTemplateHtml(ascx, themeName: "Xcillion");
+        var (body, header) = BundleWriter.ConvertAscxToTemplateHtml(ascx, themeName: "Xcillion");
 
-        Assert.Contains(@"<link rel=""stylesheet"" href=""/application/themes/Xcillion/skin.css""", result);
-        // The CSS link must appear before the body content.
-        int cssIndex  = result.IndexOf("skin.css", StringComparison.Ordinal);
-        int bodyIndex = result.IndexOf("id=\"body\"", StringComparison.Ordinal);
-        Assert.True(cssIndex < bodyIndex, "skin.css link must precede the template body.");
+        Assert.Contains(@"<link rel=""stylesheet"" href=""/application/themes/Xcillion/skin.css""", header);
+        // The CSS link must NOT be in the body — it belongs in the header.
+        Assert.DoesNotContain("skin.css", body);
     }
 
     [Fact]
@@ -774,9 +772,10 @@ public class BundleWriterTests
         // Without a theme name no CSS link should be injected.
         const string ascx = """<div id="body"></div>""";
 
-        string result = BundleWriter.ConvertAscxToTemplateHtml(ascx);
+        var (body, header) = BundleWriter.ConvertAscxToTemplateHtml(ascx);
 
-        Assert.DoesNotContain("<link", result);
+        Assert.DoesNotContain("<link", body);
+        Assert.DoesNotContain("<link", header);
     }
 
     [Fact]
@@ -786,10 +785,10 @@ public class BundleWriterTests
         // Images/logo.png when a theme name is provided.
         const string ascx = """<div><dnn:LOGO runat="server" id="logo" /></div>""";
 
-        string result = BundleWriter.ConvertAscxToTemplateHtml(ascx, themeName: "Xcillion");
+        var (body, _) = BundleWriter.ConvertAscxToTemplateHtml(ascx, themeName: "Xcillion");
 
-        Assert.Contains("/application/themes/Xcillion/Images/logo.png", result);
-        Assert.DoesNotContain("dnn:LOGO", result);
+        Assert.Contains("/application/themes/Xcillion/Images/logo.png", body);
+        Assert.DoesNotContain("dnn:LOGO", body);
     }
 
     [Fact]
@@ -798,11 +797,12 @@ public class BundleWriterTests
         // Without a theme name the <dnn:LOGO> fallback path /logo.png is used.
         const string ascx = """<div><dnn:LOGO runat="server" id="logo" /></div>""";
 
-        string result = BundleWriter.ConvertAscxToTemplateHtml(ascx);
+        var (body, header) = BundleWriter.ConvertAscxToTemplateHtml(ascx);
 
-        Assert.Contains("/logo.png", result);
-        Assert.DoesNotContain("dnn:LOGO", result);
-        Assert.DoesNotContain("/application/themes/", result);
+        Assert.Contains("/logo.png", body);
+        Assert.DoesNotContain("dnn:LOGO", body);
+        Assert.DoesNotContain("/application/themes/", body);
+        Assert.DoesNotContain("/application/themes/", header);
     }
 
     // ------------------------------------------------------------------
@@ -818,12 +818,15 @@ public class BundleWriterTests
             <div id="body"></div>
             """;
 
-        string result = BundleWriter.ConvertAscxToTemplateHtml(ascx, themeName: "Xcillion");
+        var (body, header) = BundleWriter.ConvertAscxToTemplateHtml(ascx, themeName: "Xcillion");
 
+        // CSS link must appear in header, not body.
         Assert.Contains(
             @"<link rel=""stylesheet"" href=""/application/themes/Xcillion/bootstrap/css/bootstrap.min.css"" />",
-            result);
-        Assert.DoesNotContain("DnnCssInclude", result);
+            header);
+        Assert.DoesNotContain("DnnCssInclude", body);
+        Assert.DoesNotContain("DnnCssInclude", header);
+        Assert.DoesNotContain("bootstrap.min.css", body);
     }
 
     [Fact]
@@ -835,32 +838,34 @@ public class BundleWriterTests
             <div id="body"></div>
             """;
 
-        string result = BundleWriter.ConvertAscxToTemplateHtml(ascx, themeName: "Xcillion");
+        var (body, _) = BundleWriter.ConvertAscxToTemplateHtml(ascx, themeName: "Xcillion");
 
+        // JS stays in the body (not the header).
         Assert.Contains(
             @"<script src=""/application/themes/Xcillion/bootstrap/js/bootstrap.min.js""></script>",
-            result);
-        Assert.DoesNotContain("DnnJsInclude", result);
+            body);
+        Assert.DoesNotContain("DnnJsInclude", body);
     }
 
     [Fact]
     public void ConvertAscxToTemplateHtml_SkipsSkinCssPrependWhenDnnCssIncludeProvidesSkinCss()
     {
         // When a DnnCssInclude already specifies skin.css, the automatic
-        // skin.css <link> prepend must be skipped to avoid duplicates.
+        // skin.css <link> must be skipped to avoid duplicates.
         const string ascx = """
             <dnn:DnnCssInclude ID="SkinCSS" runat="server" FilePath="skin.css" PathNameAlias="SkinPath" />
             <div id="body"></div>
             """;
 
-        string result = BundleWriter.ConvertAscxToTemplateHtml(ascx, themeName: "Xcillion");
+        var (body, header) = BundleWriter.ConvertAscxToTemplateHtml(ascx, themeName: "Xcillion");
 
-        // Exactly one skin.css reference should appear.
+        // Exactly one skin.css reference should appear (in header only).
         int count = 0;
         int idx = -1;
-        while ((idx = result.IndexOf("skin.css", idx + 1, StringComparison.Ordinal)) >= 0)
+        while ((idx = header.IndexOf("skin.css", idx + 1, StringComparison.Ordinal)) >= 0)
             count++;
         Assert.Equal(1, count);
+        Assert.DoesNotContain("skin.css", body);
     }
 
     [Fact]
@@ -873,10 +878,11 @@ public class BundleWriterTests
             <div id="body"></div>
             """;
 
-        string result = BundleWriter.ConvertAscxToTemplateHtml(ascx);
+        var (body, header) = BundleWriter.ConvertAscxToTemplateHtml(ascx);
 
-        Assert.DoesNotContain("DnnCssInclude", result);
-        Assert.DoesNotContain("<link", result);
+        Assert.DoesNotContain("DnnCssInclude", body);
+        Assert.DoesNotContain("<link", body);
+        Assert.DoesNotContain("<link", header);
     }
 
     // ------------------------------------------------------------------
@@ -887,15 +893,16 @@ public class BundleWriterTests
     public void ConvertAscxToTemplateHtml_WithSkinName_PrependsSkinSpecificCssLink()
     {
         // DNN auto-loads [SkinName].css from the skin folder alongside
-        // the skin's ASCX file.  The converter must inject this link.
+        // the skin's ASCX file.  The converter must inject this link in the header.
         const string ascx = """<div id="body"></div>""";
 
-        string result = BundleWriter.ConvertAscxToTemplateHtml(
+        var (body, header) = BundleWriter.ConvertAscxToTemplateHtml(
             ascx, themeName: "Xcillion", skinName: "Home");
 
         Assert.Contains(
             @"<link rel=""stylesheet"" href=""/application/themes/Xcillion/Home.css""",
-            result);
+            header);
+        Assert.DoesNotContain("Home.css", body);
     }
 
     [Fact]
@@ -905,42 +912,44 @@ public class BundleWriterTests
         // duplicate the skin.css link already injected – it must be skipped.
         const string ascx = """<div id="body"></div>""";
 
-        string result = BundleWriter.ConvertAscxToTemplateHtml(
+        var (body, header) = BundleWriter.ConvertAscxToTemplateHtml(
             ascx, themeName: "Xcillion", skinName: "skin");
 
         int count = 0;
         int idx = -1;
-        while ((idx = result.IndexOf("skin.css", idx + 1, StringComparison.Ordinal)) >= 0)
+        while ((idx = header.IndexOf("skin.css", idx + 1, StringComparison.Ordinal)) >= 0)
             count++;
         Assert.Equal(1, count);
+        Assert.DoesNotContain("skin.css", body);
     }
 
     [Fact]
     public void ConvertAscxToTemplateHtml_WithoutSkinName_DoesNotInjectPerSkinCss()
     {
         // When no skin name is supplied, only the shared skin.css link
-        // should appear – no per-skin link should be added.
+        // should appear in the header – no per-skin link should be added.
         const string ascx = """<div id="body"></div>""";
 
-        string result = BundleWriter.ConvertAscxToTemplateHtml(
+        var (body, header) = BundleWriter.ConvertAscxToTemplateHtml(
             ascx, themeName: "Xcillion");
 
-        Assert.Contains("skin.css", result);
-        Assert.DoesNotContain("Home.css", result);
+        Assert.Contains("skin.css", header);
+        Assert.DoesNotContain("Home.css", header);
+        Assert.DoesNotContain("skin.css", body);
     }
 
     [Fact]
     public void ConvertAscxToTemplateHtml_SkinCssPrecedesSkinSpecificCss()
     {
-        // skin.css must appear before the per-skin CSS to mirror DNN's
-        // loading order where global skin styles load first.
+        // skin.css must appear before the per-skin CSS in the header to
+        // mirror DNN's loading order where global skin styles load first.
         const string ascx = """<div id="body"></div>""";
 
-        string result = BundleWriter.ConvertAscxToTemplateHtml(
+        var (_, header) = BundleWriter.ConvertAscxToTemplateHtml(
             ascx, themeName: "Xcillion", skinName: "Home");
 
-        int skinCssIndex = result.IndexOf("skin.css", StringComparison.Ordinal);
-        int homeCssIndex = result.IndexOf("Home.css", StringComparison.Ordinal);
+        int skinCssIndex = header.IndexOf("skin.css", StringComparison.Ordinal);
+        int homeCssIndex = header.IndexOf("Home.css", StringComparison.Ordinal);
         Assert.True(skinCssIndex >= 0, "skin.css link must be present.");
         Assert.True(homeCssIndex >= 0, "Home.css link must be present.");
         Assert.True(skinCssIndex < homeCssIndex,
@@ -957,14 +966,15 @@ public class BundleWriterTests
             <div id="body"></div>
             """;
 
-        string result = BundleWriter.ConvertAscxToTemplateHtml(
+        var (body, header) = BundleWriter.ConvertAscxToTemplateHtml(
             ascx, themeName: "Xcillion", skinName: "Home");
 
         int count = 0;
         int idx = -1;
-        while ((idx = result.IndexOf("Home.css", idx + 1, StringComparison.Ordinal)) >= 0)
+        while ((idx = header.IndexOf("Home.css", idx + 1, StringComparison.Ordinal)) >= 0)
             count++;
         Assert.Equal(1, count);
+        Assert.DoesNotContain("Home.css", body);
     }
 
     // ------------------------------------------------------------------
@@ -1032,10 +1042,11 @@ public class BundleWriterTests
     }
 
     [Fact]
-    public void Write_WithSsiIncludeInSkin_InlinedCssIncludesAppearInTemplateBody()
+    public void Write_WithSsiIncludeInSkin_InlinedCssIncludesAppearInTemplateXml()
     {
         // End-to-end: a skin ASCX that #includes an AddFiles.ascx containing
-        // DnnCssInclude tags should produce a template with proper <link> tags.
+        // DnnCssInclude tags should produce a template with proper <link> tags
+        // in the header field and <script> tags in the body.
         string path = Path.GetTempFileName() + ".zip";
         try
         {
@@ -2765,10 +2776,10 @@ public class BundleWriterTests
     }
 
     [Fact]
-    public void Write_WithTheme_TemplateBodyContainsSkinCssLink()
+    public void Write_WithTheme_TemplateHeaderContainsSkinCssLink()
     {
-        // The converted template body must include a <link> tag for skin.css so
-        // that DotCMS loads the theme styles when rendering pages.
+        // The converted template must include a <link> tag for skin.css in
+        // the <header> XML field so DotCMS loads the theme styles in <head>.
         string zipPath = BuildThemesZip();
         try
         {
@@ -2789,9 +2800,16 @@ public class BundleWriterTests
             string templateEntry = names.First(n => n.EndsWith(".template.template.xml"));
             string xml = ReadTarEntry(ms, templateEntry)!;
 
-            // The template body must contain a skin.css link for the theme.
+            // The template header must contain a skin.css link for the theme.
             Assert.Contains("skin.css", xml);
             Assert.Contains("/application/themes/TestTheme/skin.css", xml);
+            // Verify the CSS link is in the <header> element, not the <body>.
+            int headerStart = xml.IndexOf("<header>", StringComparison.Ordinal);
+            int headerEnd   = xml.IndexOf("</header>", StringComparison.Ordinal);
+            Assert.True(headerStart >= 0 && headerEnd > headerStart,
+                "Template XML must contain a <header> element.");
+            string headerContent = xml[headerStart..headerEnd];
+            Assert.Contains("skin.css", headerContent);
         }
         finally { File.Delete(zipPath); }
     }
