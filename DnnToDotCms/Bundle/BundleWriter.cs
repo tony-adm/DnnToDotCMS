@@ -1626,12 +1626,11 @@ public static class BundleWriter
         List<(string id, string inode, string name, string html)> containerDefs,
         List<(string id, string inode, string name, string html, string header, string themeName)> templateDefs)
     {
-        const string containersPrefix = "_default/Containers/";
-        const string skinsPrefix      = "_default/Skins/";
-
         using var zip = ZipFile.OpenRead(themesZipPath);
 
         // First pass: collect containers so their IDs are available for template conversion.
+        // Supports both _default/Containers/{Theme}/File.ascx and
+        // {Package}/containers/{Theme}/File.ascx path formats.
         foreach (ZipArchiveEntry entry in zip.Entries)
         {
             if (!entry.Name.EndsWith(".ascx", StringComparison.OrdinalIgnoreCase))
@@ -1639,11 +1638,13 @@ public static class BundleWriter
 
             string entryPath = entry.FullName.Replace('\\', '/');
 
-            if (!entryPath.StartsWith(containersPrefix, StringComparison.OrdinalIgnoreCase))
-                continue;
+            // Locate the "/containers/" segment (case-insensitive) to handle
+            // both _default/Containers/ and {Package}/containers/ layouts.
+            int containersIdx = entryPath.IndexOf("/containers/", StringComparison.OrdinalIgnoreCase);
+            if (containersIdx < 0) continue;
 
-            // Only process ThemeName/ContainerName.ascx (exactly one slash after prefix)
-            string rest = entryPath[containersPrefix.Length..];
+            // Only process ThemeName/ContainerName.ascx (exactly one slash after containers/)
+            string rest = entryPath[(containersIdx + "/containers/".Length)..];
             if (rest.Count(c => c == '/') != 1) continue;
 
             string name = Path.GetFileNameWithoutExtension(entry.Name);
@@ -1677,6 +1678,8 @@ public static class BundleWriter
         }
 
         // Second pass: collect templates, wiring pane divs to #parseContainer.
+        // Supports both _default/Skins/{Theme}/File.ascx and
+        // {Package}/skins/{Theme}/File.ascx path formats.
         foreach (ZipArchiveEntry entry in zip.Entries)
         {
             if (!entry.Name.EndsWith(".ascx", StringComparison.OrdinalIgnoreCase))
@@ -1684,14 +1687,16 @@ public static class BundleWriter
 
             string entryPath = entry.FullName.Replace('\\', '/');
 
-            if (!entryPath.StartsWith(skinsPrefix, StringComparison.OrdinalIgnoreCase))
-                continue;
+            // Locate the "/skins/" segment (case-insensitive) to handle
+            // both _default/Skins/ and {Package}/skins/ layouts.
+            int skinsIdx = entryPath.IndexOf("/skins/", StringComparison.OrdinalIgnoreCase);
+            if (skinsIdx < 0) continue;
 
-            // Only process ThemeName/SkinName.ascx (exactly one slash after prefix)
-            string rest = entryPath[skinsPrefix.Length..];
+            // Only process ThemeName/SkinName.ascx (exactly one slash after skins/)
+            string rest = entryPath[(skinsIdx + "/skins/".Length)..];
             if (rest.Count(c => c == '/') != 1) continue;
 
-            // Extract the theme name (the directory between skinsPrefix and SkinName.ascx).
+            // Extract the theme name (the directory between skins/ and SkinName.ascx).
             int slash = rest.IndexOf('/');
             string themeName = slash >= 0 ? rest[..slash] : string.Empty;
 
@@ -2248,6 +2253,10 @@ public static class BundleWriter
         //   → "ROOT/application/themes/Xcillion/Css/skin.css"
         // "_default/Containers/Xcillion/…"
         //   → "ROOT/application/themes/Xcillion/Containers/…"
+        // "FidelityBankTexas/skins/fbot/CSS/bootstrap.min.css"
+        //   → "ROOT/application/themes/fbot/CSS/bootstrap.min.css"
+        // "FidelityBankTexas/containers/fbot/card.ascx"
+        //   → "ROOT/application/themes/fbot/Containers/card.ascx"
         //
         // The ROOT/ prefix causes DotCMS to write these files into the
         // /application/themes/ directory on the file system, which is where
@@ -2255,14 +2264,31 @@ public static class BundleWriter
         const string skinsPrefix      = "_default/Skins/";
         const string containersPrefix = "_default/Containers/";
 
+        // Standard _default/ format.
         if (zipEntryPath.StartsWith(skinsPrefix, StringComparison.OrdinalIgnoreCase))
             return "ROOT/application/themes/" + zipEntryPath[skinsPrefix.Length..];
 
         if (zipEntryPath.StartsWith(containersPrefix, StringComparison.OrdinalIgnoreCase))
         {
-            // Preserve container name but nest under a "Containers" sub-folder
-            // to avoid conflicts with skin files sharing the same theme name.
             string rest = zipEntryPath[containersPrefix.Length..];
+            int slash = rest.IndexOf('/');
+            return slash < 0
+                ? "ROOT/application/themes/" + rest
+                : $"ROOT/application/themes/{rest[..slash]}/Containers/{rest[(slash + 1)..]}";
+        }
+
+        // Non-_default format: {Package}/skins/{Theme}/{rest}
+        // Some DNN exports place skins under the package name instead of
+        // _default/, e.g. "FidelityBankTexas/skins/fbot/skin.css".
+        int skinsIdx = zipEntryPath.IndexOf("/skins/", StringComparison.OrdinalIgnoreCase);
+        if (skinsIdx >= 0)
+            return "ROOT/application/themes/" + zipEntryPath[(skinsIdx + "/skins/".Length)..];
+
+        // Non-_default format: {Package}/containers/{Theme}/{rest}
+        int containersIdx = zipEntryPath.IndexOf("/containers/", StringComparison.OrdinalIgnoreCase);
+        if (containersIdx >= 0)
+        {
+            string rest = zipEntryPath[(containersIdx + "/containers/".Length)..];
             int slash = rest.IndexOf('/');
             return slash < 0
                 ? "ROOT/application/themes/" + rest

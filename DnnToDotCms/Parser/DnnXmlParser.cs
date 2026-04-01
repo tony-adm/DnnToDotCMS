@@ -209,11 +209,11 @@ public static class DnnXmlParser
             tabUniqueIds[tabIdVal.AsInt32] = uidVal.AsGuid.ToString();
         }
 
-        // Build mappings of ModuleID → display title and ModuleID → tab UniqueId
-        // from ExportTabModule.  When a module appears on multiple tabs, the first
-        // association wins for the UniqueId lookup.
+        // Build mappings of ModuleID → display title and ModuleID → list of
+        // tab UniqueIds from ExportTabModule.  A module may appear on many
+        // tabs (e.g. shared footer modules), so we collect ALL associations.
         var moduleTitles    = new Dictionary<int, string>();
-        var moduleTabIds    = new Dictionary<int, string>();
+        var moduleTabIds    = new Dictionary<int, List<string>>();
         ILiteCollection<BsonDocument> tabModules = db.GetCollection("ExportTabModule");
         foreach (BsonDocument doc in tabModules.FindAll())
         {
@@ -232,7 +232,14 @@ public static class DnnXmlParser
             if (doc.TryGetValue("TabID", out BsonValue tabIdVal)
                 && tabUniqueIds.TryGetValue(tabIdVal.AsInt32, out string? tabUniqueId))
             {
-                moduleTabIds.TryAdd(moduleId, tabUniqueId);
+                if (!moduleTabIds.TryGetValue(moduleId, out List<string>? tabIds))
+                {
+                    tabIds = [];
+                    moduleTabIds[moduleId] = tabIds;
+                }
+                // Avoid duplicate tab associations for the same module.
+                if (!tabIds.Contains(tabUniqueId))
+                    tabIds.Add(tabUniqueId);
             }
         }
 
@@ -254,12 +261,30 @@ public static class DnnXmlParser
 
             int moduleId = moduleIdVal.AsInt32;
             moduleTitles.TryGetValue(moduleId,    out string? title);
-            moduleTabIds.TryGetValue(moduleId,    out string? tabUniqueId);
+            string displayTitle = string.IsNullOrWhiteSpace(title) ? "Content" : title;
 
-            results.Add(new DnnHtmlContent(
-                Title:       string.IsNullOrWhiteSpace(title) ? "Content" : title,
-                HtmlBody:    htmlBody,
-                TabUniqueId: tabUniqueId ?? string.Empty));
+            // Create a content entry for EVERY tab the module appears on.
+            // Shared modules (e.g. footer) appear on many tabs in DNN and
+            // their content must be present on each corresponding DotCMS page.
+            if (moduleTabIds.TryGetValue(moduleId, out List<string>? tabs2) && tabs2.Count > 0)
+            {
+                foreach (string tabUniqueId in tabs2)
+                {
+                    results.Add(new DnnHtmlContent(
+                        Title:       displayTitle,
+                        HtmlBody:    htmlBody,
+                        TabUniqueId: tabUniqueId));
+                }
+            }
+            else
+            {
+                // Module has no tab association; include it anyway so it
+                // appears in the bundle even if unlinked to a page.
+                results.Add(new DnnHtmlContent(
+                    Title:       displayTitle,
+                    HtmlBody:    htmlBody,
+                    TabUniqueId: string.Empty));
+            }
         }
 
         return results;
