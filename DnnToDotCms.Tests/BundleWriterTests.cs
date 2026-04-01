@@ -998,11 +998,11 @@ public class BundleWriterTests
     }
 
     [Fact]
-    public void ConvertAscxToTemplateHtml_AvailableThemeFiles_SkipsMissingPerSkinCss()
+    public void ConvertAscxToTemplateHtml_AvailableThemeFiles_AlwaysInjectsPerSkinCss()
     {
-        // When availableThemeFiles is provided but {skinName}.css is absent,
-        // no per-skin link should be injected.  skin.css is present so it
-        // should still appear.
+        // Per-skin CSS links are always injected regardless of
+        // availableThemeFiles because WriteThemeFileAssets creates a
+        // placeholder CSS file when the export does not include one.
         const string ascx = """<div id="body"></div>""";
         var available = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -1014,7 +1014,7 @@ public class BundleWriterTests
             availableThemeFiles: available);
 
         Assert.Contains("skin.css", body);
-        Assert.DoesNotContain("Home.css", body);
+        Assert.Contains("Home.css", body);
     }
 
     [Fact]
@@ -1270,6 +1270,23 @@ public class BundleWriterTests
                 n => Assert.Contains("/", n));
         }
         finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void Write_WithThemesZip_CreatesPlaceholderPerSkinCssFile()
+    {
+        // The themes zip has Home.ascx but no Home.css.
+        // WriteThemeFileAssets must create a placeholder Home.css so
+        // the per-skin CSS link in the template resolves to a real file.
+        string zipPath = BuildThemesZip();
+        try
+        {
+            var (ms, names) = WriteBundleToMemory([MakeHtmlContentType()], zipPath);
+
+            // A binary asset entry for Home.css must exist.
+            Assert.Contains(names, n => n.StartsWith("assets/") && n.EndsWith("/Home.css"));
+        }
+        finally { File.Delete(zipPath); }
     }
 
     // ------------------------------------------------------------------
