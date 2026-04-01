@@ -3305,4 +3305,152 @@ public class BundleWriterTests
         Assert.Contains("<defaultFileType>33888b6f-7a8e-4069-b1b6-5c1aa9d0a48d</defaultFileType>", xml);
     }
 
+    // ------------------------------------------------------------------
+    // Portal file → theme resolution tests
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Write a bundle with both a themes zip and portal files.
+    /// </summary>
+    private static (MemoryStream stream, List<string> entryNames) WriteBundleWithFilesAndThemes(
+        IReadOnlyList<DnnPortalFile> files,
+        string themesZipPath,
+        string siteName = "Test Site")
+    {
+        var ms = new MemoryStream();
+        BundleWriter.Write([MakeHtmlContentType()], ms, themesZipPath, siteName, null, null, files);
+        ms.Position = 0;
+
+        var names = new List<string>();
+        using var gz  = new GZipStream(ms, CompressionMode.Decompress, leaveOpen: true);
+        using var tar = new TarReader(gz);
+
+        TarEntry? entry;
+        while ((entry = tar.GetNextEntry(copyData: true)) is not null)
+            names.Add(entry.Name);
+
+        ms.Position = 0;
+        return (ms, names);
+    }
+
+    /// <summary>Read raw bytes of a specific tar entry.</summary>
+    private static byte[]? ReadTarEntryBytes(MemoryStream bundleStream, string entryName)
+    {
+        bundleStream.Position = 0;
+        using var gz  = new GZipStream(bundleStream, CompressionMode.Decompress, leaveOpen: true);
+        using var tar = new TarReader(gz);
+
+        TarEntry? entry;
+        while ((entry = tar.GetNextEntry(copyData: true)) is not null)
+        {
+            if (entry.Name == entryName && entry.DataStream is not null)
+            {
+                using var ms2 = new MemoryStream();
+                entry.DataStream.CopyTo(ms2);
+                return ms2.ToArray();
+            }
+        }
+        return null;
+    }
+
+    [Fact]
+    public void Write_WithPortalCssAndThemes_ResolvesPerSkinCssFromPortalFiles()
+    {
+        // Theme zip has Home.ascx but no Home.css.
+        // Portal files have home.css at site root.
+        // Expected: the Home.css asset in the theme folder should contain
+        // the portal file's real content, not a placeholder.
+        string zipPath = BuildThemesZip();
+        try
+        {
+            byte[] realCssContent = Encoding.UTF8.GetBytes("body { margin: 0; font-size: 14px; }");
+            var files = new[]
+            {
+                new DnnPortalFile(
+                    "e5dfe1f2-4cdc-46bd-ad32-7257a6b8105a",
+                    "2af85195-c192-4a33-a14d-a8bb2dc6007e",
+                    "Home.css", "", "text/css",
+                    realCssContent),
+            };
+
+            var (ms, names) = WriteBundleWithFilesAndThemes(files, zipPath);
+
+            // A theme binary asset for Home.css must exist.
+            string assetEntry = names.First(n =>
+                n.StartsWith("assets/") && n.EndsWith("/Home.css"));
+            byte[]? assetBytes = ReadTarEntryBytes(ms, assetEntry);
+
+            Assert.NotNull(assetBytes);
+            Assert.Equal(realCssContent, assetBytes);
+            Assert.DoesNotContain("placeholder", Encoding.UTF8.GetString(assetBytes));
+        }
+        finally { File.Delete(zipPath); }
+    }
+
+    [Fact]
+    public void Write_WithPortalCssAndThemes_ExcludesConsumedPortalFileFromSiteRoot()
+    {
+        // When a portal file is consumed by theme resolution, it must NOT
+        // also be written at the site root (SYSTEM_FOLDER).
+        string zipPath = BuildThemesZip();
+        try
+        {
+            byte[] cssContent = Encoding.UTF8.GetBytes("body { color: red; }");
+            var files = new[]
+            {
+                new DnnPortalFile(
+                    "e5dfe1f2-4cdc-46bd-ad32-7257a6b8105a",
+                    "2af85195-c192-4a33-a14d-a8bb2dc6007e",
+                    "Home.css", "", "text/css",
+                    cssContent),
+            };
+
+            var (ms, names) = WriteBundleWithFilesAndThemes(files, zipPath, "Test Site");
+
+            // The portal file's unique identifier should NOT appear in any
+            // content.xml entry at the site root (it was consumed by the
+            // theme).  Look for the portal file's UniqueId in content XML.
+            var portalContentEntries = names.Where(n =>
+                n.Contains("/1/") && n.EndsWith(".content.xml") &&
+                !n.Contains("host.xml"));
+            foreach (string entry in portalContentEntries)
+            {
+                string xml = ReadTarEntry(ms, entry)!;
+                // If this entry contains the portal file's unique ID, it was
+                // written for the site root — which should not happen.
+                if (xml.Contains("e5dfe1f2-4cdc-46bd-ad32-7257a6b8105a"))
+                {
+                    // Verify it's in the theme folder, not SYSTEM_FOLDER
+                    Assert.DoesNotContain("<folder>SYSTEM_FOLDER</folder>", xml);
+                }
+            }
+        }
+        finally { File.Delete(zipPath); }
+    }
+
+    [Fact]
+    public void Write_WithPortalCssAndThemes_NonMatchingPortalFilesStayAtSiteRoot()
+    {
+        // Portal files that DON'T match any per-skin CSS should still be
+        // written at the site root as before.
+        string zipPath = BuildThemesZip();
+        try
+        {
+            var files = new[]
+            {
+                new DnnPortalFile(
+                    "aaaaaaaa-bbbb-cccc-dddd-000000000001",
+                    "11111111-2222-3333-4444-555555555555",
+                    "custom.js", "", "application/javascript",
+                    Encoding.UTF8.GetBytes("console.log('hello');")),
+            };
+
+            var (ms, names) = WriteBundleWithFilesAndThemes(files, zipPath, "Test Site");
+
+            // custom.js should still be written as a binary asset at the site root.
+            Assert.Contains(names, n => n.StartsWith("assets/") && n.EndsWith("/custom.js"));
+        }
+        finally { File.Delete(zipPath); }
+    }
+
 }

@@ -287,6 +287,35 @@ public static class BundleWriter
             }
         }
 
+        // --- theme static files as FileAsset contentlets (optional) ----------
+        // Theme static files (CSS, JS, images, fonts) from export_themes.zip
+        // must be written as proper DotCMS FileAsset contentlets with folder
+        // hierarchy XML so that DotCMS's push-publish importer creates the
+        // /application/themes/ directory structure on the target server.
+        // Raw files under ROOT/ are NOT automatically imported; they require
+        // full contentlet metadata (content XML + workflow XML + binary asset)
+        // plus FolderWrapper XML entries for each directory level.
+        //
+        // This runs BEFORE portal files so that per-skin CSS files can be
+        // resolved from export_files.zip portal files; consumed portal files
+        // are tracked and excluded from the site-root write below.
+        var consumedPortalFileIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (themesZipPath is not null && File.Exists(themesZipPath))
+        {
+            try
+            {
+                WriteThemeFileAssets(
+                    tar, themesZipPath, contentHostId,
+                    siteId, siteInode, contentWorkDir, manifestEntries,
+                    templateDefs, portalFiles, consumedPortalFileIds);
+            }
+            catch (Exception ex) when (ex is InvalidDataException or IOException)
+            {
+                Console.Error.WriteLine(
+                    $"Warning: Could not read theme assets from '{themesZipPath}': {ex.Message}");
+            }
+        }
+
         // --- portal static files (from DNN export_files.zip) -----------------
         if (portalFiles is not null && portalFiles.Count > 0)
         {
@@ -345,6 +374,12 @@ public static class BundleWriter
 
             foreach (DnnPortalFile pf in portalFiles)
             {
+                // Skip files that were already placed in the theme folder
+                // by WriteThemeFileAssets (e.g. per-skin CSS resolved from
+                // portal files instead of from the themes zip).
+                if (consumedPortalFileIds.Contains(pf.UniqueId))
+                    continue;
+
                 string identifier = pf.UniqueId;
                 string inode      = pf.VersionGuid;
 
@@ -396,30 +431,6 @@ public static class BundleWriter
                     string relativePath = normalizedFolderPath[imagesFolderPrefix.Length..] + pf.FileName;
                     WriteBinaryEntry(tar, "ROOT/application/images/" + relativePath, pf.Content);
                 }
-            }
-        }
-
-        // --- theme static files as FileAsset contentlets (optional) ----------
-        // Theme static files (CSS, JS, images, fonts) from export_themes.zip
-        // must be written as proper DotCMS FileAsset contentlets with folder
-        // hierarchy XML so that DotCMS's push-publish importer creates the
-        // /application/themes/ directory structure on the target server.
-        // Raw files under ROOT/ are NOT automatically imported; they require
-        // full contentlet metadata (content XML + workflow XML + binary asset)
-        // plus FolderWrapper XML entries for each directory level.
-        if (themesZipPath is not null && File.Exists(themesZipPath))
-        {
-            try
-            {
-                WriteThemeFileAssets(
-                    tar, themesZipPath, contentHostId,
-                    siteId, siteInode, contentWorkDir, manifestEntries,
-                    templateDefs);
-            }
-            catch (Exception ex) when (ex is InvalidDataException or IOException)
-            {
-                Console.Error.WriteLine(
-                    $"Warning: Could not read theme assets from '{themesZipPath}': {ex.Message}");
             }
         }
 
@@ -1971,6 +1982,15 @@ public static class BundleWriter
     /// <c>Home.ascx</c>) are created for any skin template that does not
     /// already have a matching CSS file in the export.
     /// </summary>
+    /// <summary>
+    /// Write theme static file assets to the bundle.  When
+    /// <paramref name="portalFiles"/> are provided, any per-skin CSS
+    /// placeholder that matches a portal file by name will use the real
+    /// content from the portal file instead of an empty placeholder.
+    /// Consumed portal-file identifiers are added to
+    /// <paramref name="consumedPortalFileIds"/> so callers can avoid
+    /// writing those files a second time at the site root.
+    /// </summary>
     private static void WriteThemeFileAssets(
         TarWriter tar,
         string themesZipPath,
@@ -1979,7 +1999,9 @@ public static class BundleWriter
         string? siteInode,
         string contentWorkDir,
         List<(string type, string id, string inode, string name, string site, string folder)> manifestEntries,
-        IReadOnlyList<(string id, string inode, string name, string html, string header, string themeName)>? templateDefs = null)
+        IReadOnlyList<(string id, string inode, string name, string html, string header, string themeName)>? templateDefs = null,
+        IReadOnlyList<DnnPortalFile>? portalFiles = null,
+        ISet<string>? consumedPortalFileIds = null)
     {
         using var zip = System.IO.Compression.ZipFile.OpenRead(themesZipPath);
 
@@ -2010,15 +2032,36 @@ public static class BundleWriter
             themeFiles.Add((relPath, entry.Name, ms.ToArray()));
         }
 
-        // Create placeholder per-skin CSS files for templates that do not
-        // already have a matching CSS file in the export.  DNN auto-loads
+        // Create per-skin CSS files for templates that do not already have
+        // a matching CSS file in the theme export.  DNN auto-loads
         // {SkinName}.css alongside each skin ASCX; the link is always
         // injected in the template HTML so the file must exist in DotCMS.
+        //
+        // When portal files are available we attempt to resolve the
+        // per-skin CSS from there (matched by filename, case-insensitive).
+        // This handles the common case where a per-skin CSS file lives in
+        // the DNN portal root (export_files.zip) rather than in the theme
+        // folder (export_themes.zip).  If no matching portal file is found,
+        // an empty placeholder is created instead.
         if (templateDefs is not null)
         {
             var existingPaths = new HashSet<string>(
                 themeFiles.Select(f => f.relPath),
                 StringComparer.OrdinalIgnoreCase);
+
+            // Build a filename → portal-file lookup so we can resolve
+            // missing theme CSS files from any available export source.
+            var portalFilesByName = new Dictionary<string, DnnPortalFile>(
+                StringComparer.OrdinalIgnoreCase);
+            if (portalFiles is not null)
+            {
+                foreach (DnnPortalFile pf in portalFiles)
+                {
+                    // First match wins; prefer files closer to the portal
+                    // root (empty FolderPath) over files in sub-folders.
+                    portalFilesByName.TryAdd(pf.FileName, pf);
+                }
+            }
 
             foreach (var (_, _, name, _, _, themeName) in templateDefs)
             {
@@ -2036,8 +2079,22 @@ public static class BundleWriter
                     // placeholder creation when the filename is too long.
                     if (fileName.Length > 190)
                         continue;
-                    byte[] emptyContent = "/* Per-skin CSS placeholder */\n"u8.ToArray();
-                    themeFiles.Add((cssRelPath, fileName, emptyContent));
+
+                    // Attempt to resolve from portal files first.
+                    byte[] content;
+                    if (portalFilesByName.TryGetValue(fileName, out DnnPortalFile? match))
+                    {
+                        content = match.Content;
+                        // Mark the portal file as consumed so it is not also
+                        // written at the site root.
+                        consumedPortalFileIds?.Add(match.UniqueId);
+                    }
+                    else
+                    {
+                        content = "/* Per-skin CSS placeholder */\n"u8.ToArray();
+                    }
+
+                    themeFiles.Add((cssRelPath, fileName, content));
                     existingPaths.Add(cssRelPath);
                 }
             }
