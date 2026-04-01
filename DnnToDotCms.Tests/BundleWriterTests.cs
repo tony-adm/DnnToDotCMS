@@ -476,6 +476,13 @@ public class BundleWriterTests
                 zip.CreateEntry("_default/Skins/TestTheme/Home.ascx");
             using (var w = new StreamWriter(skinEntry.Open()))
                 w.Write(skinAscx);
+
+            // Include skin.css — DNN auto-loads this for every skin, and
+            // real exports virtually always contain it.
+            ZipArchiveEntry skinCss =
+                zip.CreateEntry("_default/Skins/TestTheme/skin.css");
+            using (var w = new StreamWriter(skinCss.Open()))
+                w.Write("body{}");
         }
         return path;
     }
@@ -974,6 +981,60 @@ public class BundleWriterTests
             count++;
         Assert.Equal(1, count);
         Assert.Empty(header);
+    }
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_AvailableThemeFiles_SkipsMissingSkinCss()
+    {
+        // When availableThemeFiles is provided but skin.css is absent,
+        // no skin.css link should be injected.
+        const string ascx = """<div id="body"></div>""";
+        var available = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        var (body, _) = BundleWriter.ConvertAscxToTemplateHtml(
+            ascx, themeName: "Xcillion", availableThemeFiles: available);
+
+        Assert.DoesNotContain("skin.css", body);
+    }
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_AvailableThemeFiles_SkipsMissingPerSkinCss()
+    {
+        // When availableThemeFiles is provided but {skinName}.css is absent,
+        // no per-skin link should be injected.  skin.css is present so it
+        // should still appear.
+        const string ascx = """<div id="body"></div>""";
+        var available = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "application/themes/Xcillion/skin.css"
+        };
+
+        var (body, _) = BundleWriter.ConvertAscxToTemplateHtml(
+            ascx, themeName: "Xcillion", skinName: "Home",
+            availableThemeFiles: available);
+
+        Assert.Contains("skin.css", body);
+        Assert.DoesNotContain("Home.css", body);
+    }
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_AvailableThemeFiles_InjectsPresentCss()
+    {
+        // When both skin.css and Home.css exist in the set, both links
+        // should be injected.
+        const string ascx = """<div id="body"></div>""";
+        var available = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "application/themes/Xcillion/skin.css",
+            "application/themes/Xcillion/Home.css"
+        };
+
+        var (body, _) = BundleWriter.ConvertAscxToTemplateHtml(
+            ascx, themeName: "Xcillion", skinName: "Home",
+            availableThemeFiles: available);
+
+        Assert.Contains("skin.css", body);
+        Assert.Contains("Home.css", body);
     }
 
     // ------------------------------------------------------------------
@@ -1526,6 +1587,54 @@ public class BundleWriterTests
     public void SanitizeHostname_ProducesExpectedResult(string input, string expected)
     {
         Assert.Equal(expected, BundleWriter.SanitizeHostname(input));
+    }
+
+    // ------------------------------------------------------------------
+    // DeterministicId utility tests
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void DeterministicId_SameSeed_ReturnsSameId()
+    {
+        string id1 = BundleWriter.DeterministicId("ContentType:htmlContent");
+        string id2 = BundleWriter.DeterministicId("ContentType:htmlContent");
+        Assert.Equal(id1, id2);
+    }
+
+    [Fact]
+    public void DeterministicId_DifferentSeed_ReturnsDifferentId()
+    {
+        string id1 = BundleWriter.DeterministicId("ContentType:htmlContent");
+        string id2 = BundleWriter.DeterministicId("ContentType:otherType");
+        Assert.NotEqual(id1, id2);
+    }
+
+    [Fact]
+    public void DeterministicId_IsValidGuid()
+    {
+        string id = BundleWriter.DeterministicId("test-seed");
+        Assert.True(Guid.TryParse(id, out _), "DeterministicId must return a valid GUID string.");
+    }
+
+    [Fact]
+    public void Write_SameContentType_ProducesSameIdAcrossBundles()
+    {
+        // Two independent bundles with the same content type variable
+        // must produce the same content type ID so DotCMS treats the
+        // second import as an update rather than a conflicting insert.
+        var contentType = new[] { MakeHtmlContentType() };
+
+        var (ms1, names1) = WriteBundleToMemory(contentType);
+        var (ms2, names2) = WriteBundleToMemory(contentType);
+
+        string ctEntry1 = names1.First(n => n.EndsWith(".contentType.json"));
+        string ctEntry2 = names2.First(n => n.EndsWith(".contentType.json"));
+
+        // The content type JSON filename includes the content type ID.
+        // Both bundles must use the same filename (same ID).
+        string ctId1 = Path.GetFileName(ctEntry1);
+        string ctId2 = Path.GetFileName(ctEntry2);
+        Assert.Equal(ctId1, ctId2);
     }
 
     // ------------------------------------------------------------------

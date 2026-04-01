@@ -1,5 +1,6 @@
 using System.Formats.Tar;
 using System.IO.Compression;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -159,7 +160,7 @@ public static class BundleWriter
         string? htmlContentTypeVariable = null;
         foreach (DotCmsContentType ct in contentTypes)
         {
-            string id   = Guid.NewGuid().ToString();
+            string id   = DeterministicId("ContentType:" + ct.Variable);
             string json = BuildContentTypeJson(ct, id, contentHostId, contentSiteName);
             // DotCMS push-publish format requires each .contentType.json to:
             //   1. contain two JSON objects (old state + new state), and
@@ -493,7 +494,7 @@ public static class BundleWriter
             result.Add(new DotCmsBundleField
             {
                 Clazz         = immutableClazz,
-                Id            = Guid.NewGuid().ToString(),
+                Id            = DeterministicId($"Field:{contentTypeId}:{f.Variable}"),
                 ContentTypeId = contentTypeId,
                 Name          = f.Name,
                 Variable      = f.Variable,
@@ -519,7 +520,7 @@ public static class BundleWriter
         string shortClazz, string name, string variable, int sortOrder, string contentTypeId) => new()
     {
         Clazz         = $"com.dotcms.contenttype.model.field.{shortClazz}",
-        Id            = Guid.NewGuid().ToString(),
+        Id            = DeterministicId($"Field:{contentTypeId}:{variable}"),
         ContentTypeId = contentTypeId,
         Name          = name,
         Variable      = variable,
@@ -1582,6 +1583,27 @@ public static class BundleWriter
         // Use the first container's identifier so template panes can reference it.
         string firstContainerId = containerDefs.Count > 0 ? containerDefs[0].id : string.Empty;
 
+        // Build a set of available non-ASCX theme file paths so that
+        // ConvertAscxToTemplateHtml only injects CSS link tags for files
+        // that actually exist in the export (DNN auto-loads per-skin CSS
+        // only when the file is present on disk).
+        var availableThemeFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (ZipArchiveEntry entry in zip.Entries)
+        {
+            if (string.IsNullOrEmpty(entry.Name) || entry.FullName.EndsWith('/'))
+                continue;
+            if (entry.Name.EndsWith(".ascx", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            string entryPath = entry.FullName.Replace('\\', '/');
+            string bundlePath = MapThemePath(entryPath);
+            const string rootPrefix = "ROOT/";
+            string relPath = bundlePath.StartsWith(rootPrefix, StringComparison.Ordinal)
+                ? bundlePath[rootPrefix.Length..]
+                : bundlePath;
+            availableThemeFiles.Add(relPath);
+        }
+
         // Second pass: collect templates, wiring pane divs to #parseContainer.
         foreach (ZipArchiveEntry entry in zip.Entries)
         {
@@ -1614,7 +1636,7 @@ public static class BundleWriter
                 ascx = ResolveSsiIncludes(ascx, skinDir, zip);
             }
 
-            var (html, header) = ConvertAscxToTemplateHtml(ascx, firstContainerId, themeName, name);
+            var (html, header) = ConvertAscxToTemplateHtml(ascx, firstContainerId, themeName, name, availableThemeFiles);
             templateDefs.Add((Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), name, html, header, themeName));
         }
     }
@@ -1824,7 +1846,8 @@ public static class BundleWriter
         string ascx,
         string defaultContainerId = "",
         string themeName = "",
-        string skinName = "")
+        string skinName = "",
+        IReadOnlySet<string>? availableThemeFiles = null)
     {
         string html = DirectiveRegex.Replace(ascx, string.Empty);
         html = CodeBlockRegex.Replace(html, string.Empty);
@@ -1890,13 +1913,16 @@ public static class BundleWriter
         // BEFORE the skin.css injection below so that skin.css ends
         // up first in the output (matching DNN's load order: skin.css base
         // styles first, per-skin overrides second).  Skip when the skin
-        // name is "skin" (already covered) or when already referenced.
+        // name is "skin" (already covered), when already referenced, or
+        // when an availableThemeFiles set is provided and the file is not
+        // present in the export.
         if (!string.IsNullOrWhiteSpace(themeName) &&
             !string.IsNullOrWhiteSpace(skinName) &&
             !string.Equals(skinName, "skin", StringComparison.OrdinalIgnoreCase))
         {
             string skinCssHref = $"/application/themes/{themeName}/{skinName}.css";
-            if (!alreadyReferenced(skinCssHref))
+            if (!alreadyReferenced(skinCssHref) &&
+                (availableThemeFiles is null || availableThemeFiles.Contains(skinCssHref.TrimStart('/'))))
             {
                 string skinCssLink = $@"<link rel=""stylesheet"" href=""{skinCssHref}"" />";
                 cssTags.Add(skinCssLink);
@@ -1907,12 +1933,18 @@ public static class BundleWriter
         // automatically included the skin CSS via its own framework; in
         // DotCMS we must add it explicitly.  Insert at position 0 so
         // skin.css appears first — matching DNN's load order.  Skip when
-        // a DnnCssInclude directive already emitted a skin.css link above.
-        if (!string.IsNullOrWhiteSpace(themeName) &&
-            !alreadyReferenced($"/application/themes/{themeName}/skin.css"))
+        // a DnnCssInclude directive already emitted a skin.css link above,
+        // or when an availableThemeFiles set is provided and skin.css is
+        // not present in the export.
+        if (!string.IsNullOrWhiteSpace(themeName))
         {
-            string cssLink = $@"<link rel=""stylesheet"" href=""/application/themes/{themeName}/skin.css"" />";
-            cssTags.Insert(0, cssLink);
+            string skinCssHref = $"/application/themes/{themeName}/skin.css";
+            if (!alreadyReferenced(skinCssHref) &&
+                (availableThemeFiles is null || availableThemeFiles.Contains(skinCssHref.TrimStart('/'))))
+            {
+                string cssLink = $@"<link rel=""stylesheet"" href=""{skinCssHref}"" />";
+                cssTags.Insert(0, cssLink);
+            }
         }
 
         // Prepend collected CSS <link> tags to the body so they appear
@@ -2171,4 +2203,23 @@ public static class BundleWriter
     /// </summary>
     private static string Truncate(string value, int maxLength) =>
         value.Length <= maxLength ? value : value[..maxLength];
+
+    /// <summary>
+    /// Generates a deterministic UUID from <paramref name="seed"/>.  The same
+    /// seed always produces the same UUID, which is critical for content type
+    /// and field IDs: bundles from different DNN sites that share the same DNN
+    /// module must produce the same content type ID so DotCMS treats the second
+    /// import as an <em>update</em> instead of a conflicting insert.
+    /// </summary>
+    public static string DeterministicId(string seed)
+    {
+        byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(seed));
+        // Shape the first 16 bytes into a UUID-like value with version
+        // and variant bits set for compatibility with UUID parsers.
+        // Note: this is NOT a strict RFC 4122 UUID v5 (which uses SHA-1);
+        // SHA-256 provides better collision resistance.
+        hash[6] = (byte)((hash[6] & 0x0F) | 0x50);
+        hash[8] = (byte)((hash[8] & 0x3F) | 0x80);
+        return new Guid(hash[..16]).ToString();
+    }
 }
