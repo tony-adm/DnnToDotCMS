@@ -3453,4 +3453,128 @@ public class BundleWriterTests
         finally { File.Delete(zipPath); }
     }
 
+    // ------------------------------------------------------------------
+    // Dynamic portal file linking – non-Images folders written to ROOT/
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Write_WithPortalFiles_PdfFolderFilesWrittenToRoot()
+    {
+        // Files in non-Images folders like PDFs/ must be written as static
+        // resources under ROOT/{folderPath}/ so that HTML references like
+        // {{PortalRoot}}PDFs/doc.pdf → /PDFs/doc.pdf resolve correctly.
+        var files = new[]
+        {
+            new DnnPortalFile(
+                "11111111-aaaa-bbbb-cccc-000000000001",
+                "22222222-aaaa-bbbb-cccc-000000000001",
+                "doc.pdf", "PDFs/", "application/pdf",
+                Encoding.UTF8.GetBytes("%PDF-1.4")),
+        };
+
+        var (_, names) = WriteBundleWithFiles(files);
+
+        Assert.Contains("ROOT/PDFs/doc.pdf", names);
+    }
+
+    [Fact]
+    public void Write_WithPortalFiles_CustomImageFolderWrittenToRoot()
+    {
+        // Folders with custom names (e.g. FisSlider-Images/) that don't start
+        // with Images/ must still be written as static resources under ROOT/.
+        var files = new[]
+        {
+            new DnnPortalFile(
+                "11111111-aaaa-bbbb-cccc-000000000002",
+                "22222222-aaaa-bbbb-cccc-000000000002",
+                "slide.jpg", "FisSlider-Images/", "image/jpeg",
+                [0xFF, 0xD8, 0xFF]),
+        };
+
+        var (_, names) = WriteBundleWithFiles(files);
+
+        Assert.Contains("ROOT/FisSlider-Images/slide.jpg", names);
+        // Must NOT also appear under application/images/ (that's only for Images/).
+        Assert.DoesNotContain(names, n => n.StartsWith("ROOT/application/images/"));
+    }
+
+    [Fact]
+    public void Write_WithPortalFiles_RootLevelFilesWrittenToRoot()
+    {
+        // Root-level portal files (FolderPath = "") should be written to ROOT/
+        // so that {{PortalRoot}}file.css → /file.css resolves correctly.
+        var files = new[]
+        {
+            new DnnPortalFile(
+                "11111111-aaaa-bbbb-cccc-000000000003",
+                "22222222-aaaa-bbbb-cccc-000000000003",
+                "home.css", "", "text/css",
+                Encoding.UTF8.GetBytes("body { color: red; }")),
+        };
+
+        var (_, names) = WriteBundleWithFiles(files);
+
+        Assert.Contains("ROOT/home.css", names);
+    }
+
+    [Fact]
+    public void Write_WithPortalFiles_ContainersFolderNotWrittenToRoot()
+    {
+        // Files in Containers/ are theme-related (handled by export_themes.zip)
+        // and must NOT be written as static resources under ROOT/.
+        var files = new[]
+        {
+            new DnnPortalFile(
+                "11111111-aaaa-bbbb-cccc-000000000004",
+                "22222222-aaaa-bbbb-cccc-000000000004",
+                "Boxed.ascx", "Containers/FBOT/", "text/plain",
+                Encoding.UTF8.GetBytes("<div>container</div>")),
+        };
+
+        var (_, names) = WriteBundleWithFiles(files);
+
+        Assert.DoesNotContain(names, n => n == "ROOT/Containers/FBOT/Boxed.ascx");
+        // Must still be written as a FileAsset contentlet (binary + XML).
+        Assert.Contains(names, n => n.StartsWith("assets/") && n.EndsWith("/Boxed.ascx"));
+    }
+
+    [Fact]
+    public void Write_WithPortalFiles_SkinsFolderNotWrittenToRoot()
+    {
+        // Files in Skins/ are theme-related and must NOT be written as static
+        // resources under ROOT/.
+        var files = new[]
+        {
+            new DnnPortalFile(
+                "11111111-aaaa-bbbb-cccc-000000000005",
+                "22222222-aaaa-bbbb-cccc-000000000005",
+                "skin.css", "Skins/FBOT/", "text/css",
+                Encoding.UTF8.GetBytes("/* skin */")),
+        };
+
+        var (_, names) = WriteBundleWithFiles(files);
+
+        Assert.DoesNotContain(names, n => n == "ROOT/Skins/FBOT/skin.css");
+    }
+
+    [Fact]
+    public void Write_WithPortalFiles_FolderWithoutSlashStillWrittenToRoot()
+    {
+        // DNN may omit the trailing slash from folder paths.  The normalisation
+        // must still produce the correct ROOT/ entry.
+        var files = new[]
+        {
+            new DnnPortalFile(
+                "11111111-aaaa-bbbb-cccc-000000000006",
+                "22222222-aaaa-bbbb-cccc-000000000006",
+                "report.pdf", "PDFs",   // ← no trailing slash
+                "application/pdf",
+                Encoding.UTF8.GetBytes("%PDF-1.5")),
+        };
+
+        var (_, names) = WriteBundleWithFiles(files);
+
+        Assert.Contains("ROOT/PDFs/report.pdf", names);
+    }
+
 }
