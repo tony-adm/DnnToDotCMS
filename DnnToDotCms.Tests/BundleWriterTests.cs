@@ -3577,4 +3577,26 @@ public class BundleWriterTests
         Assert.Contains("ROOT/PDFs/report.pdf", names);
     }
 
+    // ----- ExtractThemeNameFromSkinSrc tests -----
+
+    [Theory]
+    [InlineData("[G]Skins/FidelityBankTexas/Home.ascx", "FidelityBankTexas")]
+    [InlineData("[L]Skins/Cavalier/Inner.ascx", "Cavalier")]
+    [InlineData("[G]Skins/Xcillion/Home.ascx", "Xcillion")]
+    [InlineData("[G]Skins\\Xcillion\\Home.ascx", "Xcillion")] // backslash paths
+    public void ExtractThemeNameFromSkinSrc_ReturnsThemeName(string skinSrc, string expected)
+    {
+        string? result = BundleWriter.ExtractThemeNameFromSkinSrc(skinSrc);
+        Assert.Equal(expected, result);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("Home.ascx")]
+    [InlineData("[G]Containers/Something/Box.ascx")]
+    public void ExtractThemeNameFromSkinSrc_ReturnsNull_WhenNoSkinsSegment(string skinSrc)
+    {
+        Assert.Null(BundleWriter.ExtractThemeNameFromSkinSrc(skinSrc));
+    }
+
 }

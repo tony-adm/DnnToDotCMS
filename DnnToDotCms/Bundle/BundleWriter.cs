@@ -1536,15 +1536,26 @@ public static class BundleWriter
         IReadOnlyList<(string id, string inode, string name, string html, string header, string themeName)> templateDefs)
     {
         var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (id, _, name, _, _, _) in templateDefs)
+        foreach (var (id, _, name, _, _, themeName) in templateDefs)
+        {
+            // Primary key: "ThemeName/SkinName" – always unique across themes.
+            if (!string.IsNullOrEmpty(themeName))
+                map.TryAdd($"{themeName}/{name}", id);
+
+            // Fallback key: bare skin name – kept only when there is no
+            // collision across themes so legacy callers still work.
             map.TryAdd(name, id);
+        }
         return map;
     }
 
     /// <summary>
     /// Resolves the DotCMS template ID for a DNN page based on its
     /// <paramref name="skinSrc"/> (e.g. <c>[G]Skins/Xcillion/Home.ascx</c>).
-    /// Falls back to the first available template, or empty string when none.
+    /// The method first tries a theme-qualified lookup
+    /// (<c>ThemeName/SkinName</c>) to disambiguate skins with identical file
+    /// names across different themes, then falls back to a bare skin-name
+    /// lookup, and finally to the first available template.
     /// </summary>
     private static string ResolveTemplateId(
         string skinSrc,
@@ -1552,8 +1563,19 @@ public static class BundleWriter
     {
         if (!string.IsNullOrWhiteSpace(skinSrc))
         {
-            // Extract the skin file name without extension.
+            // Extract both theme folder and skin file name from paths like
+            // "[G]Skins/FidelityBankTexas/Home.ascx" or
+            // "[L]Skins/Cavalier/Inner.ascx".
             string skinName = Path.GetFileNameWithoutExtension(skinSrc);
+            string? themeName = ExtractThemeNameFromSkinSrc(skinSrc);
+
+            // Prefer the theme-qualified key so that two themes with
+            // identically named skins resolve to the correct template.
+            if (themeName is not null
+                && skinToTemplateId.TryGetValue($"{themeName}/{skinName}", out string? qualifiedId))
+                return qualifiedId;
+
+            // Fall back to bare skin name (works when there is no collision).
             if (skinToTemplateId.TryGetValue(skinName, out string? id))
                 return id;
         }
@@ -1561,6 +1583,26 @@ public static class BundleWriter
         foreach (string id in skinToTemplateId.Values)
             return id;
         return string.Empty;
+    }
+
+    /// <summary>
+    /// Extracts the DNN theme (skin package) folder name from a
+    /// <c>SkinSrc</c> value such as <c>[G]Skins/FidelityBankTexas/Home.ascx</c>.
+    /// Returns <c>null</c> when the path doesn't match the expected pattern.
+    /// </summary>
+    internal static string? ExtractThemeNameFromSkinSrc(string skinSrc)
+    {
+        // Normalise to forward slashes and locate the "Skins/" segment.
+        string normalised = skinSrc.Replace('\\', '/');
+        int idx = normalised.IndexOf("Skins/", StringComparison.OrdinalIgnoreCase);
+        if (idx < 0) return null;
+
+        // After "Skins/" we expect "ThemeName/SkinFile.ascx".
+        string afterSkins = normalised[(idx + "Skins/".Length)..];
+        int slash = afterSkins.IndexOf('/');
+        if (slash <= 0) return null;
+
+        return afterSkins[..slash];
     }
 
 
