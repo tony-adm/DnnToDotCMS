@@ -1,5 +1,6 @@
 using System.Formats.Tar;
 using System.IO.Compression;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -159,7 +160,7 @@ public static class BundleWriter
         string? htmlContentTypeVariable = null;
         foreach (DotCmsContentType ct in contentTypes)
         {
-            string id   = Guid.NewGuid().ToString();
+            string id   = DeterministicId("ContentType:" + ct.Variable);
             string json = BuildContentTypeJson(ct, id, contentHostId, contentSiteName);
             // DotCMS push-publish format requires each .contentType.json to:
             //   1. contain two JSON objects (old state + new state), and
@@ -493,7 +494,7 @@ public static class BundleWriter
             result.Add(new DotCmsBundleField
             {
                 Clazz         = immutableClazz,
-                Id            = Guid.NewGuid().ToString(),
+                Id            = DeterministicId($"Field:{contentTypeId}:{f.Variable}"),
                 ContentTypeId = contentTypeId,
                 Name          = f.Name,
                 Variable      = f.Variable,
@@ -519,7 +520,7 @@ public static class BundleWriter
         string shortClazz, string name, string variable, int sortOrder, string contentTypeId) => new()
     {
         Clazz         = $"com.dotcms.contenttype.model.field.{shortClazz}",
-        Id            = Guid.NewGuid().ToString(),
+        Id            = DeterministicId($"Field:{contentTypeId}:{variable}"),
         ContentTypeId = contentTypeId,
         Name          = name,
         Variable      = variable,
@@ -2202,4 +2203,20 @@ public static class BundleWriter
     /// </summary>
     private static string Truncate(string value, int maxLength) =>
         value.Length <= maxLength ? value : value[..maxLength];
+
+    /// <summary>
+    /// Generates a deterministic UUID from <paramref name="seed"/>.  The same
+    /// seed always produces the same UUID, which is critical for content type
+    /// and field IDs: bundles from different DNN sites that share the same DNN
+    /// module must produce the same content type ID so DotCMS treats the second
+    /// import as an <em>update</em> instead of a conflicting insert.
+    /// </summary>
+    public static string DeterministicId(string seed)
+    {
+        byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(seed));
+        // Set UUID version 5 (name-based SHA) and RFC 4122 variant bits.
+        hash[6] = (byte)((hash[6] & 0x0F) | 0x50);
+        hash[8] = (byte)((hash[8] & 0x3F) | 0x80);
+        return new Guid(hash[..16]).ToString();
+    }
 }

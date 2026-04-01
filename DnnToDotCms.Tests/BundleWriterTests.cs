@@ -1590,6 +1590,54 @@ public class BundleWriterTests
     }
 
     // ------------------------------------------------------------------
+    // DeterministicId utility tests
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void DeterministicId_SameSeed_ReturnsSameId()
+    {
+        string id1 = BundleWriter.DeterministicId("ContentType:htmlContent");
+        string id2 = BundleWriter.DeterministicId("ContentType:htmlContent");
+        Assert.Equal(id1, id2);
+    }
+
+    [Fact]
+    public void DeterministicId_DifferentSeed_ReturnsDifferentId()
+    {
+        string id1 = BundleWriter.DeterministicId("ContentType:htmlContent");
+        string id2 = BundleWriter.DeterministicId("ContentType:otherType");
+        Assert.NotEqual(id1, id2);
+    }
+
+    [Fact]
+    public void DeterministicId_IsValidGuid()
+    {
+        string id = BundleWriter.DeterministicId("test-seed");
+        Assert.True(Guid.TryParse(id, out _), "DeterministicId must return a valid GUID string.");
+    }
+
+    [Fact]
+    public void Write_SameContentType_ProducesSameIdAcrossBundles()
+    {
+        // Two independent bundles with the same content type variable
+        // must produce the same content type ID so DotCMS treats the
+        // second import as an update rather than a conflicting insert.
+        var contentType = new[] { MakeHtmlContentType() };
+
+        var (ms1, names1) = WriteBundleToMemory(contentType);
+        var (ms2, names2) = WriteBundleToMemory(contentType);
+
+        string ctEntry1 = names1.First(n => n.EndsWith(".contentType.json"));
+        string ctEntry2 = names2.First(n => n.EndsWith(".contentType.json"));
+
+        // The content type JSON filename includes the content type ID.
+        // Both bundles must use the same filename (same ID).
+        string ctId1 = Path.GetFileName(ctEntry1);
+        string ctId2 = Path.GetFileName(ctEntry2);
+        Assert.Equal(ctId1, ctId2);
+    }
+
+    // ------------------------------------------------------------------
     // Contentlet (HTML content) bundle entry tests
     // ------------------------------------------------------------------
 
