@@ -1841,25 +1841,18 @@ public static class BundleWriter
         foreach (var (rx, replacement) in SkinControlReplacements)
             html = rx.Replace(html, replacement);
 
-        // Collect CSS <link> tags for the template header (rendered in the
-        // HTML <head> section by DotCMS) instead of leaving them inline in
-        // the body.  DNN registers CSS via its client-resource framework and
-        // emits the links in <head>; DotCMS's template "header" field is the
-        // equivalent mechanism.  JS <script> tags remain in the body.
-        var headerTags = new List<string>();
-
-        // Convert <dnn:DnnCssInclude FilePath="..." /> to <link> tags
-        // collected for the header, and <dnn:DnnJsInclude FilePath="..." />
-        // to inline <script> tags in the body.  The FilePath attribute is
-        // relative to the skin folder, which maps to
-        // /application/themes/{themeName}/ in DotCMS.  This must run before
-        // the generic DNN-tag cleanup that follows.
+        // Convert <dnn:DnnCssInclude FilePath="..." /> to <link> tags and
+        // <dnn:DnnJsInclude FilePath="..." /> to <script> tags in the body.
+        // The FilePath attribute is relative to the skin folder, which maps
+        // to /application/themes/{themeName}/ in DotCMS.  This must run
+        // before the generic DNN-tag cleanup that follows.
+        var cssTags = new List<string>();
         if (!string.IsNullOrWhiteSpace(themeName))
         {
             string themeBase = $"/application/themes/{themeName}/";
             html = DnnCssIncludeRegex.Replace(html, m =>
             {
-                headerTags.Add($@"<link rel=""stylesheet"" href=""{themeBase}{m.Groups[1].Value}"" />");
+                cssTags.Add($@"<link rel=""stylesheet"" href=""{themeBase}{m.Groups[1].Value}"" />");
                 return string.Empty;
             });
             html = DnnJsIncludeRegex.Replace(html,
@@ -1887,14 +1880,14 @@ public static class BundleWriter
         html = html.Trim();
 
         // Helper to check whether a href is already referenced in the body
-        // or in the header tags collected so far.
+        // or in the CSS tags collected so far.
         bool alreadyReferenced(string href) =>
             html.Contains(href, StringComparison.OrdinalIgnoreCase) ||
-            headerTags.Any(t => t.Contains(href, StringComparison.OrdinalIgnoreCase));
+            cssTags.Any(t => t.Contains(href, StringComparison.OrdinalIgnoreCase));
 
         // DNN automatically loads a per-skin CSS file that matches the
-        // skin filename (e.g. Home.css for Home.ascx).  Add the link to the
-        // header BEFORE the skin.css injection below so that skin.css ends
+        // skin filename (e.g. Home.css for Home.ascx).  Add the link
+        // BEFORE the skin.css injection below so that skin.css ends
         // up first in the output (matching DNN's load order: skin.css base
         // styles first, per-skin overrides second).  Skip when the skin
         // name is "skin" (already covered) or when already referenced.
@@ -1906,25 +1899,29 @@ public static class BundleWriter
             if (!alreadyReferenced(skinCssHref))
             {
                 string skinCssLink = $@"<link rel=""stylesheet"" href=""{skinCssHref}"" />";
-                headerTags.Add(skinCssLink);
+                cssTags.Add(skinCssLink);
             }
         }
 
-        // Add a <link> tag for the theme's main skin.css to the header so
-        // that DotCMS loads the skin styles in <head>.  DNN automatically
-        // included the skin CSS via its own framework; in DotCMS we must add
-        // it to the template header.  Insert at position 0 so skin.css
-        // appears first — matching DNN's load order.  Skip when a
-        // DnnCssInclude directive already emitted a skin.css link above.
+        // Add a <link> tag for the theme's main skin.css.  DNN
+        // automatically included the skin CSS via its own framework; in
+        // DotCMS we must add it explicitly.  Insert at position 0 so
+        // skin.css appears first — matching DNN's load order.  Skip when
+        // a DnnCssInclude directive already emitted a skin.css link above.
         if (!string.IsNullOrWhiteSpace(themeName) &&
             !alreadyReferenced($"/application/themes/{themeName}/skin.css"))
         {
             string cssLink = $@"<link rel=""stylesheet"" href=""/application/themes/{themeName}/skin.css"" />";
-            headerTags.Insert(0, cssLink);
+            cssTags.Insert(0, cssLink);
         }
 
-        string header = string.Join("\n", headerTags);
-        return (html, header);
+        // Prepend collected CSS <link> tags to the body so they appear
+        // before the template content.  The header field is left empty
+        // because DotCMS push-publish does not reliably render it.
+        if (cssTags.Count > 0)
+            html = string.Join("\n", cssTags) + "\n" + html;
+
+        return (html, string.Empty);
     }
 
     // ------------------------------------------------------------------
@@ -2138,14 +2135,14 @@ public static class BundleWriter
     /// <summary>
     /// Converts a DNN portal/site name into a site name suitable for use as a
     /// DotCMS site identifier, preserving the original casing and replacing
-    /// spaces (and other non-alphanumeric characters) with underscores.
-    /// For example: <c>"My Website"</c> → <c>"My_Website"</c>.
+    /// spaces (and other non-alphanumeric characters) with hyphens.
+    /// For example: <c>"My Website"</c> → <c>"My-Website"</c>.
     /// </summary>
     public static string SanitizeHostname(string siteName)
     {
-        // Replace runs of non-alphanumeric characters (including spaces) with an underscore.
-        string sanitized = Regex.Replace(siteName, @"[^A-Za-z0-9]+", "_");
-        sanitized = sanitized.Trim('_');
+        // Replace runs of non-alphanumeric characters (including spaces) with a hyphen.
+        string sanitized = Regex.Replace(siteName, @"[^A-Za-z0-9]+", "-");
+        sanitized = sanitized.Trim('-');
         return string.IsNullOrEmpty(sanitized) ? "imported-site" : sanitized;
     }
 
