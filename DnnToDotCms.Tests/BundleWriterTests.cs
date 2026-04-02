@@ -2561,11 +2561,11 @@ public class BundleWriterTests
     }
 
     [Fact]
-    public void Write_WithPortalFiles_ImagesFolderFilesAlsoWrittenToApplicationImages()
+    public void Write_WithPortalFiles_ImagesFolderFilesWrittenToRootImages()
     {
-        // Files from the DNN "Images/" folder must also appear as static files under
-        // ROOT/application/images/ in the bundle so that DotCMS serves them directly
-        // from /application/images/ — the path referenced in converted HTML content.
+        // Files from the DNN "Images/" folder must appear as static files under
+        // ROOT/Images/ in the bundle so that DotCMS serves them at /Images/
+        // — the path referenced in converted HTML content.
         var files = new[]
         {
             new DnnPortalFile(
@@ -2577,14 +2577,14 @@ public class BundleWriterTests
 
         var (_, names) = WriteBundleWithFiles(files);
 
-        Assert.Contains("ROOT/application/images/logo.png", names);
+        Assert.Contains("ROOT/Images/logo.png", names);
     }
 
     [Fact]
-    public void Write_WithPortalFiles_RootFilesNotWrittenToApplicationImages()
+    public void Write_WithPortalFiles_RootFilesNotWrittenToImagesFolder()
     {
         // Files at the DNN site root (FolderPath = "") must NOT appear under
-        // ROOT/application/images/ — only Images/ sub-folder files go there.
+        // ROOT/Images/ — only Images/ sub-folder files go there.
         var files = new[]
         {
             new DnnPortalFile(
@@ -2596,14 +2596,14 @@ public class BundleWriterTests
 
         var (_, names) = WriteBundleWithFiles(files);
 
-        Assert.DoesNotContain(names, n => n.StartsWith("ROOT/application/images/"));
+        Assert.DoesNotContain(names, n => n.StartsWith("ROOT/Images/"));
     }
 
     [Fact]
-    public void Write_WithPortalFiles_ImagesFolderSubdirFilePreservesSubdirInApplicationImages()
+    public void Write_WithPortalFiles_ImagesFolderSubdirFilePreservesSubdirInRootImages()
     {
         // A file in a DNN sub-folder of Images/ (e.g. Images/Banners/) should land
-        // at ROOT/application/images/Banners/{filename} preserving the sub-structure.
+        // at ROOT/Images/Banners/{filename} preserving the sub-structure.
         var files = new[]
         {
             new DnnPortalFile(
@@ -2615,7 +2615,7 @@ public class BundleWriterTests
 
         var (_, names) = WriteBundleWithFiles(files);
 
-        Assert.Contains("ROOT/application/images/Banners/banner.jpg", names);
+        Assert.Contains("ROOT/Images/Banners/banner.jpg", names);
     }
 
     // ------------------------------------------------------------------
@@ -3053,11 +3053,11 @@ public class BundleWriterTests
     // ------------------------------------------------------------------
 
     [Fact]
-    public void Write_WithPortalFiles_ImagesFolderPathWithoutSlashAlsoWrittenToApplicationImages()
+    public void Write_WithPortalFiles_ImagesFolderPathWithoutSlashAlsoWrittenToRootImages()
     {
         // DNN may store the folder path as "Images" (no trailing slash) in some
         // export versions.  The bundle writer must still place such files under
-        // ROOT/application/images/ so that converted HTML references resolve.
+        // ROOT/Images/ so that converted HTML references resolve.
         var files = new[]
         {
             new DnnPortalFile(
@@ -3070,14 +3070,14 @@ public class BundleWriterTests
 
         var (_, names) = WriteBundleWithFiles(files);
 
-        Assert.Contains("ROOT/application/images/logo.png", names);
+        Assert.Contains("ROOT/Images/logo.png", names);
     }
 
     [Fact]
     public void Write_WithPortalFiles_ImagesFolderSubdirPathWithoutSlashPreservesSubdir()
     {
         // Same normalisation for nested paths: "Images/Banners" (no trailing slash)
-        // must still produce ROOT/application/images/Banners/{filename}.
+        // must still produce ROOT/Images/Banners/{filename}.
         var files = new[]
         {
             new DnnPortalFile(
@@ -3090,7 +3090,7 @@ public class BundleWriterTests
 
         var (_, names) = WriteBundleWithFiles(files);
 
-        Assert.Contains("ROOT/application/images/Banners/hero.jpg", names);
+        Assert.Contains("ROOT/Images/Banners/hero.jpg", names);
     }
 
     // ------------------------------------------------------------------
@@ -3500,8 +3500,6 @@ public class BundleWriterTests
         var (_, names) = WriteBundleWithFiles(files);
 
         Assert.Contains("ROOT/FisSlider-Images/slide.jpg", names);
-        // Must NOT also appear under application/images/ (that's only for Images/).
-        Assert.DoesNotContain(names, n => n.StartsWith("ROOT/application/images/"));
     }
 
     [Fact]
