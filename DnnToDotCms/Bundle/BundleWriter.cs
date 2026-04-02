@@ -1979,6 +1979,22 @@ public static class BundleWriter
     private static readonly Regex DnnOpenCloseTagRegex =
         new(@"</?dnn:[A-Za-z]+[^>]*>", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
+    /// <summary>
+    /// Adds the <c>dnn_</c> naming-container prefix to any <c>id="…"</c>
+    /// attribute found in <paramref name="tag"/>, unless the value already
+    /// starts with <c>dnn_</c>.  Returns the modified tag string.
+    /// </summary>
+    private static string PrefixIdWithDnn(string tag)
+    {
+        return DivIdAttributeRegex.Replace(tag, m =>
+        {
+            string idVal = m.Groups[1].Value;
+            return idVal.StartsWith("dnn_", StringComparison.OrdinalIgnoreCase)
+                ? m.Value
+                : $"id=\"dnn_{idVal}\"";
+        });
+    }
+
     // Matches <dnn:DnnCssInclude ... FilePath="..." .../> and captures the FilePath value.
     private static readonly Regex DnnCssIncludeRegex =
         new(@"<dnn:DnnCssInclude\s[^>]*FilePath=""([^""]+)""[^>]*/?>",
@@ -2034,7 +2050,7 @@ public static class BundleWriter
         html = HtmlRunatServerElementRegex.Replace(html, m =>
         {
             string tag = RunatServerRegex.Replace(m.Value, string.Empty);
-            return DivIdAttributeRegex.Replace(tag, id => $"id=\"dnn_{id.Groups[1].Value}\"");
+            return PrefixIdWithDnn(tag);
         });
         html = RunatServerRegex.Replace(html, string.Empty);
         html = DnnSelfClosingTagRegex.Replace(html, string.Empty);
@@ -2182,7 +2198,7 @@ public static class BundleWriter
                 // Add the dnn_ prefix to the id attribute so that the output
                 // matches the rendered DNN page (ASP.NET prepends the naming-
                 // container prefix "dnn_" to server-control IDs at runtime).
-                cleaned = DivIdAttributeRegex.Replace(cleaned, m2 => $"id=\"dnn_{m2.Groups[1].Value}\"");
+                cleaned = PrefixIdWithDnn(cleaned);
 
                 string withoutId = DivIdAttributeRegex.Replace(cleaned, string.Empty);
                 bool hasLayoutAttrs = withoutId.Contains('=');
@@ -2209,7 +2225,7 @@ public static class BundleWriter
         html = HtmlRunatServerElementRegex.Replace(html, m =>
         {
             string tag = RunatServerRegex.Replace(m.Value, string.Empty);
-            return DivIdAttributeRegex.Replace(tag, id => $"id=\"dnn_{id.Groups[1].Value}\"");
+            return PrefixIdWithDnn(tag);
         });
         html = RunatServerRegex.Replace(html, string.Empty);
         html = DnnSelfClosingTagRegex.Replace(html, string.Empty);
