@@ -3605,4 +3605,128 @@ public class BundleWriterTests
         Assert.Null(BundleWriter.ExtractThemeNameFromSkinSrc(skinSrc));
     }
 
+    // ------------------------------------------------------------------
+    // PaneUuidMap tests
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_ReturnsPaneUuidMap_ForMultiPaneSkin()
+    {
+        // A DNN skin with several named panes (header, content, footer zones)
+        // must produce a PaneUuidMap that maps each div id to its sequential
+        // #parseContainer UUID slot number.
+        const string ascx = """
+            <%@ Control Inherits="DotNetNuke.UI.Skins.Skin" %>
+            <div id="HeaderPane" runat="server"></div>
+            <div id="ContentPane" runat="server"></div>
+            <div id="FooterLeft" runat="server"></div>
+            <div id="FooterRight" runat="server"></div>
+            """;
+
+        var (body, _, paneUuidMap) = BundleWriter.ConvertAscxToTemplateHtml(
+            ascx, defaultContainerId: "container-1");
+
+        // All four pane ids must appear in the mapping.
+        Assert.Equal(4, paneUuidMap.Count);
+        Assert.True(paneUuidMap.ContainsKey("HeaderPane"));
+        Assert.True(paneUuidMap.ContainsKey("ContentPane"));
+        Assert.True(paneUuidMap.ContainsKey("FooterLeft"));
+        Assert.True(paneUuidMap.ContainsKey("FooterRight"));
+
+        // UUIDs must be sequential starting at 1.
+        Assert.Equal(1, paneUuidMap["HeaderPane"]);
+        Assert.Equal(2, paneUuidMap["ContentPane"]);
+        Assert.Equal(3, paneUuidMap["FooterLeft"]);
+        Assert.Equal(4, paneUuidMap["FooterRight"]);
+
+        // The template body must contain matching #parseContainer directives.
+        Assert.Contains("#parseContainer('container-1', '1')", body);
+        Assert.Contains("#parseContainer('container-1', '2')", body);
+        Assert.Contains("#parseContainer('container-1', '3')", body);
+        Assert.Contains("#parseContainer('container-1', '4')", body);
+    }
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_PaneUuidMapEmpty_WhenNoContainerId()
+    {
+        // When no container id is provided, pane divs are removed and no
+        // pane mapping is generated.
+        const string ascx = """
+            <%@ Control Inherits="DotNetNuke.UI.Skins.Skin" %>
+            <div id="ContentPane" runat="server"></div>
+            <div id="FooterPane" runat="server"></div>
+            """;
+
+        var (_, _, paneUuidMap) = BundleWriter.ConvertAscxToTemplateHtml(ascx);
+
+        Assert.Empty(paneUuidMap);
+    }
+
+    [Fact]
+    public void Write_WithFooterPaneContent_MultiTreeRelationTypeMatchesFooterSlot()
+    {
+        // Footer modules placed in high-numbered pane slots (e.g. slot 5 for
+        // FooterLeft in a skin with 5 runat="server" divs) must get the
+        // correct relation_type in multiTree so DotCMS renders the content
+        // in the matching #parseContainer directive.
+        string tabId = "footer-pane-test";
+        var pages = new[]
+        {
+            new DnnPortalPage(tabId, "Home", "Home", "", "//Home", 0, true, ""),
+        };
+        // Skin with content panes followed by 4 footer panes — mimics a
+        // real DNN skin like Xcillion Home.ascx.
+        string skinAscx = """
+            <%@ Control Inherits="DotNetNuke.UI.Skins.Skin" %>
+            <div id="HeaderPane" runat="server"></div>
+            <div id="ContentPane" runat="server"></div>
+            <div id="SidePane" runat="server"></div>
+            <footer>
+                <div id="FooterLeft" runat="server"></div>
+                <div id="FooterLeftCenter" runat="server"></div>
+                <div id="FooterRightCenter" runat="server"></div>
+                <div id="FooterRight" runat="server"></div>
+            </footer>
+            """;
+        // Content module lives in FooterLeft (slot 4) and FooterRight (slot 7).
+        var contents = new[]
+        {
+            new DnnHtmlContent("Footer 1", "<p>about</p>", TabUniqueId: tabId, PaneName: "FooterLeft"),
+            new DnnHtmlContent("Footer 4", "<p>logo</p>",  TabUniqueId: tabId, PaneName: "FooterRight"),
+        };
+
+        string zipPath = BuildThemesZip(skinAscx: skinAscx);
+        try
+        {
+            var (ms, names) = WriteBundleWithPagesAndContents(pages, contents,
+                themesZipPath: zipPath);
+
+            string? pageXml = null;
+            foreach (string name in names.Where(n =>
+                n.Contains("/1/") && n.EndsWith(".content.xml") && !n.Contains("host.xml")))
+            {
+                string candidate = ReadTarEntry(ms, name)!;
+                if (candidate.Contains("<assetSubType>htmlpageasset</assetSubType>"))
+                {
+                    pageXml = candidate;
+                    break;
+                }
+            }
+
+            Assert.NotNull(pageXml);
+            // FooterLeft is the 4th runat="server" div → slot 4.
+            // FooterRight is the 7th runat="server" div → slot 7.
+            int idx1 = pageXml!.IndexOf("<string>relation_type</string>", StringComparison.Ordinal);
+            Assert.True(idx1 >= 0);
+            string afterFirst = pageXml[(idx1 + "<string>relation_type</string>".Length)..];
+            Assert.Contains("<string>4</string>", afterFirst);
+
+            int idx2 = pageXml.IndexOf("<string>relation_type</string>", idx1 + 1, StringComparison.Ordinal);
+            Assert.True(idx2 >= 0);
+            string afterSecond = pageXml[(idx2 + "<string>relation_type</string>".Length)..];
+            Assert.Contains("<string>7</string>", afterSecond);
+        }
+        finally { File.Delete(zipPath); }
+    }
+
 }
