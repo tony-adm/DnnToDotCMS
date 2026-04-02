@@ -720,7 +720,7 @@ public class BundleWriterTests
 
         var (body, _, _) = BundleWriter.ConvertAscxToTemplateHtml(ascx);
 
-        Assert.Contains("<!-- Navigation -->", body);
+        Assert.Contains("dnn-nav", body);
         Assert.DoesNotContain("dnn:MENU", body);
     }
 
@@ -3970,11 +3970,11 @@ public class BundleWriterTests
     [Fact]
     public void ResolveDefaultContainerId_PrefersStandard()
     {
-        var defs = new List<(string id, string inode, string name, string html)>
+        var defs = new List<(string id, string inode, string name, string html, string themeName)>
         {
-            ("aaa", "i1", "Accountcard", "<div>acc</div>"),
-            ("bbb", "i2", "standard", "<div>std</div>"),
-            ("ccc", "i3", "hpcard", "<div>hp</div>"),
+            ("aaa", "i1", "Accountcard", "<div>acc</div>", "theme1"),
+            ("bbb", "i2", "standard", "<div>std</div>", "theme1"),
+            ("ccc", "i3", "hpcard", "<div>hp</div>", "theme1"),
         };
 
         string result = BundleWriter.ResolveDefaultContainerId(defs);
@@ -3985,10 +3985,10 @@ public class BundleWriterTests
     [Fact]
     public void ResolveDefaultContainerId_FallsBackToFirst_WhenNoStandard()
     {
-        var defs = new List<(string id, string inode, string name, string html)>
+        var defs = new List<(string id, string inode, string name, string html, string themeName)>
         {
-            ("aaa", "i1", "Accountcard", "<div>acc</div>"),
-            ("ccc", "i2", "hpcard", "<div>hp</div>"),
+            ("aaa", "i1", "Accountcard", "<div>acc</div>", "theme1"),
+            ("ccc", "i2", "hpcard", "<div>hp</div>", "theme1"),
         };
 
         string result = BundleWriter.ResolveDefaultContainerId(defs);
@@ -3999,7 +3999,7 @@ public class BundleWriterTests
     [Fact]
     public void ResolveDefaultContainerId_ReturnsEmpty_WhenNoDefs()
     {
-        var defs = new List<(string id, string inode, string name, string html)>();
+        var defs = new List<(string id, string inode, string name, string html, string themeName)>();
 
         string result = BundleWriter.ResolveDefaultContainerId(defs);
 
@@ -4009,10 +4009,10 @@ public class BundleWriterTests
     [Fact]
     public void ResolveDefaultContainerId_CaseInsensitive()
     {
-        var defs = new List<(string id, string inode, string name, string html)>
+        var defs = new List<(string id, string inode, string name, string html, string themeName)>
         {
-            ("aaa", "i1", "Accountcard", "<div>acc</div>"),
-            ("bbb", "i2", "Standard", "<div>std</div>"),
+            ("aaa", "i1", "Accountcard", "<div>acc</div>", "theme1"),
+            ("bbb", "i2", "Standard", "<div>std</div>", "theme1"),
         };
 
         string result = BundleWriter.ResolveDefaultContainerId(defs);

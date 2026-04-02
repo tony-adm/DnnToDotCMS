@@ -125,6 +125,7 @@ public static class ModuleMappings
         [
             TextField("Title",   "title",   required: true, listed: true),
             WysiwygField("Body", "body",     required: true),
+            TextField("Image",   "image",    hint: "Icon or image URL for container rendering"),
         ]
     };
 
