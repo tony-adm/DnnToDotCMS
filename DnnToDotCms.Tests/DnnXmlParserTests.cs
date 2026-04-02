@@ -733,6 +733,9 @@ public class DnnXmlParserTests
             // FisSlider must produce a Bootstrap carousel, not a "recreate" notice.
             Assert.Contains("carousel", hc.HtmlBody);
             Assert.Contains("dnn-slider-", hc.HtmlBody);
+            // Even the empty shell must include a caption overlay structure.
+            Assert.Contains("carousel-caption", hc.HtmlBody);
+            Assert.Contains("btn btn-primary", hc.HtmlBody);
             Assert.DoesNotContain("recreated in DotCMS", hc.HtmlBody);
             Assert.DoesNotContain("dnn-module-placeholder", hc.HtmlBody);
             Assert.Equal("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", hc.TabUniqueId);
@@ -807,6 +810,9 @@ public class DnnXmlParserTests
             Assert.Contains("carousel", hc.HtmlBody);
             Assert.Contains("/FisSlider-Images/slide1.jpg", hc.HtmlBody);
             Assert.Contains("/FisSlider-Images/slide2.jpg", hc.HtmlBody);
+            // Each slide must include a caption overlay with text and a link.
+            Assert.Contains("carousel-caption", hc.HtmlBody);
+            Assert.Contains("btn btn-primary", hc.HtmlBody);
             Assert.DoesNotContain("recreated in DotCMS", hc.HtmlBody);
             Assert.DoesNotContain("dnn-module-placeholder", hc.HtmlBody);
         }
