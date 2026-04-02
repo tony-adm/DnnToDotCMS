@@ -205,8 +205,9 @@ public static class BundleWriter
         if (htmlContents is not null && htmlContents.Count > 0
             && htmlContentTypeId is not null && htmlContentTypeVariable is not null)
         {
-            // Use the first available container for multiTree associations.
-            string defaultContainerId = containerDefs.Count > 0 ? containerDefs[0].id : string.Empty;
+            // Prefer a container named "standard" as the default; fall back to the
+            // first container if no "standard" container exists.
+            string defaultContainerId = ResolveDefaultContainerId(containerDefs);
 
             foreach (DnnHtmlContent hc in htmlContents)
             {
@@ -259,8 +260,9 @@ public static class BundleWriter
                     templatePaneMaps.TryAdd(tId, paneMap);
             }
 
-            // Use the first available container for multiTree associations.
-            string defaultContainerId = containerDefs.Count > 0 ? containerDefs[0].id : string.Empty;
+            // Prefer a container named "standard" as the default; fall back to the
+            // first container if no "standard" container exists.
+            string defaultContainerId = ResolveDefaultContainerId(containerDefs);
 
             foreach (DnnPortalPage page in pages)
             {
@@ -1706,8 +1708,9 @@ public static class BundleWriter
             containerDefs.Add((Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), name, html));
         }
 
-        // Use the first container's identifier so template panes can reference it.
-        string firstContainerId = containerDefs.Count > 0 ? containerDefs[0].id : string.Empty;
+        // Prefer a container named "standard" as the default; fall back to the
+        // first container if no "standard" container exists.
+        string firstContainerId = ResolveDefaultContainerId(containerDefs);
 
         // Build a set of available non-ASCX theme file paths so that
         // ConvertAscxToTemplateHtml only injects CSS link tags for files
@@ -1908,7 +1911,7 @@ public static class BundleWriter
         (new(@"<dnn:SEARCH\s[^>]*/?>",      RegexOptions.IgnoreCase | RegexOptions.Singleline),
          "<!-- Search -->"),
         (new(@"<dnn:COPYRIGHT\s[^>]*/?>",   RegexOptions.IgnoreCase | RegexOptions.Singleline),
-         "<!-- Copyright -->"),
+         "<span class=\"copyright\">Copyright</span>"),
         (new(@"<dnn:BREADCRUMB\s[^>]*/?>",  RegexOptions.IgnoreCase | RegexOptions.Singleline),
          "<!-- Breadcrumb -->"),
         (new(@"<dnn:CURRENTDATE\s[^>]*/?>", RegexOptions.IgnoreCase | RegexOptions.Singleline),
@@ -1916,9 +1919,9 @@ public static class BundleWriter
         (new(@"<dnn:LANGUAGE\s[^>]*/?>",    RegexOptions.IgnoreCase | RegexOptions.Singleline),
          "<!-- Language Selector -->"),
         (new(@"<dnn:TERMS\s[^>]*/?>",       RegexOptions.IgnoreCase | RegexOptions.Singleline),
-         "<!-- Terms of Use -->"),
+         "<a href=\"/terms-of-use\">Terms of Use</a>"),
         (new(@"<dnn:PRIVACY\s[^>]*/?>",     RegexOptions.IgnoreCase | RegexOptions.Singleline),
-         "<!-- Privacy -->"),
+         "<a href=\"/privacy\">Privacy</a>"),
         // Controls to remove entirely (handled by DotCMS)
         (new(@"<dnn:STYLES\s[^>]*/?>",      RegexOptions.IgnoreCase | RegexOptions.Singleline),
          string.Empty),
@@ -1961,6 +1964,13 @@ public static class BundleWriter
     private static readonly Regex DivIdAttributeRegex =
         new(@"\bid=""([^""]+)""", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
+    // Matches any HTML element (not <dnn:...>) that still carries runat="server".
+    // Used to add the dnn_ naming-container prefix to the id attribute before
+    // runat="server" is stripped, so the output matches DNN's rendered HTML.
+    private static readonly Regex HtmlRunatServerElementRegex =
+        new(@"<(?!dnn:)[A-Za-z]+\s[^>]*runat=""server""[^>]*>",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
     // Matches any remaining self-closing <dnn:TAGNAME .../> controls.
     private static readonly Regex DnnSelfClosingTagRegex =
         new(@"<dnn:[A-Za-z]+\s[^>]*/?>", RegexOptions.Compiled | RegexOptions.IgnoreCase);
@@ -1968,6 +1978,22 @@ public static class BundleWriter
     // Matches any remaining open/close <dnn:TAGNAME> ... </dnn:TAGNAME> pairs.
     private static readonly Regex DnnOpenCloseTagRegex =
         new(@"</?dnn:[A-Za-z]+[^>]*>", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    /// <summary>
+    /// Adds the <c>dnn_</c> naming-container prefix to any <c>id="…"</c>
+    /// attribute found in <paramref name="tag"/>, unless the value already
+    /// starts with <c>dnn_</c>.  Returns the modified tag string.
+    /// </summary>
+    private static string PrefixIdWithDnn(string tag)
+    {
+        return DivIdAttributeRegex.Replace(tag, m =>
+        {
+            string idVal = m.Groups[1].Value;
+            return idVal.StartsWith("dnn_", StringComparison.OrdinalIgnoreCase)
+                ? m.Value
+                : $"id=\"dnn_{idVal}\"";
+        });
+    }
 
     // Matches <dnn:DnnCssInclude ... FilePath="..." .../> and captures the FilePath value.
     private static readonly Regex DnnCssIncludeRegex =
@@ -2019,6 +2045,13 @@ public static class BundleWriter
         html = CodeBlockRegex.Replace(html, string.Empty);
         html = DnnTitleRegex.Replace(html, "$dotContent.title");
         html = ContentPaneRegex.Replace(html, "$!{dotContent.body}");
+        // Add the dnn_ naming-container prefix to IDs on elements that had
+        // runat="server", matching the rendered DNN page behaviour.
+        html = HtmlRunatServerElementRegex.Replace(html, m =>
+        {
+            string tag = RunatServerRegex.Replace(m.Value, string.Empty);
+            return PrefixIdWithDnn(tag);
+        });
         html = RunatServerRegex.Replace(html, string.Empty);
         html = DnnSelfClosingTagRegex.Replace(html, string.Empty);
         html = DnnOpenCloseTagRegex.Replace(html, string.Empty);
@@ -2161,6 +2194,12 @@ public static class BundleWriter
                 // Build a cleaned version (no runat="server") and check
                 // whether layout-relevant attributes remain (e.g. class, style).
                 string cleaned = RunatServerRegex.Replace(openTag, string.Empty);
+
+                // Add the dnn_ prefix to the id attribute so that the output
+                // matches the rendered DNN page (ASP.NET prepends the naming-
+                // container prefix "dnn_" to server-control IDs at runtime).
+                cleaned = PrefixIdWithDnn(cleaned);
+
                 string withoutId = DivIdAttributeRegex.Replace(cleaned, string.Empty);
                 bool hasLayoutAttrs = withoutId.Contains('=');
 
@@ -2180,6 +2219,14 @@ public static class BundleWriter
             html = DnnRunatPaneDivRegex.Replace(html, string.Empty);
         }
 
+        // For any remaining HTML elements that still carry runat="server"
+        // (e.g. non-pane wrapper divs), add the dnn_ naming-container prefix
+        // to their id attribute to match the rendered DNN page.
+        html = HtmlRunatServerElementRegex.Replace(html, m =>
+        {
+            string tag = RunatServerRegex.Replace(m.Value, string.Empty);
+            return PrefixIdWithDnn(tag);
+        });
         html = RunatServerRegex.Replace(html, string.Empty);
         html = DnnSelfClosingTagRegex.Replace(html, string.Empty);
         html = DnnOpenCloseTagRegex.Replace(html, string.Empty);
@@ -2605,5 +2652,26 @@ public static class BundleWriter
         hash[6] = (byte)((hash[6] & 0x0F) | 0x50);
         hash[8] = (byte)((hash[8] & 0x3F) | 0x80);
         return new Guid(hash[..16]).ToString();
+    }
+
+    /// <summary>
+    /// Returns the identifier of the best default container from a list of
+    /// container definitions.  Prefers a container named "standard"
+    /// (case-insensitive) because it uses minimal markup.  Falls back to the
+    /// first container if no "standard" container exists.
+    /// </summary>
+    internal static string ResolveDefaultContainerId(
+        IReadOnlyList<(string id, string inode, string name, string html)> containerDefs)
+    {
+        if (containerDefs.Count == 0)
+            return string.Empty;
+
+        foreach (var c in containerDefs)
+        {
+            if (c.name.Equals("standard", StringComparison.OrdinalIgnoreCase))
+                return c.id;
+        }
+
+        return containerDefs[0].id;
     }
 }
