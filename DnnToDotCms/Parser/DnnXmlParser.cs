@@ -210,10 +210,12 @@ public static class DnnXmlParser
         }
 
         // Build mappings of ModuleID → display title and ModuleID → list of
-        // tab UniqueIds from ExportTabModule.  A module may appear on many
-        // tabs (e.g. shared footer modules), so we collect ALL associations.
+        // (tab UniqueId, PaneName) from ExportTabModule.  A module may appear
+        // on many tabs (e.g. shared footer modules), so we collect ALL
+        // associations together with the pane each module instance lives in.
         var moduleTitles    = new Dictionary<int, string>();
-        var moduleTabIds    = new Dictionary<int, List<string>>();
+        var moduleTabPanes  = new Dictionary<int, List<(string tabUniqueId, string paneName)>>();
+        var moduleSeenTabs  = new Dictionary<int, HashSet<string>>(); // dedup guard
         ILiteCollection<BsonDocument> tabModules = db.GetCollection("ExportTabModule");
         foreach (BsonDocument doc in tabModules.FindAll())
         {
@@ -232,14 +234,24 @@ public static class DnnXmlParser
             if (doc.TryGetValue("TabID", out BsonValue tabIdVal)
                 && tabUniqueIds.TryGetValue(tabIdVal.AsInt32, out string? tabUniqueId))
             {
-                if (!moduleTabIds.TryGetValue(moduleId, out List<string>? tabIds))
+                string paneName = doc.TryGetValue("PaneName", out BsonValue paneVal)
+                    ? (paneVal.AsString ?? string.Empty)
+                    : string.Empty;
+
+                if (!moduleTabPanes.TryGetValue(moduleId, out var tabPanes))
                 {
-                    tabIds = [];
-                    moduleTabIds[moduleId] = tabIds;
+                    tabPanes = [];
+                    moduleTabPanes[moduleId] = tabPanes;
+                    moduleSeenTabs[moduleId] = [];
                 }
                 // Avoid duplicate tab associations for the same module.
-                if (!tabIds.Contains(tabUniqueId))
-                    tabIds.Add(tabUniqueId);
+                if (!moduleSeenTabs.TryGetValue(moduleId, out var seen))
+                {
+                    seen = [];
+                    moduleSeenTabs[moduleId] = seen;
+                }
+                if (seen.Add(tabUniqueId))
+                    tabPanes.Add((tabUniqueId, paneName));
             }
         }
 
@@ -266,14 +278,15 @@ public static class DnnXmlParser
             // Create a content entry for EVERY tab the module appears on.
             // Shared modules (e.g. footer) appear on many tabs in DNN and
             // their content must be present on each corresponding DotCMS page.
-            if (moduleTabIds.TryGetValue(moduleId, out List<string>? associatedTabs) && associatedTabs.Count > 0)
+            if (moduleTabPanes.TryGetValue(moduleId, out var associatedTabPanes) && associatedTabPanes.Count > 0)
             {
-                foreach (string tabUniqueId in associatedTabs)
+                foreach (var (tabUniqueId, paneName) in associatedTabPanes)
                 {
                     results.Add(new DnnHtmlContent(
                         Title:       displayTitle,
                         HtmlBody:    htmlBody,
-                        TabUniqueId: tabUniqueId));
+                        TabUniqueId: tabUniqueId,
+                        PaneName:    paneName));
                 }
             }
             else

@@ -28,7 +28,14 @@ public sealed record DnnHtmlContent(
     /// The UniqueId GUID of the DNN tab (page) that this module belongs to.
     /// Empty when the tab association is unknown.
     /// </summary>
-    string TabUniqueId = "");
+    string TabUniqueId = "",
+    /// <summary>
+    /// The DNN pane name that this module is placed in (e.g. <c>ContentPane</c>,
+    /// <c>FooterLeft</c>).  Used to place content in the correct
+    /// <c>#parseContainer</c> slot in the DotCMS template.  Empty when the
+    /// pane association is unknown.
+    /// </summary>
+    string PaneName = "");
 
 /// <summary>
 /// Represents a DNN module parsed from either a .dnn package manifest or an
