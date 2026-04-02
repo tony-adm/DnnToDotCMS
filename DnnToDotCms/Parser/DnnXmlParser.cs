@@ -215,6 +215,7 @@ public static class DnnXmlParser
         // associations together with the pane each module instance lives in.
         var moduleTitles    = new Dictionary<int, string>();
         var moduleTabPanes  = new Dictionary<int, List<(string tabUniqueId, string paneName)>>();
+        var moduleSeenTabs  = new Dictionary<int, HashSet<string>>(); // dedup guard
         ILiteCollection<BsonDocument> tabModules = db.GetCollection("ExportTabModule");
         foreach (BsonDocument doc in tabModules.FindAll())
         {
@@ -241,9 +242,15 @@ public static class DnnXmlParser
                 {
                     tabPanes = [];
                     moduleTabPanes[moduleId] = tabPanes;
+                    moduleSeenTabs[moduleId] = [];
                 }
                 // Avoid duplicate tab associations for the same module.
-                if (!tabPanes.Any(tp => tp.tabUniqueId == tabUniqueId))
+                if (!moduleSeenTabs.TryGetValue(moduleId, out var seen))
+                {
+                    seen = [];
+                    moduleSeenTabs[moduleId] = seen;
+                }
+                if (seen.Add(tabUniqueId))
                     tabPanes.Add((tabUniqueId, paneName));
             }
         }
