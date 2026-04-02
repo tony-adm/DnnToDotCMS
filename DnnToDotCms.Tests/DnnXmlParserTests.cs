@@ -2,6 +2,7 @@ using System.IO.Compression;
 using DnnToDotCms.Mappings;
 using DnnToDotCms.Models;
 using DnnToDotCms.Parser;
+using LiteDB;
 
 namespace DnnToDotCms.Tests;
 
@@ -647,6 +648,368 @@ public class DnnXmlParserTests
             IReadOnlyList<DnnHtmlContent> result =
                 DnnXmlParser.ParseHtmlContents(tempDir);
             Assert.Empty(result);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // ParseHtmlContents – placeholder for non-HTML modules
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Creates a temp folder with an export_db.zip containing a LiteDB
+    /// database populated by the supplied <paramref name="populate"/> action.
+    /// Returns the temp folder path; the caller must delete it when done.
+    /// </summary>
+    private static string BuildExportDbFolder(Action<LiteDatabase> populate)
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+
+        string dbFile = Path.Combine(tempDir, "temp.dnndb");
+        using (var db = new LiteDatabase($"Filename={dbFile}"))
+        {
+            populate(db);
+        }
+
+        string zipPath = Path.Combine(tempDir, "export_db.zip");
+        using (var zipStream = File.Create(zipPath))
+        using (var zip = new ZipArchive(zipStream, ZipArchiveMode.Create))
+        {
+            zip.CreateEntryFromFile(dbFile, "export.dnndb");
+        }
+        File.Delete(dbFile);
+
+        return tempDir;
+    }
+
+    [Fact]
+    public void ParseHtmlContents_CreatesPlaceholderForModuleWithoutContent()
+    {
+        // A module (FisSlider) exists in ExportTabModule but has no entry
+        // in ExportModuleContent.  ParseHtmlContents must create a
+        // placeholder contentlet for it.
+        string tempDir = BuildExportDbFolder(db =>
+        {
+            var tabs = db.GetCollection("ExportTab");
+            tabs.Insert(new BsonDocument
+            {
+                ["TabID"]    = 1,
+                ["UniqueId"] = new BsonValue(Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")),
+            });
+
+            var tabModules = db.GetCollection("ExportTabModule");
+            tabModules.Insert(new BsonDocument
+            {
+                ["ModuleID"]     = 42,
+                ["TabID"]        = 1,
+                ["ModuleTitle"]  = "Banner Slideshow",
+                ["PaneName"]     = "ContentPane",
+                ["ContainerSrc"] = "[L]Containers/FBOT/slider.ascx",
+                ["IconFile"]     = "",
+            });
+
+            var modules = db.GetCollection("ExportModule");
+            modules.Insert(new BsonDocument
+            {
+                ["ModuleID"]     = 42,
+                ["FriendlyName"] = "FisSlider",
+            });
+
+            // No ExportModuleContent entry for ModuleID=42.
+        });
+
+        try
+        {
+            IReadOnlyList<DnnHtmlContent> result =
+                DnnXmlParser.ParseHtmlContents(tempDir);
+
+            Assert.Single(result);
+            DnnHtmlContent hc = result[0];
+            Assert.Equal("Banner Slideshow", hc.Title);
+            Assert.Contains("dnn-module-placeholder", hc.HtmlBody);
+            Assert.Contains("FisSlider", hc.HtmlBody);
+            Assert.Contains("Banner Slideshow", hc.HtmlBody);
+            Assert.Contains("recreated in DotCMS", hc.HtmlBody);
+            Assert.Equal("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", hc.TabUniqueId);
+            Assert.Equal("ContentPane", hc.PaneName);
+            Assert.Equal("[L]Containers/FBOT/slider.ascx", hc.ContainerSrc);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ParseHtmlContents_PlaceholderUsesCustomModuleFriendlyName()
+    {
+        // When ExportModule has no FriendlyName, the placeholder falls
+        // back to "Custom Module".
+        string tempDir = BuildExportDbFolder(db =>
+        {
+            var tabs = db.GetCollection("ExportTab");
+            tabs.Insert(new BsonDocument
+            {
+                ["TabID"]    = 1,
+                ["UniqueId"] = new BsonValue(Guid.Parse("11111111-2222-3333-4444-555555555555")),
+            });
+
+            var tabModules = db.GetCollection("ExportTabModule");
+            tabModules.Insert(new BsonDocument
+            {
+                ["ModuleID"]    = 99,
+                ["TabID"]       = 1,
+                ["ModuleTitle"] = "My Widget",
+                ["PaneName"]    = "SidePane",
+            });
+
+            // No ExportModule entry for ModuleID=99 → no FriendlyName.
+        });
+
+        try
+        {
+            IReadOnlyList<DnnHtmlContent> result =
+                DnnXmlParser.ParseHtmlContents(tempDir);
+
+            Assert.Single(result);
+            Assert.Contains("Custom Module", result[0].HtmlBody);
+            Assert.Contains("My Widget", result[0].HtmlBody);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ParseHtmlContents_MixesHtmlAndPlaceholderModules()
+    {
+        // Two modules on the same tab: one HTML module with content,
+        // one custom module without content.  Both should appear in results.
+        string tempDir = BuildExportDbFolder(db =>
+        {
+            var tabs = db.GetCollection("ExportTab");
+            tabs.Insert(new BsonDocument
+            {
+                ["TabID"]    = 1,
+                ["UniqueId"] = new BsonValue(Guid.Parse("aaaaaaaa-1111-2222-3333-444444444444")),
+            });
+
+            var tabModules = db.GetCollection("ExportTabModule");
+            tabModules.Insert(new BsonDocument
+            {
+                ["ModuleID"]    = 10,
+                ["TabID"]       = 1,
+                ["ModuleTitle"] = "Welcome Text",
+                ["PaneName"]    = "ContentPane",
+            });
+            tabModules.Insert(new BsonDocument
+            {
+                ["ModuleID"]    = 20,
+                ["TabID"]       = 1,
+                ["ModuleTitle"] = "Image Carousel",
+                ["PaneName"]    = "BannerPane",
+            });
+
+            var moduleContents = db.GetCollection("ExportModuleContent");
+            moduleContents.Insert(new BsonDocument
+            {
+                ["ModuleID"]   = 10,
+                ["XmlContent"] = "<htmltext><content><![CDATA[&lt;p&gt;Hello!&lt;/p&gt;]]></content></htmltext>",
+            });
+
+            var modules = db.GetCollection("ExportModule");
+            modules.Insert(new BsonDocument
+            {
+                ["ModuleID"]     = 20,
+                ["FriendlyName"] = "ImageCarousel",
+            });
+
+            // No ExportModuleContent for ModuleID=20.
+        });
+
+        try
+        {
+            IReadOnlyList<DnnHtmlContent> result =
+                DnnXmlParser.ParseHtmlContents(tempDir);
+
+            Assert.Equal(2, result.Count);
+
+            // The HTML module should have actual content.
+            DnnHtmlContent htmlItem = result.First(r => r.Title == "Welcome Text");
+            Assert.Equal("<p>Hello!</p>", htmlItem.HtmlBody);
+            Assert.Equal("ContentPane", htmlItem.PaneName);
+
+            // The custom module should have a placeholder.
+            DnnHtmlContent placeholder = result.First(r => r.Title == "Image Carousel");
+            Assert.Contains("dnn-module-placeholder", placeholder.HtmlBody);
+            Assert.Contains("ImageCarousel", placeholder.HtmlBody);
+            Assert.Equal("BannerPane", placeholder.PaneName);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ParseHtmlContents_PlaceholderPerTabForSharedModule()
+    {
+        // A custom module shared across two tabs should produce a
+        // placeholder entry for each tab.
+        string tempDir = BuildExportDbFolder(db =>
+        {
+            var tabs = db.GetCollection("ExportTab");
+            tabs.Insert(new BsonDocument
+            {
+                ["TabID"]    = 1,
+                ["UniqueId"] = new BsonValue(Guid.Parse("aaaa0001-0000-0000-0000-000000000000")),
+            });
+            tabs.Insert(new BsonDocument
+            {
+                ["TabID"]    = 2,
+                ["UniqueId"] = new BsonValue(Guid.Parse("aaaa0002-0000-0000-0000-000000000000")),
+            });
+
+            var tabModules = db.GetCollection("ExportTabModule");
+            tabModules.Insert(new BsonDocument
+            {
+                ["ModuleID"]    = 50,
+                ["TabID"]       = 1,
+                ["ModuleTitle"] = "Shared Slider",
+                ["PaneName"]    = "ContentPane",
+            });
+            tabModules.Insert(new BsonDocument
+            {
+                ["ModuleID"]    = 50,
+                ["TabID"]       = 2,
+                ["ModuleTitle"] = "Shared Slider",
+                ["PaneName"]    = "ContentPane",
+            });
+
+            var modules = db.GetCollection("ExportModule");
+            modules.Insert(new BsonDocument
+            {
+                ["ModuleID"]     = 50,
+                ["FriendlyName"] = "FisSlider",
+            });
+        });
+
+        try
+        {
+            IReadOnlyList<DnnHtmlContent> result =
+                DnnXmlParser.ParseHtmlContents(tempDir);
+
+            Assert.Equal(2, result.Count);
+            Assert.All(result, r =>
+            {
+                Assert.Contains("dnn-module-placeholder", r.HtmlBody);
+                Assert.Contains("FisSlider", r.HtmlBody);
+            });
+
+            var tabIds = result.Select(r => r.TabUniqueId).ToHashSet();
+            Assert.Contains("aaaa0001-0000-0000-0000-000000000000", tabIds);
+            Assert.Contains("aaaa0002-0000-0000-0000-000000000000", tabIds);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ParseHtmlContents_PlaceholderPreservesContainerSrcAndIconFile()
+    {
+        // Verify that ContainerSrc and IconFile from ExportTabModule are
+        // carried through to the placeholder DnnHtmlContent entry.
+        string tempDir = BuildExportDbFolder(db =>
+        {
+            var tabs = db.GetCollection("ExportTab");
+            tabs.Insert(new BsonDocument
+            {
+                ["TabID"]    = 1,
+                ["UniqueId"] = new BsonValue(Guid.Parse("bbbbbbbb-0000-0000-0000-000000000000")),
+            });
+
+            var tabModules = db.GetCollection("ExportTabModule");
+            tabModules.Insert(new BsonDocument
+            {
+                ["ModuleID"]     = 77,
+                ["TabID"]        = 1,
+                ["ModuleTitle"]  = "Fancy Gallery",
+                ["PaneName"]     = "TopPane",
+                ["ContainerSrc"] = "[L]Containers/FBOT/gallery.ascx",
+                ["IconFile"]     = "Images/gallery-icon.png",
+            });
+
+            var modules = db.GetCollection("ExportModule");
+            modules.Insert(new BsonDocument
+            {
+                ["ModuleID"]     = 77,
+                ["FriendlyName"] = "PhotoGallery",
+            });
+        });
+
+        try
+        {
+            IReadOnlyList<DnnHtmlContent> result =
+                DnnXmlParser.ParseHtmlContents(tempDir);
+
+            Assert.Single(result);
+            DnnHtmlContent hc = result[0];
+            Assert.Equal("[L]Containers/FBOT/gallery.ascx", hc.ContainerSrc);
+            Assert.Equal("Images/gallery-icon.png", hc.IconFile);
+            Assert.Equal("TopPane", hc.PaneName);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ParseHtmlContents_ModuleWithContentNotDuplicated()
+    {
+        // A module that HAS ExportModuleContent should NOT get a
+        // placeholder — only the real content entry should exist.
+        string tempDir = BuildExportDbFolder(db =>
+        {
+            var tabs = db.GetCollection("ExportTab");
+            tabs.Insert(new BsonDocument
+            {
+                ["TabID"]    = 1,
+                ["UniqueId"] = new BsonValue(Guid.Parse("cccccccc-0000-0000-0000-000000000000")),
+            });
+
+            var tabModules = db.GetCollection("ExportTabModule");
+            tabModules.Insert(new BsonDocument
+            {
+                ["ModuleID"]    = 30,
+                ["TabID"]       = 1,
+                ["ModuleTitle"] = "About Us",
+                ["PaneName"]    = "ContentPane",
+            });
+
+            var moduleContents = db.GetCollection("ExportModuleContent");
+            moduleContents.Insert(new BsonDocument
+            {
+                ["ModuleID"]   = 30,
+                ["XmlContent"] = "<htmltext><content><![CDATA[&lt;p&gt;About text&lt;/p&gt;]]></content></htmltext>",
+            });
+        });
+
+        try
+        {
+            IReadOnlyList<DnnHtmlContent> result =
+                DnnXmlParser.ParseHtmlContents(tempDir);
+
+            Assert.Single(result);
+            Assert.Equal("<p>About text</p>", result[0].HtmlBody);
+            Assert.DoesNotContain("dnn-module-placeholder", result[0].HtmlBody);
         }
         finally
         {
