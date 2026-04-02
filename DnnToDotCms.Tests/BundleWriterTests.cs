@@ -681,7 +681,7 @@ public class BundleWriterTests
         string result = BundleWriter.ConvertAscxToContainerHtml(ascx);
 
         Assert.DoesNotContain("runat=\"server\"", result);
-        Assert.Contains("<div id=\"Wrapper\">", result);
+        Assert.Contains("<div id=\"dnn_Wrapper\">", result);
     }
 
     [Fact]
