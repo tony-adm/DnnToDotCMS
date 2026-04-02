@@ -1810,6 +1810,81 @@ public static class BundleWriter
         });
     }
 
+    /// <summary>
+    /// Resolves ASP.NET user control references registered via
+    /// <c>&lt;%@ Register TagPrefix="..." TagName="..." Src="..." %&gt;</c>
+    /// directives by reading the referenced ASCX file from
+    /// <paramref name="zip"/> and inlining its content.  Only controls
+    /// whose <c>Src</c> is a relative path (i.e. not starting with <c>~</c>)
+    /// are resolved – those point to files within the skin package rather
+    /// than DNN system controls.
+    /// </summary>
+    public static string ResolveRegisteredControls(
+        string ascx, string skinDir, ZipArchive zip)
+    {
+        // Collect <%@ Register TagPrefix="..." TagName="..." Src="..." %> entries
+        // that reference a local (non-system) file.
+        var registrations = new List<(string Prefix, string Name, string Src)>();
+        foreach (Match m in RegisterDirectiveRegex.Matches(ascx))
+        {
+            string block = m.Value;
+            Match prefix = TagPrefixAttrRegex.Match(block);
+            Match name   = TagNameAttrRegex.Match(block);
+            Match src    = SrcAttrRegex.Match(block);
+            if (prefix.Success && name.Success && src.Success)
+            {
+                string srcVal = src.Groups[1].Value;
+                // Only resolve local files; ~/Admin/... etc. are DNN system controls.
+                if (!srcVal.StartsWith("~", StringComparison.Ordinal))
+                    registrations.Add((prefix.Groups[1].Value, name.Groups[1].Value, srcVal));
+            }
+        }
+
+        // For each registration, inline the file content in place of the control tag.
+        foreach (var (prefix, name, src) in registrations)
+        {
+            string escapedPrefix = Regex.Escape(prefix);
+            string escapedName   = Regex.Escape(name);
+
+            // Match <prefix:name ...>...</prefix:name> (open/close pair) or
+            // <prefix:name .../> (self-closing).  Open/close first so we
+            // don't leave orphan closing tags.
+            var tagRegex = new Regex(
+                $@"<{escapedPrefix}:{escapedName}\b[^>]*>[\s\S]*?</{escapedPrefix}:{escapedName}\s*>" +
+                $@"|<{escapedPrefix}:{escapedName}\b[^>]*/?>",
+                RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+            // Resolve the source file path relative to the skin directory.
+            string relPath  = src.Replace('\\', '/');
+            string fullPath = skinDir + "/" + relPath;
+            ZipArchiveEntry? entry = zip.Entries.FirstOrDefault(e =>
+                string.Equals(
+                    e.FullName.Replace('\\', '/'),
+                    fullPath,
+                    StringComparison.OrdinalIgnoreCase));
+
+            if (entry is null)
+            {
+                Console.Error.WriteLine(
+                    $"Warning: Registered control source not found in themes zip: '{fullPath}'");
+                // Remove the unresolvable control tag to avoid leaving server markup.
+                ascx = tagRegex.Replace(ascx, string.Empty);
+                continue;
+            }
+
+            using var reader = new StreamReader(entry.Open(), Encoding.UTF8);
+            string content = reader.ReadToEnd();
+
+            // Strip <%@ ... %> directives from the inlined content so they
+            // don't interfere with the parent ASCX processing.
+            content = DirectiveRegex.Replace(content, string.Empty);
+
+            ascx = tagRegex.Replace(ascx, content);
+        }
+
+        return ascx;
+    }
+
     // ------------------------------------------------------------------
     // ASCX → HTML conversion helpers
     // ------------------------------------------------------------------
@@ -1899,6 +1974,25 @@ public static class BundleWriter
     private static readonly Regex DnnJsIncludeRegex =
         new(@"<dnn:DnnJsInclude\s[^>]*FilePath=""([^""]+)""[^>]*/?>",
             RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+    // Matches <%= SkinPath %> ASP.NET expressions (with optional surrounding whitespace).
+    // DNN skins use this expression in <script src> and <link> tags to reference
+    // files relative to the skin folder.
+    private static readonly Regex SkinPathExpressionRegex =
+        new(@"<%=\s*SkinPath\s*%>", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    // Matches <%@ Register ... %> directives in DNN ASCX files.
+    private static readonly Regex RegisterDirectiveRegex =
+        new(@"<%@\s*Register\s[^%]*(?:%(?!>)[^%]*)*%>",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+    // Attribute-level regex helpers for <%@ Register %> parsing.
+    private static readonly Regex TagPrefixAttrRegex =
+        new(@"\bTagPrefix=""([^""]+)""", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex TagNameAttrRegex =
+        new(@"\bTagName=""([^""]+)""", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex SrcAttrRegex =
+        new(@"\bSrc=""([^""]+)""", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     /// <summary>
     /// Converts a DNN container ASCX file into a DotCMS container Velocity
