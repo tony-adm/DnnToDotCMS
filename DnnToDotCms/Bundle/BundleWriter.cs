@@ -1764,6 +1764,10 @@ public static class BundleWriter
             {
                 string skinDir = entryPath[..lastSlashIdx];
                 ascx = ResolveSsiIncludes(ascx, skinDir, zip);
+
+                // Resolve <%@ Register TagPrefix="..." Src="..." %> user
+                // controls by inlining their source ASCX content.
+                ascx = ResolveRegisteredControls(ascx, skinDir, zip);
             }
 
             var (html, header, paneUuidMap) = ConvertAscxToTemplateHtml(ascx, firstContainerId, themeName, name, availableThemeFiles);
@@ -2078,6 +2082,14 @@ public static class BundleWriter
         IReadOnlySet<string>? availableThemeFiles = null)
     {
         string html = DirectiveRegex.Replace(ascx, string.Empty);
+
+        // Replace <%= SkinPath %> expressions with the theme base URL before
+        // CodeBlockRegex strips all <% ... %> blocks.  DNN skins use this
+        // ASP.NET expression in <script src> and <link> tags to reference
+        // files relative to the skin folder (e.g. custom.js, modal.js).
+        if (!string.IsNullOrWhiteSpace(themeName))
+            html = SkinPathExpressionRegex.Replace(html, $"/application/themes/{themeName}/");
+
         html = CodeBlockRegex.Replace(html, string.Empty);
 
         // Replace <dnn:LOGO> with a theme-aware img tag.
@@ -2115,6 +2127,11 @@ public static class BundleWriter
         // Also build a mapping of pane id → uuid so that content modules can
         // be placed in the correct container slot via multiTree.
         // This must run before RunatServerRegex strips the runat attribute.
+        //
+        // When a pane div carries layout-relevant attributes (CSS classes,
+        // styles, etc.) beyond the standard id and runat, the outer <div> is
+        // preserved so that bootstrap / layout styling is not lost.  The
+        // #parseContainer directive is placed *inside* the wrapper div.
         var paneUuidMap = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         if (!string.IsNullOrEmpty(defaultContainerId))
         {
@@ -2125,7 +2142,36 @@ public static class BundleWriter
                 Match idMatch = DivIdAttributeRegex.Match(m.Value);
                 if (idMatch.Success)
                     paneUuidMap[idMatch.Groups[1].Value] = uuid;
-                return $"#parseContainer('{defaultContainerId}', '{uuid}')";
+
+                string parseContainer = $"#parseContainer('{defaultContainerId}', '{uuid}')";
+
+                // Extract just the opening <div ...> tag.
+                string openTag;
+                bool matchedClosing = m.Groups[1].Success;
+                if (matchedClosing)
+                {
+                    int closingOffset = m.Groups[1].Index - m.Index;
+                    openTag = m.Value[..closingOffset];
+                }
+                else
+                {
+                    openTag = m.Value;
+                }
+
+                // Build a cleaned version (no runat="server") and check
+                // whether layout-relevant attributes remain (e.g. class, style).
+                string cleaned = RunatServerRegex.Replace(openTag, string.Empty);
+                string withoutId = DivIdAttributeRegex.Replace(cleaned, string.Empty);
+                bool hasLayoutAttrs = withoutId.Contains('=');
+
+                if (hasLayoutAttrs)
+                {
+                    return matchedClosing
+                        ? $"{cleaned}\n{parseContainer}\n</div>"
+                        : $"{cleaned}\n{parseContainer}";
+                }
+
+                return parseContainer;
             });
         }
         else
