@@ -119,7 +119,7 @@ public static class BundleWriter
         // that their IDs are known before the manifest.csv is written.
         // Tuple: (identifier, inode, name, html, themeName)
         var containerDefs = new List<(string id, string inode, string name, string html)>();
-        var templateDefs  = new List<(string id, string inode, string name, string html, string header, string themeName)>();
+        var templateDefs  = new List<(string id, string inode, string name, string html, string header, string themeName, IReadOnlyDictionary<string, int> paneUuidMap)>();
 
         if (themesZipPath is not null && File.Exists(themesZipPath))
         {
@@ -190,7 +190,7 @@ public static class BundleWriter
 
         // --- templates (from DNN skins) --------------------------------------
         // Written to live/ so they are imported as published (not draft) assets.
-        foreach (var (id, inode, name, html, header, themeName) in templateDefs)
+        foreach (var (id, inode, name, html, header, themeName, _) in templateDefs)
         {
             string xml = BuildTemplateXml(id, inode, name, html, contentHostId, themeName, header);
             WriteTextEntry(tar, $"live/{contentWorkDir}/{id}.template.template.xml", xml);
@@ -199,8 +199,8 @@ public static class BundleWriter
 
         // --- HTML contentlets (from DNN HTML modules) ------------------------
         // Pre-generate identifiers so they can be referenced in page multiTree entries.
-        // Build a lookup: tab UniqueId → list of (contentlet identifier, container id).
-        var tabContentMap = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        // Build a lookup: tab UniqueId → list of (contentlet identifier, pane name).
+        var tabContentMap = new Dictionary<string, List<(string contentletId, string paneName)>>(StringComparer.OrdinalIgnoreCase);
 
         if (htmlContents is not null && htmlContents.Count > 0
             && htmlContentTypeId is not null && htmlContentTypeVariable is not null)
@@ -233,12 +233,12 @@ public static class BundleWriter
                 // Record the association so pages can reference this contentlet in multiTree.
                 if (!string.IsNullOrEmpty(hc.TabUniqueId) && !string.IsNullOrEmpty(defaultContainerId))
                 {
-                    if (!tabContentMap.TryGetValue(hc.TabUniqueId, out List<string>? ids))
+                    if (!tabContentMap.TryGetValue(hc.TabUniqueId, out var items))
                     {
-                        ids = [];
-                        tabContentMap[hc.TabUniqueId] = ids;
+                        items = [];
+                        tabContentMap[hc.TabUniqueId] = items;
                     }
-                    ids.Add(identifier);
+                    items.Add((identifier, hc.PaneName));
                 }
             }
         }
@@ -249,6 +249,15 @@ public static class BundleWriter
             // Build a lookup from skin name → template ID for matching DNN pages
             // to the templates that were converted from DNN skins.
             var skinToTemplateId = BuildSkinToTemplateMap(templateDefs);
+
+            // Build a lookup from template ID → pane-UUID mapping so each page
+            // can resolve its content modules to the correct container slots.
+            var templatePaneMaps = new Dictionary<string, IReadOnlyDictionary<string, int>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (tId, _, _, _, _, _, paneMap) in templateDefs)
+            {
+                if (paneMap.Count > 0)
+                    templatePaneMaps.TryAdd(tId, paneMap);
+            }
 
             // Use the first available container for multiTree associations.
             string defaultContainerId = containerDefs.Count > 0 ? containerDefs[0].id : string.Empty;
@@ -265,12 +274,15 @@ public static class BundleWriter
                 string templateId = ResolveTemplateId(page.SkinSrc, skinToTemplateId);
 
                 // Resolve the HTML contentlet identifiers belonging to this page.
-                tabContentMap.TryGetValue(page.UniqueId, out List<string>? pageContentIds);
+                tabContentMap.TryGetValue(page.UniqueId, out var pageContentItems);
+
+                // Resolve the pane-UUID mapping for the page's template.
+                templatePaneMaps.TryGetValue(templateId, out var paneUuidMap);
 
                 string pageXml = BuildPageXml(
                     identifier, inode, page.Title, url,
                     contentHostId, templateId,
-                    defaultContainerId, pageContentIds ?? []);
+                    defaultContainerId, pageContentItems ?? [], paneUuidMap);
                 WriteTextEntry(
                     tar,
                     $"live/{contentWorkDir}/1/{identifier}.content.xml",
@@ -1078,7 +1090,8 @@ public static class BundleWriter
         string hostId,
         string templateId,
         string containerId = "",
-        IReadOnlyList<string>? contentletIds = null)
+        IReadOnlyList<(string contentletId, string paneName)>? contentItems = null,
+        IReadOnlyDictionary<string, int>? paneUuidMap = null)
     {
         string now      = DateTime.UtcNow.ToString(XmlTimestampFormat);
         string xmlTitle = System.Security.SecurityElement.Escape(Truncate(title, MaxVarcharLength)) ?? string.Empty;
@@ -1087,7 +1100,7 @@ public static class BundleWriter
         string segments = string.Concat(Enumerable.Repeat(EmptyConcurrentHashMapSegment, 16));
 
         // Build multiTree entries linking this page to its contentlets via the container.
-        string multiTreeContent = BuildMultiTreeXml(identifier, containerId, contentletIds ?? []);
+        string multiTreeContent = BuildMultiTreeXml(identifier, containerId, contentItems ?? [], paneUuidMap);
         string multiTreeElement = string.IsNullOrEmpty(multiTreeContent)
             ? "<multiTree/>"
             : $"<multiTree>{multiTreeContent}</multiTree>";
@@ -1210,26 +1223,73 @@ public static class BundleWriter
     /// <summary>
     /// Builds zero or more DotCMS <c>com.dotmarketing.beans.MultiTree</c> XML
     /// elements that associate a page (<paramref name="pageId"/>) with
-    /// <paramref name="contentletIds"/> placed in <paramref name="containerId"/>.
-    /// Returns an empty string when no container or contentlet IDs are given.
+    /// content items placed in <paramref name="containerId"/>.
+    /// <para>
+    /// When <paramref name="paneUuidMap"/> is provided, each content item's
+    /// pane name is resolved to the matching <c>#parseContainer</c> UUID slot
+    /// in the template, ensuring that footer modules (or any pane-specific
+    /// content) appear in the correct template region.  Multiple items sharing
+    /// the same pane are distinguished by <c>tree_order</c>.
+    /// </para>
+    /// Returns an empty string when no container or content items are given.
     /// </summary>
     private static string BuildMultiTreeXml(
         string pageId,
         string containerId,
-        IReadOnlyList<string> contentletIds)
+        IReadOnlyList<(string contentletId, string paneName)> contentItems,
+        IReadOnlyDictionary<string, int>? paneUuidMap = null)
     {
-        if (string.IsNullOrEmpty(containerId) || contentletIds.Count == 0)
+        if (string.IsNullOrEmpty(containerId) || contentItems.Count == 0)
             return string.Empty;
 
         var sb = new StringBuilder();
-        for (int i = 0; i < contentletIds.Count; i++)
+
+        // When no pane mapping is available, fall back to sequential
+        // relation_type assignment (the original behaviour).
+        if (paneUuidMap is null || paneUuidMap.Count == 0)
         {
-            // The relation_type must match the second argument of the corresponding
-            // #parseContainer directive in the template body, which uses sequential
-            // integers starting at 1.  Using a random GUID would leave the container
-            // slots empty when DotCMS renders the page.
-            string relationType = (i + 1).ToString();
-            sb.Append($"""
+            for (int i = 0; i < contentItems.Count; i++)
+            {
+                string relationType = (i + 1).ToString();
+                AppendMultiTreeEntry(sb, pageId, containerId,
+                    contentItems[i].contentletId, relationType, i);
+            }
+        }
+        else
+        {
+            // Group content items by their resolved pane UUID so multiple
+            // items in the same pane get sequential tree_order values.
+            // Items whose pane name is unknown fall back to the first UUID.
+            int fallbackUuid = 1;
+            var paneOrders = new Dictionary<int, int>(); // uuid → next tree_order
+            int globalOrder = 0;
+
+            foreach (var (contentletId, paneName) in contentItems)
+            {
+                int uuid;
+                if (!string.IsNullOrEmpty(paneName) && paneUuidMap.TryGetValue(paneName, out int mapped))
+                    uuid = mapped;
+                else
+                    uuid = fallbackUuid;
+
+                if (!paneOrders.TryGetValue(uuid, out int order))
+                    order = 0;
+                paneOrders[uuid] = order + 1;
+
+                AppendMultiTreeEntry(sb, pageId, containerId,
+                    contentletId, uuid.ToString(), globalOrder++);
+            }
+        }
+
+        return sb.ToString();
+    }
+
+    /// <summary>Appends a single multiTree &lt;map&gt; entry to <paramref name="sb"/>.</summary>
+    private static void AppendMultiTreeEntry(
+        StringBuilder sb, string pageId, string containerId,
+        string contentletId, string relationType, int treeOrder)
+    {
+        sb.Append($"""
 
                   <map>
                     <entry>
@@ -1242,7 +1302,7 @@ public static class BundleWriter
                     </entry>
                     <entry>
                       <string>child</string>
-                      <string>{contentletIds[i]}</string>
+                      <string>{contentletId}</string>
                     </entry>
                     <entry>
                       <string>relation_type</string>
@@ -1250,7 +1310,7 @@ public static class BundleWriter
                     </entry>
                     <entry>
                       <string>tree_order</string>
-                      <int>{i}</int>
+                      <int>{treeOrder}</int>
                     </entry>
                     <entry>
                       <string>personalization</string>
@@ -1262,8 +1322,6 @@ public static class BundleWriter
                     </entry>
                   </map>
               """);
-        }
-        return sb.ToString();
     }
 
     // ------------------------------------------------------------------
@@ -1533,10 +1591,10 @@ public static class BundleWriter
     /// name without extension (e.g. <c>Home</c> from <c>Home.ascx</c>).
     /// </summary>
     private static Dictionary<string, string> BuildSkinToTemplateMap(
-        IReadOnlyList<(string id, string inode, string name, string html, string header, string themeName)> templateDefs)
+        IReadOnlyList<(string id, string inode, string name, string html, string header, string themeName, IReadOnlyDictionary<string, int> paneUuidMap)> templateDefs)
     {
         var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (id, _, name, _, _, themeName) in templateDefs)
+        foreach (var (id, _, name, _, _, themeName, _) in templateDefs)
         {
             // Primary key: "ThemeName/SkinName" – always unique across themes.
             if (!string.IsNullOrEmpty(themeName))
@@ -1624,7 +1682,7 @@ public static class BundleWriter
     private static void CollectThemeDefinitions(
         string themesZipPath,
         List<(string id, string inode, string name, string html)> containerDefs,
-        List<(string id, string inode, string name, string html, string header, string themeName)> templateDefs)
+        List<(string id, string inode, string name, string html, string header, string themeName, IReadOnlyDictionary<string, int> paneUuidMap)> templateDefs)
     {
         using var zip = ZipFile.OpenRead(themesZipPath);
 
@@ -1713,8 +1771,8 @@ public static class BundleWriter
                 ascx = ResolveSsiIncludes(ascx, skinDir, zip);
             }
 
-            var (html, header) = ConvertAscxToTemplateHtml(ascx, firstContainerId, themeName, name, availableThemeFiles);
-            templateDefs.Add((Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), name, html, header, themeName));
+            var (html, header, paneUuidMap) = ConvertAscxToTemplateHtml(ascx, firstContainerId, themeName, name, availableThemeFiles);
+            templateDefs.Add((Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), name, html, header, themeName, paneUuidMap));
         }
     }
 
@@ -1825,6 +1883,10 @@ public static class BundleWriter
         new(@"<div\s+[^>]*runat=""server""[^>]*>(\s*</div>)?",
             RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
 
+    // Captures the id attribute value from an HTML element.
+    private static readonly Regex DivIdAttributeRegex =
+        new(@"\bid=""([^""]+)""", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
     // Matches any remaining self-closing <dnn:TAGNAME .../> controls.
     private static readonly Regex DnnSelfClosingTagRegex =
         new(@"<dnn:[A-Za-z]+\s[^>]*/?>", RegexOptions.Compiled | RegexOptions.IgnoreCase);
@@ -1919,7 +1981,7 @@ public static class BundleWriter
     ///   <item>Any unrecognised <c>&lt;dnn:…&gt;</c> controls are removed.</item>
     /// </list>
     /// </remarks>
-    public static (string Body, string Header) ConvertAscxToTemplateHtml(
+    public static (string Body, string Header, IReadOnlyDictionary<string, int> PaneUuidMap) ConvertAscxToTemplateHtml(
         string ascx,
         string defaultContainerId = "",
         string themeName = "",
@@ -1961,12 +2023,21 @@ public static class BundleWriter
 
         // Replace DNN server-side pane divs (runat="server") with #parseContainer
         // directives so DotCMS renders container content in those zones.
+        // Also build a mapping of pane id → uuid so that content modules can
+        // be placed in the correct container slot via multiTree.
         // This must run before RunatServerRegex strips the runat attribute.
+        var paneUuidMap = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         if (!string.IsNullOrEmpty(defaultContainerId))
         {
             int uuid = 0;
-            html = DnnRunatPaneDivRegex.Replace(html,
-                _ => $"#parseContainer('{defaultContainerId}', '{++uuid}')");
+            html = DnnRunatPaneDivRegex.Replace(html, m =>
+            {
+                ++uuid;
+                Match idMatch = DivIdAttributeRegex.Match(m.Value);
+                if (idMatch.Success)
+                    paneUuidMap[idMatch.Groups[1].Value] = uuid;
+                return $"#parseContainer('{defaultContainerId}', '{uuid}')";
+            });
         }
         else
         {
@@ -2030,7 +2101,7 @@ public static class BundleWriter
         if (cssTags.Count > 0)
             html = string.Join("\n", cssTags) + "\n" + html;
 
-        return (html, string.Empty);
+        return (html, string.Empty, paneUuidMap);
     }
 
     // ------------------------------------------------------------------
@@ -2061,7 +2132,7 @@ public static class BundleWriter
         string? siteInode,
         string contentWorkDir,
         List<(string type, string id, string inode, string name, string site, string folder)> manifestEntries,
-        IReadOnlyList<(string id, string inode, string name, string html, string header, string themeName)>? templateDefs = null,
+        IReadOnlyList<(string id, string inode, string name, string html, string header, string themeName, IReadOnlyDictionary<string, int> paneUuidMap)>? templateDefs = null,
         IReadOnlyList<DnnPortalFile>? portalFiles = null,
         ISet<string>? consumedPortalFileIds = null)
     {
@@ -2125,7 +2196,7 @@ public static class BundleWriter
                 }
             }
 
-            foreach (var (_, _, name, _, _, themeName) in templateDefs)
+            foreach (var (_, _, name, _, _, themeName, _) in templateDefs)
             {
                 if (string.IsNullOrWhiteSpace(themeName) ||
                     string.IsNullOrWhiteSpace(name) ||
