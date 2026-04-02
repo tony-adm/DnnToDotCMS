@@ -1101,10 +1101,237 @@ public class BundleWriterTests
         finally { File.Delete(path); }
     }
 
+    // ------------------------------------------------------------------
+    // SkinPath expression replacement
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_ReplacesSkinPathInScriptTags()
+    {
+        const string ascx = """
+            <%@ Control Inherits="DotNetNuke.UI.Skins.Skin" %>
+            <div id="ContentPane" runat="server"></div>
+            <script src="<%= SkinPath %>js/custom.js"></script>
+            <script src="<%= SkinPath %>/modal/modal.js"></script>
+            """;
+
+        var (body, _, _) = BundleWriter.ConvertAscxToTemplateHtml(
+            ascx, "ctr1", themeName: "fbot");
+
+        Assert.Contains(@"src=""/application/themes/fbot/js/custom.js""", body);
+        Assert.Contains(@"src=""/application/themes/fbot//modal/modal.js""", body);
+        Assert.DoesNotContain("SkinPath", body);
+    }
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_ReplacesSkinPathInLinkTags()
+    {
+        const string ascx = """
+            <%@ Control Inherits="DotNetNuke.UI.Skins.Skin" %>
+            <link src="<%= SkinPath %>/modal/modal.css">
+            <div id="ContentPane" runat="server"></div>
+            """;
+
+        var (body, _, _) = BundleWriter.ConvertAscxToTemplateHtml(
+            ascx, "ctr1", themeName: "fbot");
+
+        Assert.Contains(@"src=""/application/themes/fbot//modal/modal.css""", body);
+        Assert.DoesNotContain("SkinPath", body);
+    }
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_WithoutThemeName_SkinPathExpressionStripped()
+    {
+        // Without a theme name, SkinPath cannot be resolved; the generic
+        // CodeBlockRegex cleanup removes the expression.
+        const string ascx = """
+            <%@ Control Inherits="DotNetNuke.UI.Skins.Skin" %>
+            <script src="<%= SkinPath %>js/custom.js"></script>
+            """;
+
+        var (body, _, _) = BundleWriter.ConvertAscxToTemplateHtml(ascx);
+
+        Assert.DoesNotContain("SkinPath", body);
+        // Path is left relative (no theme base) after code-block stripping.
+        Assert.Contains(@"src=""js/custom.js""", body);
+    }
+
+    // ------------------------------------------------------------------
+    // Registered control resolution
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void ResolveRegisteredControls_InlinesLocalUserControl()
+    {
+        string path = Path.GetTempFileName() + ".zip";
+        try
+        {
+            using (var zip = ZipFile.Open(path, ZipArchiveMode.Create))
+            {
+                ZipArchiveEntry main = zip.CreateEntry("Skins/Test/Home.ascx");
+                using (var w = new StreamWriter(main.Open()))
+                    w.Write("""
+                        <%@ Register TagPrefix="FIS" TagName="Modal" Src="modal/modal.ascx" %>
+                        <div>main</div>
+                        <FIS:Modal id="Modal" runat="server" />
+                        """);
+
+                ZipArchiveEntry modal = zip.CreateEntry("Skins/Test/modal/modal.ascx");
+                using (var w = new StreamWriter(modal.Open()))
+                    w.Write("""
+                        <%@ Control Inherits="DotNetNuke.UI.Skins.SkinObjectBase" %>
+                        <div class="modal">Modal Content</div>
+                        """);
+            }
+
+            using var archive = ZipFile.OpenRead(path);
+            ZipArchiveEntry homeEntry = archive.GetEntry("Skins/Test/Home.ascx")!;
+            using var reader = new StreamReader(homeEntry.Open(), Encoding.UTF8);
+            string ascx = reader.ReadToEnd();
+
+            string result = BundleWriter.ResolveRegisteredControls(
+                ascx, "Skins/Test", archive);
+
+            Assert.Contains("<div class=\"modal\">Modal Content</div>", result);
+            Assert.DoesNotContain("<FIS:Modal", result);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void ResolveRegisteredControls_IgnoresSystemControls()
+    {
+        // Controls with Src starting with ~ (DNN system controls) should
+        // not be resolved — they are handled by other processing steps.
+        string path = Path.GetTempFileName() + ".zip";
+        try
+        {
+            using (var zip = ZipFile.Open(path, ZipArchiveMode.Create))
+            {
+                ZipArchiveEntry main = zip.CreateEntry("Skins/Test/Home.ascx");
+                using (var w = new StreamWriter(main.Open()))
+                    w.Write("""
+                        <%@ Register TagPrefix="dnn" TagName="LOGO" Src="~/Admin/Skins/Logo.ascx" %>
+                        <dnn:LOGO runat="server" />
+                        """);
+            }
+
+            using var archive = ZipFile.OpenRead(path);
+            ZipArchiveEntry homeEntry = archive.GetEntry("Skins/Test/Home.ascx")!;
+            using var reader = new StreamReader(homeEntry.Open(), Encoding.UTF8);
+            string ascx = reader.ReadToEnd();
+
+            string result = BundleWriter.ResolveRegisteredControls(
+                ascx, "Skins/Test", archive);
+
+            // System control tag should remain untouched.
+            Assert.Contains("<dnn:LOGO", result);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void ResolveRegisteredControls_RemovesTagWhenSourceNotFound()
+    {
+        string path = Path.GetTempFileName() + ".zip";
+        try
+        {
+            using (var zip = ZipFile.Open(path, ZipArchiveMode.Create))
+            {
+                ZipArchiveEntry main = zip.CreateEntry("Skins/Test/Home.ascx");
+                using (var w = new StreamWriter(main.Open()))
+                    w.Write("""
+                        <%@ Register TagPrefix="FIS" TagName="Missing" Src="missing/control.ascx" %>
+                        <div>main</div>
+                        <FIS:Missing id="M" runat="server" />
+                        """);
+            }
+
+            using var archive = ZipFile.OpenRead(path);
+            ZipArchiveEntry homeEntry = archive.GetEntry("Skins/Test/Home.ascx")!;
+            using var reader = new StreamReader(homeEntry.Open(), Encoding.UTF8);
+            string ascx = reader.ReadToEnd();
+
+            string result = BundleWriter.ResolveRegisteredControls(
+                ascx, "Skins/Test", archive);
+
+            Assert.DoesNotContain("<FIS:Missing", result);
+        }
+        finally { File.Delete(path); }
+    }
+
+    // ------------------------------------------------------------------
+    // Pane div layout attribute preservation
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_PreservesBootstrapClassesOnPaneDivs()
+    {
+        const string ascx = """
+            <%@ Control Inherits="DotNetNuke.UI.Skins.Skin" %>
+            <div class="promo">
+              <div class="row">
+                <div class="col-md-6 bg-dark" id="PromoLeft" runat="server"></div>
+                <div class="col-md-6" id="PromoRight" runat="server"></div>
+              </div>
+            </div>
+            """;
+
+        var (body, _, paneUuidMap) = BundleWriter.ConvertAscxToTemplateHtml(
+            ascx, "ctr1", themeName: "TestTheme");
+
+        // The wrapper divs with bootstrap classes should be preserved.
+        Assert.Contains("class=\"col-md-6 bg-dark\"", body);
+        Assert.Contains("class=\"col-md-6\"", body);
+        // #parseContainer should be inside the wrapper divs.
+        Assert.Contains("#parseContainer('ctr1',", body);
+        // Pane IDs should still be mapped.
+        Assert.True(paneUuidMap.ContainsKey("PromoLeft"));
+        Assert.True(paneUuidMap.ContainsKey("PromoRight"));
+    }
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_PlainPaneDivFullyReplaced()
+    {
+        // Pane divs without extra classes should be replaced entirely
+        // (no wrapper div) to keep existing behaviour.
+        const string ascx = """
+            <%@ Control Inherits="DotNetNuke.UI.Skins.Skin" %>
+            <div id="ContentPane" runat="server"></div>
+            """;
+
+        var (body, _, _) = BundleWriter.ConvertAscxToTemplateHtml(
+            ascx, "ctr1");
+
+        Assert.Contains("#parseContainer('ctr1',", body);
+        // There should be no leftover <div> wrapper around the #parseContainer.
+        Assert.DoesNotContain("<div", body);
+    }
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_MixedPaneDivsHandledCorrectly()
+    {
+        // Mix of pane divs with and without classes.
+        const string ascx = """
+            <%@ Control Inherits="DotNetNuke.UI.Skins.Skin" %>
+            <div id="ContentPane" runat="server"></div>
+            <div class="col-md-3" id="FooterLeft" runat="server"></div>
+            """;
+
+        var (body, _, paneUuidMap) = BundleWriter.ConvertAscxToTemplateHtml(
+            ascx, "ctr1");
+
+        // ContentPane (no extra class) — no wrapper
+        Assert.Contains("#parseContainer('ctr1', '1')", body);
+        // FooterLeft (has class) — wrapper preserved
+        Assert.Contains("class=\"col-md-3\"", body);
+        Assert.True(paneUuidMap.ContainsKey("ContentPane"));
+        Assert.True(paneUuidMap.ContainsKey("FooterLeft"));
+    }
+
     [Fact]
     public void Write_WithSsiIncludeInSkin_InlinedCssIncludesAppearInTemplateXml()
     {
-        // End-to-end: a skin ASCX that #includes an AddFiles.ascx containing
         // DnnCssInclude tags should produce a template with proper <link> tags
         // in the header field and <script> tags in the body.
         string path = Path.GetTempFileName() + ".zip";

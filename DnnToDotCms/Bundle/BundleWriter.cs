@@ -1764,6 +1764,10 @@ public static class BundleWriter
             {
                 string skinDir = entryPath[..lastSlashIdx];
                 ascx = ResolveSsiIncludes(ascx, skinDir, zip);
+
+                // Resolve <%@ Register TagPrefix="..." Src="..." %> user
+                // controls by inlining their source ASCX content.
+                ascx = ResolveRegisteredControls(ascx, skinDir, zip);
             }
 
             var (html, header, paneUuidMap) = ConvertAscxToTemplateHtml(ascx, firstContainerId, themeName, name, availableThemeFiles);
@@ -1808,6 +1812,81 @@ public static class BundleWriter
             using var reader = new StreamReader(included.Open(), Encoding.UTF8);
             return reader.ReadToEnd();
         });
+    }
+
+    /// <summary>
+    /// Resolves ASP.NET user control references registered via
+    /// <c>&lt;%@ Register TagPrefix="..." TagName="..." Src="..." %&gt;</c>
+    /// directives by reading the referenced ASCX file from
+    /// <paramref name="zip"/> and inlining its content.  Only controls
+    /// whose <c>Src</c> is a relative path (i.e. not starting with <c>~</c>)
+    /// are resolved – those point to files within the skin package rather
+    /// than DNN system controls.
+    /// </summary>
+    public static string ResolveRegisteredControls(
+        string ascx, string skinDir, ZipArchive zip)
+    {
+        // Collect <%@ Register TagPrefix="..." TagName="..." Src="..." %> entries
+        // that reference a local (non-system) file.
+        var registrations = new List<(string Prefix, string Name, string Src)>();
+        foreach (Match m in RegisterDirectiveRegex.Matches(ascx))
+        {
+            string block = m.Value;
+            Match prefix = TagPrefixAttrRegex.Match(block);
+            Match name   = TagNameAttrRegex.Match(block);
+            Match src    = SrcAttrRegex.Match(block);
+            if (prefix.Success && name.Success && src.Success)
+            {
+                string srcVal = src.Groups[1].Value;
+                // Only resolve local files; ~/Admin/... etc. are DNN system controls.
+                if (!srcVal.StartsWith("~", StringComparison.Ordinal))
+                    registrations.Add((prefix.Groups[1].Value, name.Groups[1].Value, srcVal));
+            }
+        }
+
+        // For each registration, inline the file content in place of the control tag.
+        foreach (var (prefix, name, src) in registrations)
+        {
+            string escapedPrefix = Regex.Escape(prefix);
+            string escapedName   = Regex.Escape(name);
+
+            // Match <prefix:name ...>...</prefix:name> (open/close pair) or
+            // <prefix:name .../> (self-closing).  Open/close first so we
+            // don't leave orphan closing tags.
+            var tagRegex = new Regex(
+                $@"<{escapedPrefix}:{escapedName}\b[^>]*>[\s\S]*?</{escapedPrefix}:{escapedName}\s*>" +
+                $@"|<{escapedPrefix}:{escapedName}\b[^>]*/?>",
+                RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+            // Resolve the source file path relative to the skin directory.
+            string relPath  = src.Replace('\\', '/');
+            string fullPath = skinDir + "/" + relPath;
+            ZipArchiveEntry? entry = zip.Entries.FirstOrDefault(e =>
+                string.Equals(
+                    e.FullName.Replace('\\', '/'),
+                    fullPath,
+                    StringComparison.OrdinalIgnoreCase));
+
+            if (entry is null)
+            {
+                Console.Error.WriteLine(
+                    $"Warning: Registered control source not found in themes zip: '{fullPath}'");
+                // Remove the unresolvable control tag to avoid leaving server markup.
+                ascx = tagRegex.Replace(ascx, string.Empty);
+                continue;
+            }
+
+            using var reader = new StreamReader(entry.Open(), Encoding.UTF8);
+            string content = reader.ReadToEnd();
+
+            // Strip <%@ ... %> directives from the inlined content so they
+            // don't interfere with the parent ASCX processing.
+            content = DirectiveRegex.Replace(content, string.Empty);
+
+            ascx = tagRegex.Replace(ascx, content);
+        }
+
+        return ascx;
     }
 
     // ------------------------------------------------------------------
@@ -1900,6 +1979,25 @@ public static class BundleWriter
         new(@"<dnn:DnnJsInclude\s[^>]*FilePath=""([^""]+)""[^>]*/?>",
             RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
 
+    // Matches <%= SkinPath %> ASP.NET expressions (with optional surrounding whitespace).
+    // DNN skins use this expression in <script src> and <link> tags to reference
+    // files relative to the skin folder.
+    private static readonly Regex SkinPathExpressionRegex =
+        new(@"<%=\s*SkinPath\s*%>", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    // Matches <%@ Register ... %> directives in DNN ASCX files.
+    private static readonly Regex RegisterDirectiveRegex =
+        new(@"<%@\s*Register\s[^%]*(?:%(?!>)[^%]*)*%>",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+    // Attribute-level regex helpers for <%@ Register %> parsing.
+    private static readonly Regex TagPrefixAttrRegex =
+        new(@"\bTagPrefix=""([^""]+)""", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex TagNameAttrRegex =
+        new(@"\bTagName=""([^""]+)""", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex SrcAttrRegex =
+        new(@"\bSrc=""([^""]+)""", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
     /// <summary>
     /// Converts a DNN container ASCX file into a DotCMS container Velocity
     /// template suitable for the <c>code</c> field of a container bundle entry.
@@ -1984,6 +2082,14 @@ public static class BundleWriter
         IReadOnlySet<string>? availableThemeFiles = null)
     {
         string html = DirectiveRegex.Replace(ascx, string.Empty);
+
+        // Replace <%= SkinPath %> expressions with the theme base URL before
+        // CodeBlockRegex strips all <% ... %> blocks.  DNN skins use this
+        // ASP.NET expression in <script src> and <link> tags to reference
+        // files relative to the skin folder (e.g. custom.js, modal.js).
+        if (!string.IsNullOrWhiteSpace(themeName))
+            html = SkinPathExpressionRegex.Replace(html, $"/application/themes/{themeName}/");
+
         html = CodeBlockRegex.Replace(html, string.Empty);
 
         // Replace <dnn:LOGO> with a theme-aware img tag.
@@ -2021,6 +2127,11 @@ public static class BundleWriter
         // Also build a mapping of pane id → uuid so that content modules can
         // be placed in the correct container slot via multiTree.
         // This must run before RunatServerRegex strips the runat attribute.
+        //
+        // When a pane div carries layout-relevant attributes (CSS classes,
+        // styles, etc.) beyond the standard id and runat, the outer <div> is
+        // preserved so that bootstrap / layout styling is not lost.  The
+        // #parseContainer directive is placed *inside* the wrapper div.
         var paneUuidMap = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         if (!string.IsNullOrEmpty(defaultContainerId))
         {
@@ -2031,7 +2142,36 @@ public static class BundleWriter
                 Match idMatch = DivIdAttributeRegex.Match(m.Value);
                 if (idMatch.Success)
                     paneUuidMap[idMatch.Groups[1].Value] = uuid;
-                return $"#parseContainer('{defaultContainerId}', '{uuid}')";
+
+                string parseContainer = $"#parseContainer('{defaultContainerId}', '{uuid}')";
+
+                // Extract just the opening <div ...> tag.
+                string openTag;
+                bool matchedClosing = m.Groups[1].Success;
+                if (matchedClosing)
+                {
+                    int closingOffset = m.Groups[1].Index - m.Index;
+                    openTag = m.Value[..closingOffset];
+                }
+                else
+                {
+                    openTag = m.Value;
+                }
+
+                // Build a cleaned version (no runat="server") and check
+                // whether layout-relevant attributes remain (e.g. class, style).
+                string cleaned = RunatServerRegex.Replace(openTag, string.Empty);
+                string withoutId = DivIdAttributeRegex.Replace(cleaned, string.Empty);
+                bool hasLayoutAttrs = withoutId.Contains('=');
+
+                if (hasLayoutAttrs)
+                {
+                    return matchedClosing
+                        ? $"{cleaned}\n{parseContainer}\n</div>"
+                        : $"{cleaned}\n{parseContainer}";
+                }
+
+                return parseContainer;
             });
         }
         else
