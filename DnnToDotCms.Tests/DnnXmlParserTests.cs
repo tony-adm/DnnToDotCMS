@@ -575,8 +575,8 @@ public class DnnXmlParserTests
     public void ExtractHtmlBodyFromDnnXml_ReplacesPortalRootToken()
     {
         // {{PortalRoot}} is a DNN runtime token that expands to "/Portals/{id}/" at
-        // run time.  After migration to DotCMS, files in the DNN Images/ folder are
-        // served from /application/images/, so the token must be replaced accordingly.
+        // run time.  After migration to DotCMS, the token is replaced with "/" so
+        // that image URLs match the DotCMS FileAsset folder structure.
         const string xmlContent = """
             <htmltext><content><![CDATA[&lt;img src=&quot;{{PortalRoot}}Images/logo.png&quot; /&gt;]]></content></htmltext>
             """;
@@ -585,7 +585,7 @@ public class DnnXmlParserTests
 
         Assert.NotNull(result);
         Assert.DoesNotContain("{{PortalRoot}}", result);
-        Assert.Contains("/application/images/logo.png", result);
+        Assert.Contains("/Images/logo.png", result);
     }
 
     [Fact]
@@ -620,10 +620,10 @@ public class DnnXmlParserTests
     }
 
     [Fact]
-    public void ExtractHtmlBodyFromDnnXml_ImagesPortalRootReplacedWithApplicationImages()
+    public void ExtractHtmlBodyFromDnnXml_ImagesPortalRootReplacedWithSlash()
     {
-        // {{PortalRoot}}Images/ must be replaced with /application/images/ so that
-        // HTML content links to images at the correct DotCMS static resource path.
+        // {{PortalRoot}}Images/ is replaced with /Images/ so that HTML content
+        // links match the DotCMS FileAsset folder path.
         const string xmlContent = """
             <htmltext><content><![CDATA[&lt;img src=&quot;{{PortalRoot}}Images/banner.jpg&quot; /&gt;]]></content></htmltext>
             """;
@@ -632,8 +632,7 @@ public class DnnXmlParserTests
 
         Assert.NotNull(result);
         Assert.DoesNotContain("{{PortalRoot}}", result, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("/application/images/banner.jpg", result);
-        Assert.DoesNotContain("/Images/banner.jpg", result);
+        Assert.Contains("/Images/banner.jpg", result);
     }
 
     [Fact]

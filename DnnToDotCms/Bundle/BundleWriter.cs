@@ -428,11 +428,13 @@ public static class BundleWriter
                     Truncate(pf.FileName, MaxVarcharLength), contentWorkDir, "/"));
 
                 // Portal files are also written as static web resources under
-                // ROOT/ so that URL references in migrated HTML content resolve
-                // correctly.  DNN HTML uses {{PortalRoot}} tokens that map to:
-                //   {{PortalRoot}}Images/x  →  /application/images/x  (special)
-                //   {{PortalRoot}}Other/x   →  /Other/x               (general)
-                //   {{PortalRoot}}file.css  →  /file.css              (root)
+                // ROOT/{folderPath}/{fileName} so that URL references in
+                // migrated HTML content resolve correctly.
+                // DNN HTML uses {{PortalRoot}} which is replaced with "/",
+                // so the file path in the bundle mirrors the DNN folder layout:
+                //   {{PortalRoot}}Images/x  →  /Images/x
+                //   {{PortalRoot}}Other/x   →  /Other/x
+                //   {{PortalRoot}}file.css  →  /file.css
                 //
                 // Theme-related folders (Containers/, Skins/) are already
                 // processed from export_themes.zip by WriteThemeFileAssets and
@@ -447,17 +449,10 @@ public static class BundleWriter
                 {
                     // Theme-related folder — skip static resource writing.
                 }
-                else if (normalizedFolderPath.StartsWith("Images/", StringComparison.OrdinalIgnoreCase))
-                {
-                    // Images/ maps to /application/images/ to match the
-                    // {{PortalRoot}}Images/ replacement in ExtractHtmlBodyFromDnnXml.
-                    string relativePath = normalizedFolderPath["Images/".Length..] + pf.FileName;
-                    WriteBinaryEntry(tar, "ROOT/application/images/" + relativePath, pf.Content);
-                }
                 else
                 {
-                    // All other folders and root-level files are written to
-                    // ROOT/{folderPath}/{fileName}, matching the general
+                    // All portal files (including Images/) are written to
+                    // ROOT/{folderPath}/{fileName}, matching the uniform
                     // {{PortalRoot}} → "/" replacement.
                     WriteBinaryEntry(tar, "ROOT/" + normalizedFolderPath + pf.FileName, pf.Content);
                 }
