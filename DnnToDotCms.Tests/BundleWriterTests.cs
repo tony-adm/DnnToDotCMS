@@ -3887,6 +3887,187 @@ public class BundleWriterTests
         Assert.Empty(paneUuidMap);
     }
 
+    // ------------------------------------------------------------------
+    // dnn_ ID prefix tests
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_PaneDivIdGetsDnnPrefix()
+    {
+        // Pane divs with runat="server" should get the dnn_ prefix on
+        // their id attribute to match the rendered DNN page.
+        const string ascx = """
+            <%@ Control Inherits="DotNetNuke.UI.Skins.Skin" %>
+            <div class="col-md" id="FDIC" runat="server"></div>
+            """;
+
+        var (body, _, paneUuidMap) = BundleWriter.ConvertAscxToTemplateHtml(
+            ascx, "ctr1");
+
+        Assert.Contains("id=\"dnn_FDIC\"", body);
+        Assert.DoesNotContain("id=\"FDIC\"", body);
+        // paneUuidMap still uses the original (unprefixed) id for content mapping.
+        Assert.True(paneUuidMap.ContainsKey("FDIC"));
+    }
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_MultiplePaneDivsAllGetDnnPrefix()
+    {
+        const string ascx = """
+            <%@ Control Inherits="DotNetNuke.UI.Skins.Skin" %>
+            <div class="top-bar-bg">
+              <div class="row">
+                <div class="col-md" id="FDIC" runat="server"></div>
+                <div class="col-md" id="TopRightBar" runat="server"></div>
+              </div>
+            </div>
+            <div class="col-xl-2" id="login" runat="server"></div>
+            """;
+
+        var (body, _, _) = BundleWriter.ConvertAscxToTemplateHtml(
+            ascx, "ctr1");
+
+        Assert.Contains("id=\"dnn_FDIC\"", body);
+        Assert.Contains("id=\"dnn_TopRightBar\"", body);
+        Assert.Contains("id=\"dnn_login\"", body);
+    }
+
+    [Fact]
+    public void ConvertAscxToContainerHtml_RunatServerDivGetsDnnPrefix()
+    {
+        const string ascx = """<div id="Wrapper" runat="server"><p>text</p></div>""";
+
+        string result = BundleWriter.ConvertAscxToContainerHtml(ascx);
+
+        Assert.Contains("id=\"dnn_Wrapper\"", result);
+        Assert.DoesNotContain("id=\"Wrapper\"", result);
+        Assert.DoesNotContain("runat", result);
+    }
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_NonRunatDivsNotPrefixed()
+    {
+        // Divs without runat="server" should NOT get the dnn_ prefix.
+        const string ascx = """
+            <%@ Control Inherits="DotNetNuke.UI.Skins.Skin" %>
+            <div id="header" class="sticky-top">
+              <div id="ContentPane" runat="server"></div>
+            </div>
+            """;
+
+        var (body, _, _) = BundleWriter.ConvertAscxToTemplateHtml(
+            ascx, "ctr1");
+
+        // "header" does not have runat="server" so no prefix.
+        Assert.Contains("id=\"header\"", body);
+        Assert.DoesNotContain("id=\"dnn_header\"", body);
+    }
+
+    // ------------------------------------------------------------------
+    // Default container selection tests
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void ResolveDefaultContainerId_PrefersStandard()
+    {
+        var defs = new List<(string id, string inode, string name, string html)>
+        {
+            ("aaa", "i1", "Accountcard", "<div>acc</div>"),
+            ("bbb", "i2", "standard", "<div>std</div>"),
+            ("ccc", "i3", "hpcard", "<div>hp</div>"),
+        };
+
+        string result = BundleWriter.ResolveDefaultContainerId(defs);
+
+        Assert.Equal("bbb", result);
+    }
+
+    [Fact]
+    public void ResolveDefaultContainerId_FallsBackToFirst_WhenNoStandard()
+    {
+        var defs = new List<(string id, string inode, string name, string html)>
+        {
+            ("aaa", "i1", "Accountcard", "<div>acc</div>"),
+            ("ccc", "i2", "hpcard", "<div>hp</div>"),
+        };
+
+        string result = BundleWriter.ResolveDefaultContainerId(defs);
+
+        Assert.Equal("aaa", result);
+    }
+
+    [Fact]
+    public void ResolveDefaultContainerId_ReturnsEmpty_WhenNoDefs()
+    {
+        var defs = new List<(string id, string inode, string name, string html)>();
+
+        string result = BundleWriter.ResolveDefaultContainerId(defs);
+
+        Assert.Equal(string.Empty, result);
+    }
+
+    [Fact]
+    public void ResolveDefaultContainerId_CaseInsensitive()
+    {
+        var defs = new List<(string id, string inode, string name, string html)>
+        {
+            ("aaa", "i1", "Accountcard", "<div>acc</div>"),
+            ("bbb", "i2", "Standard", "<div>std</div>"),
+        };
+
+        string result = BundleWriter.ResolveDefaultContainerId(defs);
+
+        Assert.Equal("bbb", result);
+    }
+
+    // ------------------------------------------------------------------
+    // Footer control replacement tests (COPYRIGHT, TERMS, PRIVACY)
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_CopyrightRendersVisibleHtml()
+    {
+        const string ascx = """
+            <%@ Control Inherits="DotNetNuke.UI.Skins.Skin" %>
+            <div class="footer"><dnn:COPYRIGHT ID="c1" runat="server" /></div>
+            """;
+
+        var (body, _, _) = BundleWriter.ConvertAscxToTemplateHtml(ascx);
+
+        Assert.Contains("Copyright", body);
+        Assert.DoesNotContain("<!-- Copyright -->", body);
+    }
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_TermsRendersVisibleLink()
+    {
+        const string ascx = """
+            <%@ Control Inherits="DotNetNuke.UI.Skins.Skin" %>
+            <dnn:TERMS ID="t1" runat="server" />
+            """;
+
+        var (body, _, _) = BundleWriter.ConvertAscxToTemplateHtml(ascx);
+
+        Assert.Contains("Terms of Use", body);
+        Assert.Contains("href=", body);
+        Assert.DoesNotContain("<!-- Terms", body);
+    }
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_PrivacyRendersVisibleLink()
+    {
+        const string ascx = """
+            <%@ Control Inherits="DotNetNuke.UI.Skins.Skin" %>
+            <dnn:PRIVACY ID="p1" runat="server" />
+            """;
+
+        var (body, _, _) = BundleWriter.ConvertAscxToTemplateHtml(ascx);
+
+        Assert.Contains("Privacy", body);
+        Assert.Contains("href=", body);
+        Assert.DoesNotContain("<!-- Privacy", body);
+    }
+
     [Fact]
     public void Write_WithFooterPaneContent_MultiTreeRelationTypeMatchesFooterSlot()
     {
