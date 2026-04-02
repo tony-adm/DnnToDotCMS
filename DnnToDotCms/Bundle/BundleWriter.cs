@@ -118,7 +118,7 @@ public static class BundleWriter
         // Pre-collect container and template definitions from the themes zip so
         // that their IDs are known before the manifest.csv is written.
         // Tuple: (identifier, inode, name, html, themeName)
-        var containerDefs = new List<(string id, string inode, string name, string html)>();
+        var containerDefs = new List<(string id, string inode, string name, string html, string themeName)>();
         var templateDefs  = new List<(string id, string inode, string name, string html, string header, string themeName, IReadOnlyDictionary<string, int> paneUuidMap)>();
 
         if (themesZipPath is not null && File.Exists(themesZipPath))
@@ -180,7 +180,7 @@ public static class BundleWriter
 
         // --- containers (from DNN containers) --------------------------------
         // Written to live/ so they are imported as published (not draft) assets.
-        foreach (var (id, inode, name, html) in containerDefs)
+        foreach (var (id, inode, name, html, _) in containerDefs)
         {
             string xml = BuildContainerXml(id, inode, name, html, contentHostId,
                 htmlContentTypeId ?? string.Empty);
@@ -188,19 +188,17 @@ public static class BundleWriter
             manifestEntries.Add(("containers", id, inode, name, "", ""));
         }
 
-        // --- templates (from DNN skins) --------------------------------------
-        // Written to live/ so they are imported as published (not draft) assets.
-        foreach (var (id, inode, name, html, header, themeName, _) in templateDefs)
-        {
-            string xml = BuildTemplateXml(id, inode, name, html, contentHostId, themeName, header);
-            WriteTextEntry(tar, $"live/{contentWorkDir}/{id}.template.template.xml", xml);
-            manifestEntries.Add(("template", id, inode, name, "", ""));
-        }
+        // --- templates are written later, after per-pane container resolution ---
 
         // --- HTML contentlets (from DNN HTML modules) ------------------------
         // Pre-generate identifiers so they can be referenced in page multiTree entries.
         // Build a lookup: tab UniqueId → list of (contentlet identifier, pane name).
         var tabContentMap = new Dictionary<string, List<(string contentletId, string paneName)>>(StringComparer.OrdinalIgnoreCase);
+
+        // Collect per-pane container source from content items so templates
+        // can use the correct container for each pane slot.
+        // Key: paneName (case-insensitive) → ContainerSrc (most common value).
+        var paneContainerVotes = new Dictionary<string, Dictionary<string, int>>(StringComparer.OrdinalIgnoreCase);
 
         if (htmlContents is not null && htmlContents.Count > 0
             && htmlContentTypeId is not null && htmlContentTypeVariable is not null)
@@ -214,9 +212,15 @@ public static class BundleWriter
                 string identifier = Guid.NewGuid().ToString();
                 string inode      = Guid.NewGuid().ToString();
 
+                // Resolve the icon file path to a portal-root-relative URL.
+                string imageUrl = string.Empty;
+                if (!string.IsNullOrEmpty(hc.IconFile))
+                    imageUrl = "/" + hc.IconFile.TrimStart('/');
+
                 string contentXml = BuildContentXml(
                     identifier, inode, hc.Title, hc.HtmlBody,
-                    contentHostId, htmlContentTypeId, htmlContentTypeVariable);
+                    contentHostId, htmlContentTypeId, htmlContentTypeVariable,
+                    imageUrl);
                 WriteTextEntry(
                     tar,
                     $"live/{contentWorkDir}/1/{identifier}.content.xml",
@@ -241,7 +245,61 @@ public static class BundleWriter
                     }
                     items.Add((identifier, hc.PaneName));
                 }
+
+                // Track per-pane container votes for template resolution.
+                if (!string.IsNullOrEmpty(hc.PaneName) && !string.IsNullOrEmpty(hc.ContainerSrc))
+                {
+                    if (!paneContainerVotes.TryGetValue(hc.PaneName, out var votes))
+                    {
+                        votes = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                        paneContainerVotes[hc.PaneName] = votes;
+                    }
+                    votes.TryGetValue(hc.ContainerSrc, out int count);
+                    votes[hc.ContainerSrc] = count + 1;
+                }
             }
+        }
+
+        // Build per-pane container ID mapping from the collected votes.
+        // For each pane, pick the most common container source and resolve it
+        // to a DotCMS container identifier.
+        var paneContainerIds = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        {
+            string defaultCtr = ResolveDefaultContainerId(containerDefs);
+            foreach (var (paneName, votes) in paneContainerVotes)
+            {
+                string topSrc = votes.OrderByDescending(kv => kv.Value).First().Key;
+                string resolved = ResolveContainerIdFromSrc(topSrc, containerDefs, defaultCtr);
+                if (resolved != defaultCtr)
+                    paneContainerIds[paneName] = resolved;
+            }
+        }
+
+        // --- templates (from DNN skins) --------------------------------------
+        // Written to live/ after per-pane container resolution so the correct
+        // container IDs are baked into each #parseContainer directive.
+        foreach (var (id, inode, name, html, header, themeName, paneMap) in templateDefs)
+        {
+            // Post-process the template HTML to replace the default container
+            // with the per-pane container where applicable.
+            string finalHtml = html;
+            if (paneContainerIds.Count > 0 && paneMap.Count > 0)
+            {
+                string defaultCtr = ResolveDefaultContainerId(containerDefs);
+                foreach (var (paneName, uuid) in paneMap)
+                {
+                    if (paneContainerIds.TryGetValue(paneName, out string? paneContainerId))
+                    {
+                        string oldDirective = $"#parseContainer('{defaultCtr}', '{uuid}')";
+                        string newDirective = $"#parseContainer('{paneContainerId}', '{uuid}')";
+                        finalHtml = finalHtml.Replace(oldDirective, newDirective);
+                    }
+                }
+            }
+
+            string xml = BuildTemplateXml(id, inode, name, finalHtml, contentHostId, themeName, header);
+            WriteTextEntry(tar, $"live/{contentWorkDir}/{id}.template.template.xml", xml);
+            manifestEntries.Add(("template", id, inode, name, "", ""));
         }
 
         // --- portal pages (from DNN tabs) ------------------------------------
@@ -905,11 +963,13 @@ public static class BundleWriter
         string htmlBody,
         string hostId,
         string contentTypeId,
-        string contentTypeVariable)
+        string contentTypeVariable,
+        string imageUrl = "")
     {
         string now        = DateTime.UtcNow.ToString(XmlTimestampFormat);
         string xmlTitle   = System.Security.SecurityElement.Escape(Truncate(title, MaxVarcharLength))   ?? string.Empty;
         string xmlBody    = System.Security.SecurityElement.Escape(htmlBody) ?? string.Empty;
+        string xmlImage   = System.Security.SecurityElement.Escape(imageUrl) ?? string.Empty;
 
         // Java 7 ConcurrentHashMap with 16 empty segments (same pattern as HostWrapper).
         string segments = string.Concat(Enumerable.Repeat(EmptyConcurrentHashMapSegment, 16));
@@ -954,6 +1014,8 @@ public static class BundleWriter
                     <string>{xmlTitle}</string>
                     <string>body</string>
                     <string>{xmlBody}</string>
+                    <string>image</string>
+                    <string>{xmlImage}</string>
                     <string>owner</string>
                     <string>dotcms.org.1</string>
                     <string>identifier</string>
@@ -1678,7 +1740,7 @@ public static class BundleWriter
     /// </remarks>
     private static void CollectThemeDefinitions(
         string themesZipPath,
-        List<(string id, string inode, string name, string html)> containerDefs,
+        List<(string id, string inode, string name, string html, string themeName)> containerDefs,
         List<(string id, string inode, string name, string html, string header, string themeName, IReadOnlyDictionary<string, int> paneUuidMap)> templateDefs)
     {
         using var zip = ZipFile.OpenRead(themesZipPath);
@@ -1703,9 +1765,12 @@ public static class BundleWriter
             if (rest.Count(c => c == '/') != 1) continue;
 
             string name = Path.GetFileNameWithoutExtension(entry.Name);
+            // Extract the container's theme name (directory between containers/ and the file).
+            int cSlash = rest.IndexOf('/');
+            string containerTheme = cSlash >= 0 ? rest[..cSlash] : string.Empty;
             using var reader = new StreamReader(entry.Open(), Encoding.UTF8);
             string html = ConvertAscxToContainerHtml(reader.ReadToEnd());
-            containerDefs.Add((Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), name, html));
+            containerDefs.Add((Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), name, html, containerTheme));
         }
 
         // Prefer a container named "standard" as the default; fall back to the
@@ -1903,25 +1968,33 @@ public static class BundleWriter
     private static readonly (Regex Rx, string Replacement)[] SkinControlReplacements =
     [
         (new(@"<dnn:MENU\s[^>]*/?>",        RegexOptions.IgnoreCase | RegexOptions.Singleline),
-         "<!-- Navigation -->"),
+         @"<nav class=""dnn-nav""><!-- Navigation: configure in DotCMS --></nav>"),
+        (new(@"<dnn:NAV\s[^>]*/?>",         RegexOptions.IgnoreCase | RegexOptions.Singleline),
+         @"<nav class=""dnn-nav""><!-- Navigation: configure in DotCMS --></nav>"),
         (new(@"<dnn:USER\s[^>]*/?>",        RegexOptions.IgnoreCase | RegexOptions.Singleline),
-         "<!-- User Panel -->"),
+         @"<span class=""dnn-user"">$!{user.firstName} $!{user.lastName}</span>"),
         (new(@"<dnn:LOGIN\s[^>]*/?>",       RegexOptions.IgnoreCase | RegexOptions.Singleline),
-         "<!-- Login -->"),
+         @"<span class=""dnn-login"">#if($!{user} && $!{user.userId} != ""anonymous"") <a href=""/dotAdmin"">My Account</a> #else <a href=""/dotAdmin/login"">Login</a> #end</span>"),
+        (new(@"<dnn:USERANDLOGIN\s[^>]*/?>", RegexOptions.IgnoreCase | RegexOptions.Singleline),
+         @"<span class=""dnn-login"">#if($!{user} && $!{user.userId} != ""anonymous"") <a href=""/dotAdmin"">$!{user.firstName}</a> | <a href=""/api/v1/logout"">Logout</a> #else <a href=""/dotAdmin/login"">Login</a> #end</span>"),
         (new(@"<dnn:SEARCH\s[^>]*/?>",      RegexOptions.IgnoreCase | RegexOptions.Singleline),
-         "<!-- Search -->"),
+         @"<form class=""dnn-search"" action=""/search"" method=""get""><input type=""text"" name=""q"" placeholder=""Search..."" aria-label=""Search"" /><button type=""submit"">Search</button></form>"),
         (new(@"<dnn:COPYRIGHT\s[^>]*/?>",   RegexOptions.IgnoreCase | RegexOptions.Singleline),
          "<span class=\"copyright\">Copyright</span>"),
         (new(@"<dnn:BREADCRUMB\s[^>]*/?>",  RegexOptions.IgnoreCase | RegexOptions.Singleline),
-         "<!-- Breadcrumb -->"),
+         @"<nav class=""dnn-breadcrumb"" aria-label=""Breadcrumb""><!-- Breadcrumb: configure in DotCMS --></nav>"),
         (new(@"<dnn:CURRENTDATE\s[^>]*/?>", RegexOptions.IgnoreCase | RegexOptions.Singleline),
-         "<!-- Current Date -->"),
+         @"<span class=""dnn-currentdate"">$date.format('MMMM d, yyyy', $date.date)</span>"),
         (new(@"<dnn:LANGUAGE\s[^>]*/?>",    RegexOptions.IgnoreCase | RegexOptions.Singleline),
-         "<!-- Language Selector -->"),
+         @"<span class=""dnn-language"">$!{language.languageCode}</span>"),
         (new(@"<dnn:TERMS\s[^>]*/?>",       RegexOptions.IgnoreCase | RegexOptions.Singleline),
          "<a href=\"/terms-of-use\">Terms of Use</a>"),
         (new(@"<dnn:PRIVACY\s[^>]*/?>",     RegexOptions.IgnoreCase | RegexOptions.Singleline),
          "<a href=\"/privacy\">Privacy</a>"),
+        (new(@"<dnn:LINKS\s[^>]*/?>",       RegexOptions.IgnoreCase | RegexOptions.Singleline),
+         string.Empty),
+        (new(@"<dnn:TEXT\s[^>]*/?>",         RegexOptions.IgnoreCase | RegexOptions.Singleline),
+         string.Empty),
         // Controls to remove entirely (handled by DotCMS)
         (new(@"<dnn:STYLES\s[^>]*/?>",      RegexOptions.IgnoreCase | RegexOptions.Singleline),
          string.Empty),
@@ -1930,6 +2003,10 @@ public static class BundleWriter
         (new(@"<dnn:META\s[^>]*/?>",        RegexOptions.IgnoreCase | RegexOptions.Singleline),
          string.Empty),
         (new(@"<dnn:LINKTOMOBILE\s[^>]*/?>", RegexOptions.IgnoreCase | RegexOptions.Singleline),
+         string.Empty),
+        (new(@"<dnn:TOAST\s[^>]*/?>",       RegexOptions.IgnoreCase | RegexOptions.Singleline),
+         string.Empty),
+        (new(@"<dnn:CONTROLPANEL\s[^>]*/?>", RegexOptions.IgnoreCase | RegexOptions.Singleline),
          string.Empty),
     ];
 
@@ -2024,6 +2101,10 @@ public static class BundleWriter
     private static readonly Regex SrcAttrRegex =
         new(@"\bSrc=""([^""]+)""", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
+    // Matches <dnn:ICON .../> or <dnn:Icon .../> (DNN container icon control).
+    private static readonly Regex DnnIconRegex =
+        new(@"<dnn:Icon\s[^>]*/?>", RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
     /// <summary>
     /// Converts a DNN container ASCX file into a DotCMS container Velocity
     /// template suitable for the <c>code</c> field of a container bundle entry.
@@ -2034,6 +2115,8 @@ public static class BundleWriter
     ///   <item>ASP.NET directive blocks (<c>&lt;%@ … %&gt;</c>) are removed.</item>
     ///   <item>Inline code blocks (<c>&lt;% … %&gt;</c>) are removed.</item>
     ///   <item><c>&lt;dnn:TITLE … /&gt;</c> is replaced with <c>$dotContent.title</c>.</item>
+    ///   <item><c>&lt;dnn:ICON … /&gt;</c> is replaced with a conditional <c>&lt;img&gt;</c>
+    ///         tag referencing <c>$!{dotContent.image}</c> so that the module icon renders.</item>
     ///   <item>The ContentPane div is replaced with <c>$!{dotContent.body}</c>.</item>
     ///   <item>All remaining <c>runat="server"</c> attributes are stripped.</item>
     ///   <item>Any other <c>&lt;dnn:…&gt;</c> controls are removed.</item>
@@ -2044,6 +2127,16 @@ public static class BundleWriter
         string html = DirectiveRegex.Replace(ascx, string.Empty);
         html = CodeBlockRegex.Replace(html, string.Empty);
         html = DnnTitleRegex.Replace(html, "$dotContent.title");
+        // Replace <dnn:Icon> with a conditional <img> referencing the content
+        // image field.  Preserve style/loading attributes from the original tag.
+        html = DnnIconRegex.Replace(html, m =>
+        {
+            var styleMatch = Regex.Match(m.Value, @"style=""([^""]*)""", RegexOptions.IgnoreCase);
+            string style = styleMatch.Success ? $@" style=""{styleMatch.Groups[1].Value}""" : "";
+            var loadMatch = Regex.Match(m.Value, @"loading=""([^""]*)""", RegexOptions.IgnoreCase);
+            string loading = loadMatch.Success ? $@" loading=""{loadMatch.Groups[1].Value}""" : "";
+            return $@"#if(""$!{{dotContent.image}}"" != """") <img src=""$!{{dotContent.image}}"" alt=""$!{{dotContent.title}}""{style}{loading} /> #end";
+        });
         html = ContentPaneRegex.Replace(html, "$!{dotContent.body}");
         // Add the dnn_ naming-container prefix to IDs on elements that had
         // runat="server", matching the rendered DNN page behaviour.
@@ -2661,7 +2754,7 @@ public static class BundleWriter
     /// first container if no "standard" container exists.
     /// </summary>
     internal static string ResolveDefaultContainerId(
-        IReadOnlyList<(string id, string inode, string name, string html)> containerDefs)
+        IReadOnlyList<(string id, string inode, string name, string html, string themeName)> containerDefs)
     {
         if (containerDefs.Count == 0)
             return string.Empty;
@@ -2673,5 +2766,58 @@ public static class BundleWriter
         }
 
         return containerDefs[0].id;
+    }
+
+    /// <summary>
+    /// Resolves a DNN container source path (e.g.
+    /// <c>[L]Containers/FBOT/hpcard.ascx</c>) to a DotCMS container
+    /// identifier by matching the theme-name and container-name segments
+    /// against <paramref name="containerDefs"/>.  Falls back to
+    /// <paramref name="defaultContainerId"/> when no match is found.
+    /// </summary>
+    internal static string ResolveContainerIdFromSrc(
+        string containerSrc,
+        IReadOnlyList<(string id, string inode, string name, string html, string themeName)> containerDefs,
+        string defaultContainerId)
+    {
+        if (string.IsNullOrWhiteSpace(containerSrc) || containerDefs.Count == 0)
+            return defaultContainerId;
+
+        // DNN container paths look like:
+        //   [L]Containers/{ThemeName}/{ContainerName}.ascx
+        //   [G]Containers/{ThemeName}/{ContainerName}.ascx
+        // Strip the [L] / [G] prefix, then extract theme and container name.
+        string path = containerSrc;
+        if (path.Length > 3 && path[0] == '[' && path[2] == ']')
+            path = path[3..];
+
+        // Normalise separators and locate the "containers/" segment.
+        path = path.Replace('\\', '/');
+        int idx = path.IndexOf("containers/", StringComparison.OrdinalIgnoreCase);
+        if (idx < 0)
+            return defaultContainerId;
+
+        string rest = path[(idx + "containers/".Length)..];
+        int slash = rest.IndexOf('/');
+        if (slash < 0)
+            return defaultContainerId;
+
+        string srcTheme = rest[..slash];
+        string srcName  = Path.GetFileNameWithoutExtension(rest[(slash + 1)..]);
+
+        // Try matching theme + name first, then just name.
+        foreach (var c in containerDefs)
+        {
+            if (c.name.Equals(srcName, StringComparison.OrdinalIgnoreCase) &&
+                c.themeName.Equals(srcTheme, StringComparison.OrdinalIgnoreCase))
+                return c.id;
+        }
+        foreach (var c in containerDefs)
+        {
+            if (c.name.Equals(srcName, StringComparison.OrdinalIgnoreCase))
+                return c.id;
+        }
+
+        return defaultContainerId;
     }
 }

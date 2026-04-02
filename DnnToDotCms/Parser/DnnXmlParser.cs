@@ -214,8 +214,24 @@ public static class DnnXmlParser
         // on many tabs (e.g. shared footer modules), so we collect ALL
         // associations together with the pane each module instance lives in.
         var moduleTitles    = new Dictionary<int, string>();
-        var moduleTabPanes  = new Dictionary<int, List<(string tabUniqueId, string paneName)>>();
+        var moduleTabPanes  = new Dictionary<int, List<(string tabUniqueId, string paneName, string containerSrc, string iconFile)>>();
         var moduleSeenTabs  = new Dictionary<int, HashSet<string>>(); // dedup guard
+
+        // Build a mapping of FileId → folder/fileName from ExportFile so that
+        // IconFile values like "FileID=58791" can be resolved to actual paths.
+        var fileIdPaths = new Dictionary<int, string>();
+        ILiteCollection<BsonDocument> exportFiles = db.GetCollection("ExportFile");
+        foreach (BsonDocument doc in exportFiles.FindAll())
+        {
+            if (!doc.TryGetValue("FileId", out BsonValue fIdVal)) continue;
+            string folder = doc.TryGetValue("Folder", out BsonValue folderVal)
+                ? (folderVal.AsString ?? string.Empty) : string.Empty;
+            string fileName = doc.TryGetValue("FileName", out BsonValue fnVal)
+                ? (fnVal.AsString ?? string.Empty) : string.Empty;
+            if (!string.IsNullOrEmpty(fileName))
+                fileIdPaths[fIdVal.AsInt32] = folder + fileName;
+        }
+
         ILiteCollection<BsonDocument> tabModules = db.GetCollection("ExportTabModule");
         foreach (BsonDocument doc in tabModules.FindAll())
         {
@@ -238,6 +254,22 @@ public static class DnnXmlParser
                     ? (paneVal.AsString ?? string.Empty)
                     : string.Empty;
 
+                string containerSrc = doc.TryGetValue("ContainerSrc", out BsonValue cVal)
+                    ? (cVal.AsString ?? string.Empty)
+                    : string.Empty;
+
+                // Resolve IconFile: may be a path like "Images/foo.png" or
+                // a reference like "FileID=58791".
+                string iconFile = doc.TryGetValue("IconFile", out BsonValue iVal)
+                    ? (iVal.AsString ?? string.Empty)
+                    : string.Empty;
+                if (iconFile.StartsWith("FileID=", StringComparison.OrdinalIgnoreCase)
+                    && int.TryParse(iconFile.AsSpan("FileID=".Length), out int fid)
+                    && fileIdPaths.TryGetValue(fid, out string? resolvedPath))
+                {
+                    iconFile = resolvedPath;
+                }
+
                 if (!moduleTabPanes.TryGetValue(moduleId, out var tabPanes))
                 {
                     tabPanes = [];
@@ -251,12 +283,17 @@ public static class DnnXmlParser
                     moduleSeenTabs[moduleId] = seen;
                 }
                 if (seen.Add(tabUniqueId))
-                    tabPanes.Add((tabUniqueId, paneName));
+                    tabPanes.Add((tabUniqueId, paneName, containerSrc, iconFile));
             }
         }
 
         var results = new List<DnnHtmlContent>();
         ILiteCollection<BsonDocument> moduleContents = db.GetCollection("ExportModuleContent");
+
+        // Track which modules have content in ExportModuleContent so we can
+        // create placeholder entries for modules that don't (e.g. custom
+        // modules like FisSlider that store data in their own SQL tables).
+        var modulesWithContent = new HashSet<int>();
 
         foreach (BsonDocument doc in moduleContents.FindAll())
         {
@@ -272,6 +309,7 @@ public static class DnnXmlParser
                 continue;
 
             int moduleId = moduleIdVal.AsInt32;
+            modulesWithContent.Add(moduleId);
             moduleTitles.TryGetValue(moduleId,    out string? title);
             string displayTitle = string.IsNullOrWhiteSpace(title) ? "Content" : title;
 
@@ -280,13 +318,15 @@ public static class DnnXmlParser
             // their content must be present on each corresponding DotCMS page.
             if (moduleTabPanes.TryGetValue(moduleId, out var associatedTabPanes) && associatedTabPanes.Count > 0)
             {
-                foreach (var (tabUniqueId, paneName) in associatedTabPanes)
+                foreach (var (tabUniqueId, paneName, containerSrc, iconFile) in associatedTabPanes)
                 {
                     results.Add(new DnnHtmlContent(
                         Title:       displayTitle,
                         HtmlBody:    htmlBody,
                         TabUniqueId: tabUniqueId,
-                        PaneName:    paneName));
+                        PaneName:    paneName,
+                        ContainerSrc: containerSrc,
+                        IconFile:    iconFile));
                 }
             }
             else
@@ -297,6 +337,54 @@ public static class DnnXmlParser
                     Title:       displayTitle,
                     HtmlBody:    htmlBody,
                     TabUniqueId: string.Empty));
+            }
+        }
+
+        // Build a mapping of ModuleID → FriendlyName from ExportModule so
+        // placeholder entries for non-HTML modules include the module type.
+        var moduleFriendlyNames = new Dictionary<int, string>();
+        ILiteCollection<BsonDocument> exportModules = db.GetCollection("ExportModule");
+        foreach (BsonDocument doc in exportModules.FindAll())
+        {
+            if (!doc.TryGetValue("ModuleID", out BsonValue midVal)) continue;
+            string fn = doc.TryGetValue("FriendlyName", out BsonValue fnVal)
+                ? (fnVal.AsString ?? string.Empty) : string.Empty;
+            if (!string.IsNullOrWhiteSpace(fn))
+                moduleFriendlyNames[midVal.AsInt32] = fn;
+        }
+
+        // Create placeholder entries for modules that have page/pane
+        // associations but no content in ExportModuleContent (e.g. custom
+        // modules like FisSlider that store data in their own SQL tables).
+        // This ensures every pane slot has content in the DotCMS bundle.
+        foreach (var (moduleId, tabPanes) in moduleTabPanes)
+        {
+            if (modulesWithContent.Contains(moduleId))
+                continue;
+
+            moduleTitles.TryGetValue(moduleId, out string? title);
+            string displayTitle = string.IsNullOrWhiteSpace(title) ? "Content" : title;
+
+            moduleFriendlyNames.TryGetValue(moduleId, out string? friendlyName);
+            string moduleType = string.IsNullOrWhiteSpace(friendlyName) ? "Custom Module" : friendlyName;
+
+            // Build a placeholder body that identifies the original DNN module
+            // so content editors know what content needs to be recreated.
+            string placeholderBody = $"<div class=\"dnn-module-placeholder\" data-module-type=\"{System.Security.SecurityElement.Escape(moduleType)}\">"
+                + $"<p><strong>{System.Security.SecurityElement.Escape(moduleType)}</strong>: "
+                + $"{System.Security.SecurityElement.Escape(displayTitle)}</p>"
+                + "<p><em>This content was managed by a custom DNN module and needs to be recreated in DotCMS.</em></p>"
+                + "</div>";
+
+            foreach (var (tabUniqueId, paneName, containerSrc, iconFile) in tabPanes)
+            {
+                results.Add(new DnnHtmlContent(
+                    Title:        displayTitle,
+                    HtmlBody:     placeholderBody,
+                    TabUniqueId:  tabUniqueId,
+                    PaneName:     paneName,
+                    ContainerSrc: containerSrc,
+                    IconFile:     iconFile));
             }
         }
 

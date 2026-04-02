@@ -35,7 +35,20 @@ public sealed record DnnHtmlContent(
     /// <c>#parseContainer</c> slot in the DotCMS template.  Empty when the
     /// pane association is unknown.
     /// </summary>
-    string PaneName = "");
+    string PaneName = "",
+    /// <summary>
+    /// DNN container source path for the module instance, e.g.
+    /// <c>[L]Containers/FBOT/hpcard.ascx</c>.  Used to assign the correct
+    /// DotCMS container per pane slot instead of the default container.
+    /// </summary>
+    string ContainerSrc = "",
+    /// <summary>
+    /// Resolved icon/image file path for the module instance, e.g.
+    /// <c>Images/Icon - Open an Account.png</c>.  Stored in the DotCMS
+    /// contentlet <c>image</c> field so that containers referencing
+    /// <c>$!{dotContent.image}</c> can render the module icon.
+    /// </summary>
+    string IconFile = "");
 
 /// <summary>
 /// Represents a DNN module parsed from either a .dnn package manifest or an
