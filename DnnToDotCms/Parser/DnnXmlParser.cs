@@ -520,12 +520,12 @@ public static class DnnXmlParser
     /// <summary>
     /// Builds a Bootstrap 5 carousel (<c>div.carousel</c>) for a FisSlider
     /// module instance.  When <paramref name="imagePaths"/> is empty an empty
-    /// carousel structure ready to be configured in DotCMS is produced; no
-    /// placeholder text is emitted so the slot renders cleanly on the page.
-    /// Each slide includes a <c>.carousel-caption</c> overlay with a heading,
-    /// descriptive paragraph and a call-to-action link, matching the overlay
-    /// layout of the original FisSlider widget.  Content editors should replace
-    /// the placeholder text and <c>href</c> values after import.
+    /// carousel structure ready to be configured in DotCMS is produced.
+    /// Each slide uses the image filename (without extension) as the caption
+    /// heading — the only slide-specific text available from DNN exports.
+    /// FisSlider slide descriptions and link URLs are stored in a custom SQL
+    /// table (<c>FisSlider_Slides</c>) that is not included in DNN exports,
+    /// so those fields are omitted.
     /// </summary>
     /// <param name="title">
     /// The DNN module title — used to derive a stable, unique HTML element ID
@@ -576,14 +576,12 @@ public static class DnnXmlParser
                 if (string.IsNullOrWhiteSpace(altText)) altText = $"Slide {i + 1}";
                 sb.AppendLine($"""    <div class="carousel-item{activeClass}">""");
                 sb.AppendLine($"""      <img src="{src}" class="d-block w-100" alt="{altText}">""");
-                // Caption overlay — mirrors the original FisSlider text-and-link
-                // overlay.  FisSlider stores slide text in its own SQL tables
-                // which are not included in DNN exports, so placeholder content
-                // is used here.  Replace heading, paragraph and href after import.
+                // Caption overlay using the image filename as the slide title.
+                // FisSlider stores slide descriptions and links in its own SQL
+                // tables which are not included in DNN exports, so only the
+                // title (derived from the image filename) is populated here.
                 sb.AppendLine("""      <div class="carousel-caption d-none d-md-block">""");
-                sb.AppendLine($"""        <h5>Slide {i + 1} Title</h5>""");
-                sb.AppendLine("""        <p>Slide description text.</p>""");
-                sb.AppendLine("""        <a href="#" class="btn btn-primary">Learn More</a>""");
+                sb.AppendLine($"""        <h5>{altText}</h5>""");
                 sb.AppendLine("      </div>");
                 sb.AppendLine("    </div>");
             }
@@ -595,11 +593,6 @@ public static class DnnXmlParser
             // that content editors can populate directly inside DotCMS.
             sb.AppendLine("""  <div class="carousel-inner">""");
             sb.AppendLine("""    <div class="carousel-item active">""");
-            sb.AppendLine("""      <div class="carousel-caption d-none d-md-block">""");
-            sb.AppendLine("""        <h5>Slide Title</h5>""");
-            sb.AppendLine("""        <p>Slide description text.</p>""");
-            sb.AppendLine("""        <a href="#" class="btn btn-primary">Learn More</a>""");
-            sb.AppendLine("      </div>");
             sb.AppendLine("    </div>");
             sb.AppendLine("  </div>");
         }
