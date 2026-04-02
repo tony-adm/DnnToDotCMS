@@ -2135,7 +2135,10 @@ public static class BundleWriter
             string style = styleMatch.Success ? $@" style=""{styleMatch.Groups[1].Value}""" : "";
             var loadMatch = Regex.Match(m.Value, @"loading=""([^""]*)""", RegexOptions.IgnoreCase);
             string loading = loadMatch.Success ? $@" loading=""{loadMatch.Groups[1].Value}""" : "";
-            return $@"#if(""$!{{dotContent.image}}"" != """") <img src=""$!{{dotContent.image}}"" alt=""$!{{dotContent.title}}""{style}{loading} /> #end";
+            // Velocity conditional: only render the <img> when the image field has a value.
+            return "#if(\"$!{dotContent.image}\" != \"\")"
+                 + $" <img src=\"$!{{dotContent.image}}\" alt=\"$!{{dotContent.title}}\"{style}{loading} />"
+                 + " #end";
         });
         html = ContentPaneRegex.Replace(html, "$!{dotContent.body}");
         // Add the dnn_ naming-container prefix to IDs on elements that had

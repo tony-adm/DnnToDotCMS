@@ -370,11 +370,15 @@ public static class DnnXmlParser
 
             // Build a placeholder body that identifies the original DNN module
             // so content editors know what content needs to be recreated.
-            string placeholderBody = $"<div class=\"dnn-module-placeholder\" data-module-type=\"{System.Security.SecurityElement.Escape(moduleType)}\">"
-                + $"<p><strong>{System.Security.SecurityElement.Escape(moduleType)}</strong>: "
-                + $"{System.Security.SecurityElement.Escape(displayTitle)}</p>"
-                + "<p><em>This content was managed by a custom DNN module and needs to be recreated in DotCMS.</em></p>"
-                + "</div>";
+            string escapedType  = System.Security.SecurityElement.Escape(moduleType) ?? moduleType;
+            string escapedTitle = System.Security.SecurityElement.Escape(displayTitle) ?? displayTitle;
+            string placeholderBody =
+                $"""
+                <div class="dnn-module-placeholder" data-module-type="{escapedType}">
+                  <p><strong>{escapedType}</strong>: {escapedTitle}</p>
+                  <p><em>This content was managed by a custom DNN module and needs to be recreated in DotCMS.</em></p>
+                </div>
+                """;
 
             foreach (var (tabUniqueId, paneName, containerSrc, iconFile) in tabPanes)
             {
