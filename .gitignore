@@ -12,6 +12,8 @@ output/
 .vs/
 *.DotSettings.user
 
+bundles/
+
 # NuGet
 *.nupkg
 *.snupkg
