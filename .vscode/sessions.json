@@ -27,16 +27,6 @@
                 ]
             },
             {
-                "name": "Workspace DotCMS",
-                "icon": "repo",
-                "color": "terminal.ansiWhite",
-                "autoExecuteCommands": true,
-                "cwd": "/mnt/c/Repos/DotCMS/dotcms-workspace",
-                "commands": [
-                    "bash -lc \"cd /mnt/c/Repos/DotCMS/dotcms-workspace && clear && echo 'Run when ready:' && echo '  ./update-local.sh --overwrite' && echo '  ./update-local.sh --pull' && exec bash\""
-                ]
-            },
-            {
                 "name": "Developer Browser",
                 "icon": "search",
                 "color": "terminal.ansiRed",
@@ -52,11 +42,21 @@
                 "autoExecuteCommands": true,
                 "cwd": "C:\\Repos\\DnnToDotcms",
                 "commands": [
-                    "Clear-Host; Write-Host 'DNN to DotCMS Migration Session'; Write-Host 'Run when ready:'; Write-Host '  dotnet run --project DnnToDotCms -- example/2026-03-29_01-49-26 --output test-site.tar.gz' -ForegroundColor Blue; Write-Host '  git pull origin main' -ForegroundColor Yellow"
+                    "Clear-Host; Write-Host 'DNN to DotCMS Migration Session'; Write-Host 'Run when ready:'; Write-Host '  dotnet run --project DnnToDotCms -- dnn_export/2026-03-29_01-49-26 --output test-site.tar.gz' -ForegroundColor Blue; Write-Host '  git pull origin main' -ForegroundColor Yellow"
                 ]
             }
         ],
         "emailScript-dev": [
+            {
+                "name": "Workspace DotCMS",
+                "icon": "Repos",
+                "color": "terminal.ansiWhite",
+                "autoExecuteCommands": true,
+                "cwd": "/mnt/c/Repos/DotCMS/dotcms-workspace",
+                "commands": [
+                    "bash -lc \"cd /mnt/c/Repos/DotCMS/dotcms-workspace && clear && echo 'Run when ready:' && echo '  ./update-local.sh --overwrite' && echo '  ./update-local.sh --pull' && exec bash\""
+                ]
+            },
             {
                 "name": "demo-emailScript",
                 "icon": "mail",
