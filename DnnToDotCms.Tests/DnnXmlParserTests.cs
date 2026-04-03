@@ -733,7 +733,7 @@ public class DnnXmlParserTests
             // FisSlider must produce a Bootstrap carousel, not a "recreate" notice.
             Assert.Contains("carousel", hc.HtmlBody);
             Assert.Contains("dnn-slider-", hc.HtmlBody);
-            // The empty shell must not contain placeholder text.
+            // The empty shell has no slides, so there must be no slide-level elements.
             Assert.DoesNotContain("Slide Title", hc.HtmlBody);
             Assert.DoesNotContain("btn btn-primary", hc.HtmlBody);
             Assert.DoesNotContain("recreated in DotCMS", hc.HtmlBody);
@@ -814,8 +814,12 @@ public class DnnXmlParserTests
             Assert.Contains("carousel-caption", hc.HtmlBody);
             Assert.Contains("<h5>slide1</h5>", hc.HtmlBody);
             Assert.Contains("<h5>slide2</h5>", hc.HtmlBody);
-            // No placeholder description or link button — those aren't in the export.
-            Assert.DoesNotContain("btn btn-primary", hc.HtmlBody);
+            // Each slide must include a placeholder "Learn More" link button so
+            // content editors know to supply the actual slide destination URL.
+            // FisSlider stores per-slide link URLs in a SQL table that is not
+            // included in DNN exports; the placeholder preserves the structure.
+            Assert.Contains("btn btn-primary", hc.HtmlBody);
+            Assert.Contains("Learn More", hc.HtmlBody);
             Assert.DoesNotContain("Slide description text", hc.HtmlBody);
             Assert.DoesNotContain("recreated in DotCMS", hc.HtmlBody);
             Assert.DoesNotContain("dnn-module-placeholder", hc.HtmlBody);
