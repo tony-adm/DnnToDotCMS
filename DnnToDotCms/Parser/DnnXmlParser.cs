@@ -524,8 +524,10 @@ public static class DnnXmlParser
     /// Each slide uses the image filename (without extension) as the caption
     /// heading — the only slide-specific text available from DNN exports.
     /// FisSlider slide descriptions and link URLs are stored in a custom SQL
-    /// table (<c>FisSlider_Slides</c>) that is not included in DNN exports,
-    /// so those fields are omitted.
+    /// table (<c>FisSlider_Slides</c>) that is not included in DNN exports;
+    /// a placeholder <c>&lt;a href="#"&gt;Learn More&lt;/a&gt;</c> button is
+    /// emitted for each slide so content editors can supply the correct URL in
+    /// DotCMS after import.
     /// </summary>
     /// <param name="title">
     /// The DNN module title — used to derive a stable, unique HTML element ID
@@ -577,11 +579,14 @@ public static class DnnXmlParser
                 sb.AppendLine($"""    <div class="carousel-item{activeClass}">""");
                 sb.AppendLine($"""      <img src="{src}" class="d-block w-100" alt="{altText}">""");
                 // Caption overlay using the image filename as the slide title.
-                // FisSlider stores slide descriptions and links in its own SQL
-                // tables which are not included in DNN exports, so only the
-                // title (derived from the image filename) is populated here.
+                // FisSlider stores per-slide link URLs in a custom SQL table
+                // (FisSlider_Slides.LinkUrl) that is not included in DNN exports.
+                // A placeholder link is emitted so content editors can supply
+                // the correct destination URL directly in DotCMS after import.
                 sb.AppendLine("""      <div class="carousel-caption d-none d-md-block">""");
                 sb.AppendLine($"""        <h5>{altText}</h5>""");
+                sb.AppendLine("""        <!-- TODO: replace '#' with the slide destination URL -->""");
+                sb.AppendLine("""        <a href="#" class="btn btn-primary">Learn More</a>""");
                 sb.AppendLine("      </div>");
                 sb.AppendLine("    </div>");
             }
