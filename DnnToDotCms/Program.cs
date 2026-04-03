@@ -126,6 +126,11 @@ try
         ? DnnXmlParser.ParsePortalFiles(exportDir)
         : [];
 
+    // Delete any existing output file before writing so a failed run never
+    // leaves a stale bundle from a previous successful run in place.
+    if (File.Exists(outputPath))
+        File.Delete(outputPath);
+
     // Write the DotCMS site bundle.
     using (var outStream = File.Create(outputPath))
         BundleWriter.Write(contentTypes, outStream, themesZip, portalName, htmlContents,
