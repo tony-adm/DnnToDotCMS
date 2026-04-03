@@ -681,7 +681,7 @@ public class BundleWriterTests
         string result = BundleWriter.ConvertAscxToContainerHtml(ascx);
 
         Assert.DoesNotContain("runat=\"server\"", result);
-        Assert.Contains("<div id=\"Wrapper\">", result);
+        Assert.Contains("<div id=\"dnn_Wrapper\">", result);
     }
 
     [Fact]
@@ -693,7 +693,7 @@ public class BundleWriterTests
             <div id="siteWrapper"></div>
             """;
 
-        var (body, _) = BundleWriter.ConvertAscxToTemplateHtml(ascx);
+        var (body, _, _) = BundleWriter.ConvertAscxToTemplateHtml(ascx);
 
         Assert.DoesNotContain("<%@", body);
     }
@@ -705,7 +705,7 @@ public class BundleWriterTests
             <div><dnn:LOGO runat="server" id="dnnLogo" /></div>
             """;
 
-        var (body, _) = BundleWriter.ConvertAscxToTemplateHtml(ascx);
+        var (body, _, _) = BundleWriter.ConvertAscxToTemplateHtml(ascx);
 
         Assert.Contains("<img", body);
         Assert.DoesNotContain("dnn:LOGO", body);
@@ -718,9 +718,9 @@ public class BundleWriterTests
             <nav><dnn:MENU runat="server" MenuStyle="Suckerfish" /></nav>
             """;
 
-        var (body, _) = BundleWriter.ConvertAscxToTemplateHtml(ascx);
+        var (body, _, _) = BundleWriter.ConvertAscxToTemplateHtml(ascx);
 
-        Assert.Contains("<!-- Navigation -->", body);
+        Assert.Contains("dnn-nav", body);
         Assert.DoesNotContain("dnn:MENU", body);
     }
 
@@ -733,7 +733,7 @@ public class BundleWriterTests
             <div id="body"></div>
             """;
 
-        var (body, _) = BundleWriter.ConvertAscxToTemplateHtml(ascx);
+        var (body, _, _) = BundleWriter.ConvertAscxToTemplateHtml(ascx);
 
         Assert.DoesNotContain("dnn:STYLES", body);
         Assert.DoesNotContain("dnn:jQuery", body);
@@ -752,7 +752,7 @@ public class BundleWriterTests
             </div>
             """;
 
-        var (body, _) = BundleWriter.ConvertAscxToTemplateHtml(ascx);
+        var (body, _, _) = BundleWriter.ConvertAscxToTemplateHtml(ascx);
 
         Assert.Contains("id=\"siteWrapper\"", body);
         Assert.Contains("id=\"header\"", body);
@@ -766,7 +766,7 @@ public class BundleWriterTests
         // must appear in the template body so DotCMS loads the skin styles.
         const string ascx = """<div id="body"></div>""";
 
-        var (body, header) = BundleWriter.ConvertAscxToTemplateHtml(ascx, themeName: "Xcillion");
+        var (body, header, _) = BundleWriter.ConvertAscxToTemplateHtml(ascx, themeName: "Xcillion");
 
         Assert.Contains(@"<link rel=""stylesheet"" href=""/application/themes/Xcillion/skin.css""", body);
         Assert.Empty(header);
@@ -778,7 +778,7 @@ public class BundleWriterTests
         // Without a theme name no CSS link should be injected.
         const string ascx = """<div id="body"></div>""";
 
-        var (body, header) = BundleWriter.ConvertAscxToTemplateHtml(ascx);
+        var (body, header, _) = BundleWriter.ConvertAscxToTemplateHtml(ascx);
 
         Assert.DoesNotContain("<link", body);
         Assert.DoesNotContain("<link", header);
@@ -791,7 +791,7 @@ public class BundleWriterTests
         // Images/logo.png when a theme name is provided.
         const string ascx = """<div><dnn:LOGO runat="server" id="logo" /></div>""";
 
-        var (body, _) = BundleWriter.ConvertAscxToTemplateHtml(ascx, themeName: "Xcillion");
+        var (body, _, _) = BundleWriter.ConvertAscxToTemplateHtml(ascx, themeName: "Xcillion");
 
         Assert.Contains("/application/themes/Xcillion/Images/logo.png", body);
         Assert.DoesNotContain("dnn:LOGO", body);
@@ -803,7 +803,7 @@ public class BundleWriterTests
         // Without a theme name the <dnn:LOGO> fallback path /logo.png is used.
         const string ascx = """<div><dnn:LOGO runat="server" id="logo" /></div>""";
 
-        var (body, header) = BundleWriter.ConvertAscxToTemplateHtml(ascx);
+        var (body, header, _) = BundleWriter.ConvertAscxToTemplateHtml(ascx);
 
         Assert.Contains("/logo.png", body);
         Assert.DoesNotContain("dnn:LOGO", body);
@@ -824,7 +824,7 @@ public class BundleWriterTests
             <div id="body"></div>
             """;
 
-        var (body, header) = BundleWriter.ConvertAscxToTemplateHtml(ascx, themeName: "Xcillion");
+        var (body, header, _) = BundleWriter.ConvertAscxToTemplateHtml(ascx, themeName: "Xcillion");
 
         // CSS link must appear in body.
         Assert.Contains(
@@ -844,7 +844,7 @@ public class BundleWriterTests
             <div id="body"></div>
             """;
 
-        var (body, _) = BundleWriter.ConvertAscxToTemplateHtml(ascx, themeName: "Xcillion");
+        var (body, _, _) = BundleWriter.ConvertAscxToTemplateHtml(ascx, themeName: "Xcillion");
 
         // JS stays in the body (not the header).
         Assert.Contains(
@@ -863,7 +863,7 @@ public class BundleWriterTests
             <div id="body"></div>
             """;
 
-        var (body, header) = BundleWriter.ConvertAscxToTemplateHtml(ascx, themeName: "Xcillion");
+        var (body, header, _) = BundleWriter.ConvertAscxToTemplateHtml(ascx, themeName: "Xcillion");
 
         // Exactly one skin.css reference should appear (in body).
         int count = 0;
@@ -884,7 +884,7 @@ public class BundleWriterTests
             <div id="body"></div>
             """;
 
-        var (body, header) = BundleWriter.ConvertAscxToTemplateHtml(ascx);
+        var (body, header, _) = BundleWriter.ConvertAscxToTemplateHtml(ascx);
 
         Assert.DoesNotContain("DnnCssInclude", body);
         Assert.DoesNotContain("<link", body);
@@ -902,7 +902,7 @@ public class BundleWriterTests
         // the skin's ASCX file.  The converter must inject this link in the body.
         const string ascx = """<div id="body"></div>""";
 
-        var (body, header) = BundleWriter.ConvertAscxToTemplateHtml(
+        var (body, header, _) = BundleWriter.ConvertAscxToTemplateHtml(
             ascx, themeName: "Xcillion", skinName: "Home");
 
         Assert.Contains(
@@ -918,7 +918,7 @@ public class BundleWriterTests
         // duplicate the skin.css link already injected – it must be skipped.
         const string ascx = """<div id="body"></div>""";
 
-        var (body, header) = BundleWriter.ConvertAscxToTemplateHtml(
+        var (body, header, _) = BundleWriter.ConvertAscxToTemplateHtml(
             ascx, themeName: "Xcillion", skinName: "skin");
 
         int count = 0;
@@ -936,7 +936,7 @@ public class BundleWriterTests
         // should appear in the body – no per-skin link should be added.
         const string ascx = """<div id="body"></div>""";
 
-        var (body, header) = BundleWriter.ConvertAscxToTemplateHtml(
+        var (body, header, _) = BundleWriter.ConvertAscxToTemplateHtml(
             ascx, themeName: "Xcillion");
 
         Assert.Contains("skin.css", body);
@@ -951,7 +951,7 @@ public class BundleWriterTests
         // mirror DNN's loading order where global skin styles load first.
         const string ascx = """<div id="body"></div>""";
 
-        var (body, _) = BundleWriter.ConvertAscxToTemplateHtml(
+        var (body, _, _) = BundleWriter.ConvertAscxToTemplateHtml(
             ascx, themeName: "Xcillion", skinName: "Home");
 
         int skinCssIndex = body.IndexOf("skin.css", StringComparison.Ordinal);
@@ -972,7 +972,7 @@ public class BundleWriterTests
             <div id="body"></div>
             """;
 
-        var (body, header) = BundleWriter.ConvertAscxToTemplateHtml(
+        var (body, header, _) = BundleWriter.ConvertAscxToTemplateHtml(
             ascx, themeName: "Xcillion", skinName: "Home");
 
         int count = 0;
@@ -991,7 +991,7 @@ public class BundleWriterTests
         const string ascx = """<div id="body"></div>""";
         var available = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        var (body, _) = BundleWriter.ConvertAscxToTemplateHtml(
+        var (body, _, _) = BundleWriter.ConvertAscxToTemplateHtml(
             ascx, themeName: "Xcillion", availableThemeFiles: available);
 
         Assert.DoesNotContain("skin.css", body);
@@ -1009,7 +1009,7 @@ public class BundleWriterTests
             "application/themes/Xcillion/skin.css"
         };
 
-        var (body, _) = BundleWriter.ConvertAscxToTemplateHtml(
+        var (body, _, _) = BundleWriter.ConvertAscxToTemplateHtml(
             ascx, themeName: "Xcillion", skinName: "Home",
             availableThemeFiles: available);
 
@@ -1029,7 +1029,7 @@ public class BundleWriterTests
             "application/themes/Xcillion/Home.css"
         };
 
-        var (body, _) = BundleWriter.ConvertAscxToTemplateHtml(
+        var (body, _, _) = BundleWriter.ConvertAscxToTemplateHtml(
             ascx, themeName: "Xcillion", skinName: "Home",
             availableThemeFiles: available);
 
@@ -1101,10 +1101,237 @@ public class BundleWriterTests
         finally { File.Delete(path); }
     }
 
+    // ------------------------------------------------------------------
+    // SkinPath expression replacement
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_ReplacesSkinPathInScriptTags()
+    {
+        const string ascx = """
+            <%@ Control Inherits="DotNetNuke.UI.Skins.Skin" %>
+            <div id="ContentPane" runat="server"></div>
+            <script src="<%= SkinPath %>js/custom.js"></script>
+            <script src="<%= SkinPath %>/modal/modal.js"></script>
+            """;
+
+        var (body, _, _) = BundleWriter.ConvertAscxToTemplateHtml(
+            ascx, "ctr1", themeName: "fbot");
+
+        Assert.Contains(@"src=""/application/themes/fbot/js/custom.js""", body);
+        Assert.Contains(@"src=""/application/themes/fbot//modal/modal.js""", body);
+        Assert.DoesNotContain("SkinPath", body);
+    }
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_ReplacesSkinPathInLinkTags()
+    {
+        const string ascx = """
+            <%@ Control Inherits="DotNetNuke.UI.Skins.Skin" %>
+            <link src="<%= SkinPath %>/modal/modal.css">
+            <div id="ContentPane" runat="server"></div>
+            """;
+
+        var (body, _, _) = BundleWriter.ConvertAscxToTemplateHtml(
+            ascx, "ctr1", themeName: "fbot");
+
+        Assert.Contains(@"src=""/application/themes/fbot//modal/modal.css""", body);
+        Assert.DoesNotContain("SkinPath", body);
+    }
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_WithoutThemeName_SkinPathExpressionStripped()
+    {
+        // Without a theme name, SkinPath cannot be resolved; the generic
+        // CodeBlockRegex cleanup removes the expression.
+        const string ascx = """
+            <%@ Control Inherits="DotNetNuke.UI.Skins.Skin" %>
+            <script src="<%= SkinPath %>js/custom.js"></script>
+            """;
+
+        var (body, _, _) = BundleWriter.ConvertAscxToTemplateHtml(ascx);
+
+        Assert.DoesNotContain("SkinPath", body);
+        // Path is left relative (no theme base) after code-block stripping.
+        Assert.Contains(@"src=""js/custom.js""", body);
+    }
+
+    // ------------------------------------------------------------------
+    // Registered control resolution
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void ResolveRegisteredControls_InlinesLocalUserControl()
+    {
+        string path = Path.GetTempFileName() + ".zip";
+        try
+        {
+            using (var zip = ZipFile.Open(path, ZipArchiveMode.Create))
+            {
+                ZipArchiveEntry main = zip.CreateEntry("Skins/Test/Home.ascx");
+                using (var w = new StreamWriter(main.Open()))
+                    w.Write("""
+                        <%@ Register TagPrefix="FIS" TagName="Modal" Src="modal/modal.ascx" %>
+                        <div>main</div>
+                        <FIS:Modal id="Modal" runat="server" />
+                        """);
+
+                ZipArchiveEntry modal = zip.CreateEntry("Skins/Test/modal/modal.ascx");
+                using (var w = new StreamWriter(modal.Open()))
+                    w.Write("""
+                        <%@ Control Inherits="DotNetNuke.UI.Skins.SkinObjectBase" %>
+                        <div class="modal">Modal Content</div>
+                        """);
+            }
+
+            using var archive = ZipFile.OpenRead(path);
+            ZipArchiveEntry homeEntry = archive.GetEntry("Skins/Test/Home.ascx")!;
+            using var reader = new StreamReader(homeEntry.Open(), Encoding.UTF8);
+            string ascx = reader.ReadToEnd();
+
+            string result = BundleWriter.ResolveRegisteredControls(
+                ascx, "Skins/Test", archive);
+
+            Assert.Contains("<div class=\"modal\">Modal Content</div>", result);
+            Assert.DoesNotContain("<FIS:Modal", result);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void ResolveRegisteredControls_IgnoresSystemControls()
+    {
+        // Controls with Src starting with ~ (DNN system controls) should
+        // not be resolved — they are handled by other processing steps.
+        string path = Path.GetTempFileName() + ".zip";
+        try
+        {
+            using (var zip = ZipFile.Open(path, ZipArchiveMode.Create))
+            {
+                ZipArchiveEntry main = zip.CreateEntry("Skins/Test/Home.ascx");
+                using (var w = new StreamWriter(main.Open()))
+                    w.Write("""
+                        <%@ Register TagPrefix="dnn" TagName="LOGO" Src="~/Admin/Skins/Logo.ascx" %>
+                        <dnn:LOGO runat="server" />
+                        """);
+            }
+
+            using var archive = ZipFile.OpenRead(path);
+            ZipArchiveEntry homeEntry = archive.GetEntry("Skins/Test/Home.ascx")!;
+            using var reader = new StreamReader(homeEntry.Open(), Encoding.UTF8);
+            string ascx = reader.ReadToEnd();
+
+            string result = BundleWriter.ResolveRegisteredControls(
+                ascx, "Skins/Test", archive);
+
+            // System control tag should remain untouched.
+            Assert.Contains("<dnn:LOGO", result);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void ResolveRegisteredControls_RemovesTagWhenSourceNotFound()
+    {
+        string path = Path.GetTempFileName() + ".zip";
+        try
+        {
+            using (var zip = ZipFile.Open(path, ZipArchiveMode.Create))
+            {
+                ZipArchiveEntry main = zip.CreateEntry("Skins/Test/Home.ascx");
+                using (var w = new StreamWriter(main.Open()))
+                    w.Write("""
+                        <%@ Register TagPrefix="FIS" TagName="Missing" Src="missing/control.ascx" %>
+                        <div>main</div>
+                        <FIS:Missing id="M" runat="server" />
+                        """);
+            }
+
+            using var archive = ZipFile.OpenRead(path);
+            ZipArchiveEntry homeEntry = archive.GetEntry("Skins/Test/Home.ascx")!;
+            using var reader = new StreamReader(homeEntry.Open(), Encoding.UTF8);
+            string ascx = reader.ReadToEnd();
+
+            string result = BundleWriter.ResolveRegisteredControls(
+                ascx, "Skins/Test", archive);
+
+            Assert.DoesNotContain("<FIS:Missing", result);
+        }
+        finally { File.Delete(path); }
+    }
+
+    // ------------------------------------------------------------------
+    // Pane div layout attribute preservation
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_PreservesBootstrapClassesOnPaneDivs()
+    {
+        const string ascx = """
+            <%@ Control Inherits="DotNetNuke.UI.Skins.Skin" %>
+            <div class="promo">
+              <div class="row">
+                <div class="col-md-6 bg-dark" id="PromoLeft" runat="server"></div>
+                <div class="col-md-6" id="PromoRight" runat="server"></div>
+              </div>
+            </div>
+            """;
+
+        var (body, _, paneUuidMap) = BundleWriter.ConvertAscxToTemplateHtml(
+            ascx, "ctr1", themeName: "TestTheme");
+
+        // The wrapper divs with bootstrap classes should be preserved.
+        Assert.Contains("class=\"col-md-6 bg-dark\"", body);
+        Assert.Contains("class=\"col-md-6\"", body);
+        // #parseContainer should be inside the wrapper divs.
+        Assert.Contains("#parseContainer('ctr1',", body);
+        // Pane IDs should still be mapped.
+        Assert.True(paneUuidMap.ContainsKey("PromoLeft"));
+        Assert.True(paneUuidMap.ContainsKey("PromoRight"));
+    }
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_PlainPaneDivFullyReplaced()
+    {
+        // Pane divs without extra classes should be replaced entirely
+        // (no wrapper div) to keep existing behaviour.
+        const string ascx = """
+            <%@ Control Inherits="DotNetNuke.UI.Skins.Skin" %>
+            <div id="ContentPane" runat="server"></div>
+            """;
+
+        var (body, _, _) = BundleWriter.ConvertAscxToTemplateHtml(
+            ascx, "ctr1");
+
+        Assert.Contains("#parseContainer('ctr1',", body);
+        // There should be no leftover <div> wrapper around the #parseContainer.
+        Assert.DoesNotContain("<div", body);
+    }
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_MixedPaneDivsHandledCorrectly()
+    {
+        // Mix of pane divs with and without classes.
+        const string ascx = """
+            <%@ Control Inherits="DotNetNuke.UI.Skins.Skin" %>
+            <div id="ContentPane" runat="server"></div>
+            <div class="col-md-3" id="FooterLeft" runat="server"></div>
+            """;
+
+        var (body, _, paneUuidMap) = BundleWriter.ConvertAscxToTemplateHtml(
+            ascx, "ctr1");
+
+        // ContentPane (no extra class) — no wrapper
+        Assert.Contains("#parseContainer('ctr1', '1')", body);
+        // FooterLeft (has class) — wrapper preserved
+        Assert.Contains("class=\"col-md-3\"", body);
+        Assert.True(paneUuidMap.ContainsKey("ContentPane"));
+        Assert.True(paneUuidMap.ContainsKey("FooterLeft"));
+    }
+
     [Fact]
     public void Write_WithSsiIncludeInSkin_InlinedCssIncludesAppearInTemplateXml()
     {
-        // End-to-end: a skin ASCX that #includes an AddFiles.ascx containing
         // DnnCssInclude tags should produce a template with proper <link> tags
         // in the header field and <script> tags in the body.
         string path = Path.GetTempFileName() + ".zip";
@@ -2561,11 +2788,11 @@ public class BundleWriterTests
     }
 
     [Fact]
-    public void Write_WithPortalFiles_ImagesFolderFilesAlsoWrittenToApplicationImages()
+    public void Write_WithPortalFiles_ImagesFolderFilesWrittenToRootImages()
     {
-        // Files from the DNN "Images/" folder must also appear as static files under
-        // ROOT/application/images/ in the bundle so that DotCMS serves them directly
-        // from /application/images/ — the path referenced in converted HTML content.
+        // Files from the DNN "Images/" folder must appear as static files under
+        // ROOT/Images/ in the bundle so that DotCMS serves them at /Images/
+        // — the path referenced in converted HTML content.
         var files = new[]
         {
             new DnnPortalFile(
@@ -2577,14 +2804,14 @@ public class BundleWriterTests
 
         var (_, names) = WriteBundleWithFiles(files);
 
-        Assert.Contains("ROOT/application/images/logo.png", names);
+        Assert.Contains("ROOT/Images/logo.png", names);
     }
 
     [Fact]
-    public void Write_WithPortalFiles_RootFilesNotWrittenToApplicationImages()
+    public void Write_WithPortalFiles_RootFilesNotWrittenToImagesFolder()
     {
         // Files at the DNN site root (FolderPath = "") must NOT appear under
-        // ROOT/application/images/ — only Images/ sub-folder files go there.
+        // ROOT/Images/ — only Images/ sub-folder files go there.
         var files = new[]
         {
             new DnnPortalFile(
@@ -2596,14 +2823,14 @@ public class BundleWriterTests
 
         var (_, names) = WriteBundleWithFiles(files);
 
-        Assert.DoesNotContain(names, n => n.StartsWith("ROOT/application/images/"));
+        Assert.DoesNotContain(names, n => n.StartsWith("ROOT/Images/"));
     }
 
     [Fact]
-    public void Write_WithPortalFiles_ImagesFolderSubdirFilePreservesSubdirInApplicationImages()
+    public void Write_WithPortalFiles_ImagesFolderSubdirFilePreservesSubdirInRootImages()
     {
         // A file in a DNN sub-folder of Images/ (e.g. Images/Banners/) should land
-        // at ROOT/application/images/Banners/{filename} preserving the sub-structure.
+        // at ROOT/Images/Banners/{filename} preserving the sub-structure.
         var files = new[]
         {
             new DnnPortalFile(
@@ -2615,7 +2842,7 @@ public class BundleWriterTests
 
         var (_, names) = WriteBundleWithFiles(files);
 
-        Assert.Contains("ROOT/application/images/Banners/banner.jpg", names);
+        Assert.Contains("ROOT/Images/Banners/banner.jpg", names);
     }
 
     // ------------------------------------------------------------------
@@ -2795,20 +3022,28 @@ public class BundleWriterTests
     public void Write_WithPageAndMatchingContent_MultiTreeRelationTypeIsSequentialInteger()
     {
         // The relation_type in multiTree entries must match the second argument of
-        // the #parseContainer directives in the template body.  The template uses
-        // sequential integers ("1", "2", …), so the relation_type must do the same.
+        // the #parseContainer directives in the template body.  When content items
+        // carry a PaneName that matches a pane in the template, the relation_type
+        // is set to the pane's UUID slot.  When PaneName is empty, items placed
+        // on the same page share the first available slot.
         string tabId = "seq-rel-type-test";
         var pages = new[]
         {
             new DnnPortalPage(tabId, "Home", "Home", "", "//Home", 0, true, ""),
         };
+        // Use a template with two panes so each content item maps to a distinct slot.
+        string skinAscx = """
+            <%@ Control Inherits="DotNetNuke.UI.Skins.Skin" %>
+            <div id="ContentPane" runat="server"></div>
+            <div id="FooterPane" runat="server"></div>
+            """;
         var contents = new[]
         {
-            new DnnHtmlContent("First",  "<p>first</p>",  TabUniqueId: tabId),
-            new DnnHtmlContent("Second", "<p>second</p>", TabUniqueId: tabId),
+            new DnnHtmlContent("First",  "<p>first</p>",  TabUniqueId: tabId, PaneName: "ContentPane"),
+            new DnnHtmlContent("Second", "<p>second</p>", TabUniqueId: tabId, PaneName: "FooterPane"),
         };
 
-        string zipPath = BuildThemesZip();
+        string zipPath = BuildThemesZip(skinAscx: skinAscx);
         try
         {
             var (ms, names) = WriteBundleWithPagesAndContents(pages, contents,
@@ -2827,14 +3062,12 @@ public class BundleWriterTests
             }
 
             Assert.NotNull(pageXml);
-            // Both sequential relation_type values must appear in the page XML.
+            // Both relation_type values must appear: "1" for ContentPane, "2" for FooterPane.
             Assert.Contains("<string>relation_type</string>", pageXml!);
-            // "1" must appear as a relation_type value (first contentlet)
             int idx1 = pageXml!.IndexOf("<string>relation_type</string>", StringComparison.Ordinal);
             Assert.True(idx1 >= 0);
             string afterFirst = pageXml[(idx1 + "<string>relation_type</string>".Length)..];
             Assert.Contains("<string>1</string>", afterFirst);
-            // "2" must appear as a relation_type value (second contentlet)
             int idx2 = pageXml.IndexOf("<string>relation_type</string>", idx1 + 1, StringComparison.Ordinal);
             Assert.True(idx2 >= 0);
             string afterSecond = pageXml[(idx2 + "<string>relation_type</string>".Length)..];
@@ -3047,11 +3280,11 @@ public class BundleWriterTests
     // ------------------------------------------------------------------
 
     [Fact]
-    public void Write_WithPortalFiles_ImagesFolderPathWithoutSlashAlsoWrittenToApplicationImages()
+    public void Write_WithPortalFiles_ImagesFolderPathWithoutSlashAlsoWrittenToRootImages()
     {
         // DNN may store the folder path as "Images" (no trailing slash) in some
         // export versions.  The bundle writer must still place such files under
-        // ROOT/application/images/ so that converted HTML references resolve.
+        // ROOT/Images/ so that converted HTML references resolve.
         var files = new[]
         {
             new DnnPortalFile(
@@ -3064,14 +3297,14 @@ public class BundleWriterTests
 
         var (_, names) = WriteBundleWithFiles(files);
 
-        Assert.Contains("ROOT/application/images/logo.png", names);
+        Assert.Contains("ROOT/Images/logo.png", names);
     }
 
     [Fact]
     public void Write_WithPortalFiles_ImagesFolderSubdirPathWithoutSlashPreservesSubdir()
     {
         // Same normalisation for nested paths: "Images/Banners" (no trailing slash)
-        // must still produce ROOT/application/images/Banners/{filename}.
+        // must still produce ROOT/Images/Banners/{filename}.
         var files = new[]
         {
             new DnnPortalFile(
@@ -3084,7 +3317,7 @@ public class BundleWriterTests
 
         var (_, names) = WriteBundleWithFiles(files);
 
-        Assert.Contains("ROOT/application/images/Banners/hero.jpg", names);
+        Assert.Contains("ROOT/Images/Banners/hero.jpg", names);
     }
 
     // ------------------------------------------------------------------
@@ -3449,6 +3682,455 @@ public class BundleWriterTests
 
             // custom.js should still be written as a binary asset at the site root.
             Assert.Contains(names, n => n.StartsWith("assets/") && n.EndsWith("/custom.js"));
+        }
+        finally { File.Delete(zipPath); }
+    }
+
+    // ------------------------------------------------------------------
+    // Dynamic portal file linking – non-Images folders written to ROOT/
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Write_WithPortalFiles_PdfFolderFilesWrittenToRoot()
+    {
+        // Files in non-Images folders like PDFs/ must be written as static
+        // resources under ROOT/{folderPath}/ so that HTML references like
+        // {{PortalRoot}}PDFs/doc.pdf → /PDFs/doc.pdf resolve correctly.
+        var files = new[]
+        {
+            new DnnPortalFile(
+                "11111111-aaaa-bbbb-cccc-000000000001",
+                "22222222-aaaa-bbbb-cccc-000000000001",
+                "doc.pdf", "PDFs/", "application/pdf",
+                Encoding.UTF8.GetBytes("%PDF-1.4")),
+        };
+
+        var (_, names) = WriteBundleWithFiles(files);
+
+        Assert.Contains("ROOT/PDFs/doc.pdf", names);
+    }
+
+    [Fact]
+    public void Write_WithPortalFiles_CustomImageFolderWrittenToRoot()
+    {
+        // Folders with custom names (e.g. FisSlider-Images/) that don't start
+        // with Images/ must still be written as static resources under ROOT/.
+        var files = new[]
+        {
+            new DnnPortalFile(
+                "11111111-aaaa-bbbb-cccc-000000000002",
+                "22222222-aaaa-bbbb-cccc-000000000002",
+                "slide.jpg", "FisSlider-Images/", "image/jpeg",
+                [0xFF, 0xD8, 0xFF]),
+        };
+
+        var (_, names) = WriteBundleWithFiles(files);
+
+        Assert.Contains("ROOT/FisSlider-Images/slide.jpg", names);
+    }
+
+    [Fact]
+    public void Write_WithPortalFiles_RootLevelFilesWrittenToRoot()
+    {
+        // Root-level portal files (FolderPath = "") should be written to ROOT/
+        // so that {{PortalRoot}}file.css → /file.css resolves correctly.
+        var files = new[]
+        {
+            new DnnPortalFile(
+                "11111111-aaaa-bbbb-cccc-000000000003",
+                "22222222-aaaa-bbbb-cccc-000000000003",
+                "home.css", "", "text/css",
+                Encoding.UTF8.GetBytes("body { color: red; }")),
+        };
+
+        var (_, names) = WriteBundleWithFiles(files);
+
+        Assert.Contains("ROOT/home.css", names);
+    }
+
+    [Fact]
+    public void Write_WithPortalFiles_ContainersFolderNotWrittenToRoot()
+    {
+        // Files in Containers/ are theme-related (handled by export_themes.zip)
+        // and must NOT be written as static resources under ROOT/.
+        var files = new[]
+        {
+            new DnnPortalFile(
+                "11111111-aaaa-bbbb-cccc-000000000004",
+                "22222222-aaaa-bbbb-cccc-000000000004",
+                "Boxed.ascx", "Containers/FBOT/", "text/plain",
+                Encoding.UTF8.GetBytes("<div>container</div>")),
+        };
+
+        var (_, names) = WriteBundleWithFiles(files);
+
+        Assert.DoesNotContain(names, n => n == "ROOT/Containers/FBOT/Boxed.ascx");
+        // Must still be written as a FileAsset contentlet (binary + XML).
+        Assert.Contains(names, n => n.StartsWith("assets/") && n.EndsWith("/Boxed.ascx"));
+    }
+
+    [Fact]
+    public void Write_WithPortalFiles_SkinsFolderNotWrittenToRoot()
+    {
+        // Files in Skins/ are theme-related and must NOT be written as static
+        // resources under ROOT/.
+        var files = new[]
+        {
+            new DnnPortalFile(
+                "11111111-aaaa-bbbb-cccc-000000000005",
+                "22222222-aaaa-bbbb-cccc-000000000005",
+                "skin.css", "Skins/FBOT/", "text/css",
+                Encoding.UTF8.GetBytes("/* skin */")),
+        };
+
+        var (_, names) = WriteBundleWithFiles(files);
+
+        Assert.DoesNotContain(names, n => n == "ROOT/Skins/FBOT/skin.css");
+    }
+
+    [Fact]
+    public void Write_WithPortalFiles_FolderWithoutSlashStillWrittenToRoot()
+    {
+        // DNN may omit the trailing slash from folder paths.  The normalisation
+        // must still produce the correct ROOT/ entry.
+        var files = new[]
+        {
+            new DnnPortalFile(
+                "11111111-aaaa-bbbb-cccc-000000000006",
+                "22222222-aaaa-bbbb-cccc-000000000006",
+                "report.pdf", "PDFs",   // ← no trailing slash
+                "application/pdf",
+                Encoding.UTF8.GetBytes("%PDF-1.5")),
+        };
+
+        var (_, names) = WriteBundleWithFiles(files);
+
+        Assert.Contains("ROOT/PDFs/report.pdf", names);
+    }
+
+    // ----- ExtractThemeNameFromSkinSrc tests -----
+
+    [Theory]
+    [InlineData("[G]Skins/FidelityBankTexas/Home.ascx", "FidelityBankTexas")]
+    [InlineData("[L]Skins/Cavalier/Inner.ascx", "Cavalier")]
+    [InlineData("[G]Skins/Xcillion/Home.ascx", "Xcillion")]
+    [InlineData("[G]Skins\\Xcillion\\Home.ascx", "Xcillion")] // backslash paths
+    public void ExtractThemeNameFromSkinSrc_ReturnsThemeName(string skinSrc, string expected)
+    {
+        string? result = BundleWriter.ExtractThemeNameFromSkinSrc(skinSrc);
+        Assert.Equal(expected, result);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("Home.ascx")]
+    [InlineData("[G]Containers/Something/Box.ascx")]
+    public void ExtractThemeNameFromSkinSrc_ReturnsNull_WhenNoSkinsSegment(string skinSrc)
+    {
+        Assert.Null(BundleWriter.ExtractThemeNameFromSkinSrc(skinSrc));
+    }
+
+    // ------------------------------------------------------------------
+    // PaneUuidMap tests
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_ReturnsPaneUuidMap_ForMultiPaneSkin()
+    {
+        // A DNN skin with several named panes (header, content, footer zones)
+        // must produce a PaneUuidMap that maps each div id to its sequential
+        // #parseContainer UUID slot number.
+        const string ascx = """
+            <%@ Control Inherits="DotNetNuke.UI.Skins.Skin" %>
+            <div id="HeaderPane" runat="server"></div>
+            <div id="ContentPane" runat="server"></div>
+            <div id="FooterLeft" runat="server"></div>
+            <div id="FooterRight" runat="server"></div>
+            """;
+
+        var (body, _, paneUuidMap) = BundleWriter.ConvertAscxToTemplateHtml(
+            ascx, defaultContainerId: "container-1");
+
+        // All four pane ids must appear in the mapping.
+        Assert.Equal(4, paneUuidMap.Count);
+        Assert.True(paneUuidMap.ContainsKey("HeaderPane"));
+        Assert.True(paneUuidMap.ContainsKey("ContentPane"));
+        Assert.True(paneUuidMap.ContainsKey("FooterLeft"));
+        Assert.True(paneUuidMap.ContainsKey("FooterRight"));
+
+        // UUIDs must be sequential starting at 1.
+        Assert.Equal(1, paneUuidMap["HeaderPane"]);
+        Assert.Equal(2, paneUuidMap["ContentPane"]);
+        Assert.Equal(3, paneUuidMap["FooterLeft"]);
+        Assert.Equal(4, paneUuidMap["FooterRight"]);
+
+        // The template body must contain matching #parseContainer directives.
+        Assert.Contains("#parseContainer('container-1', '1')", body);
+        Assert.Contains("#parseContainer('container-1', '2')", body);
+        Assert.Contains("#parseContainer('container-1', '3')", body);
+        Assert.Contains("#parseContainer('container-1', '4')", body);
+    }
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_PaneUuidMapEmpty_WhenNoContainerId()
+    {
+        // When no container id is provided, pane divs are removed and no
+        // pane mapping is generated.
+        const string ascx = """
+            <%@ Control Inherits="DotNetNuke.UI.Skins.Skin" %>
+            <div id="ContentPane" runat="server"></div>
+            <div id="FooterPane" runat="server"></div>
+            """;
+
+        var (_, _, paneUuidMap) = BundleWriter.ConvertAscxToTemplateHtml(ascx);
+
+        Assert.Empty(paneUuidMap);
+    }
+
+    // ------------------------------------------------------------------
+    // dnn_ ID prefix tests
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_PaneDivIdGetsDnnPrefix()
+    {
+        // Pane divs with runat="server" should get the dnn_ prefix on
+        // their id attribute to match the rendered DNN page.
+        const string ascx = """
+            <%@ Control Inherits="DotNetNuke.UI.Skins.Skin" %>
+            <div class="col-md" id="FDIC" runat="server"></div>
+            """;
+
+        var (body, _, paneUuidMap) = BundleWriter.ConvertAscxToTemplateHtml(
+            ascx, "ctr1");
+
+        Assert.Contains("id=\"dnn_FDIC\"", body);
+        Assert.DoesNotContain("id=\"FDIC\"", body);
+        // paneUuidMap still uses the original (unprefixed) id for content mapping.
+        Assert.True(paneUuidMap.ContainsKey("FDIC"));
+    }
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_MultiplePaneDivsAllGetDnnPrefix()
+    {
+        const string ascx = """
+            <%@ Control Inherits="DotNetNuke.UI.Skins.Skin" %>
+            <div class="top-bar-bg">
+              <div class="row">
+                <div class="col-md" id="FDIC" runat="server"></div>
+                <div class="col-md" id="TopRightBar" runat="server"></div>
+              </div>
+            </div>
+            <div class="col-xl-2" id="login" runat="server"></div>
+            """;
+
+        var (body, _, _) = BundleWriter.ConvertAscxToTemplateHtml(
+            ascx, "ctr1");
+
+        Assert.Contains("id=\"dnn_FDIC\"", body);
+        Assert.Contains("id=\"dnn_TopRightBar\"", body);
+        Assert.Contains("id=\"dnn_login\"", body);
+    }
+
+    [Fact]
+    public void ConvertAscxToContainerHtml_RunatServerDivGetsDnnPrefix()
+    {
+        const string ascx = """<div id="Wrapper" runat="server"><p>text</p></div>""";
+
+        string result = BundleWriter.ConvertAscxToContainerHtml(ascx);
+
+        Assert.Contains("id=\"dnn_Wrapper\"", result);
+        Assert.DoesNotContain("id=\"Wrapper\"", result);
+        Assert.DoesNotContain("runat", result);
+    }
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_NonRunatDivsNotPrefixed()
+    {
+        // Divs without runat="server" should NOT get the dnn_ prefix.
+        const string ascx = """
+            <%@ Control Inherits="DotNetNuke.UI.Skins.Skin" %>
+            <div id="header" class="sticky-top">
+              <div id="ContentPane" runat="server"></div>
+            </div>
+            """;
+
+        var (body, _, _) = BundleWriter.ConvertAscxToTemplateHtml(
+            ascx, "ctr1");
+
+        // "header" does not have runat="server" so no prefix.
+        Assert.Contains("id=\"header\"", body);
+        Assert.DoesNotContain("id=\"dnn_header\"", body);
+    }
+
+    // ------------------------------------------------------------------
+    // Default container selection tests
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void ResolveDefaultContainerId_PrefersStandard()
+    {
+        var defs = new List<(string id, string inode, string name, string html, string themeName)>
+        {
+            ("aaa", "i1", "Accountcard", "<div>acc</div>", "theme1"),
+            ("bbb", "i2", "standard", "<div>std</div>", "theme1"),
+            ("ccc", "i3", "hpcard", "<div>hp</div>", "theme1"),
+        };
+
+        string result = BundleWriter.ResolveDefaultContainerId(defs);
+
+        Assert.Equal("bbb", result);
+    }
+
+    [Fact]
+    public void ResolveDefaultContainerId_FallsBackToFirst_WhenNoStandard()
+    {
+        var defs = new List<(string id, string inode, string name, string html, string themeName)>
+        {
+            ("aaa", "i1", "Accountcard", "<div>acc</div>", "theme1"),
+            ("ccc", "i2", "hpcard", "<div>hp</div>", "theme1"),
+        };
+
+        string result = BundleWriter.ResolveDefaultContainerId(defs);
+
+        Assert.Equal("aaa", result);
+    }
+
+    [Fact]
+    public void ResolveDefaultContainerId_ReturnsEmpty_WhenNoDefs()
+    {
+        var defs = new List<(string id, string inode, string name, string html, string themeName)>();
+
+        string result = BundleWriter.ResolveDefaultContainerId(defs);
+
+        Assert.Equal(string.Empty, result);
+    }
+
+    [Fact]
+    public void ResolveDefaultContainerId_CaseInsensitive()
+    {
+        var defs = new List<(string id, string inode, string name, string html, string themeName)>
+        {
+            ("aaa", "i1", "Accountcard", "<div>acc</div>", "theme1"),
+            ("bbb", "i2", "Standard", "<div>std</div>", "theme1"),
+        };
+
+        string result = BundleWriter.ResolveDefaultContainerId(defs);
+
+        Assert.Equal("bbb", result);
+    }
+
+    // ------------------------------------------------------------------
+    // Footer control replacement tests (COPYRIGHT, TERMS, PRIVACY)
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_CopyrightRendersVisibleHtml()
+    {
+        const string ascx = """
+            <%@ Control Inherits="DotNetNuke.UI.Skins.Skin" %>
+            <div class="footer"><dnn:COPYRIGHT ID="c1" runat="server" /></div>
+            """;
+
+        var (body, _, _) = BundleWriter.ConvertAscxToTemplateHtml(ascx);
+
+        Assert.Contains("Copyright", body);
+        Assert.DoesNotContain("<!-- Copyright -->", body);
+    }
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_TermsRendersVisibleLink()
+    {
+        const string ascx = """
+            <%@ Control Inherits="DotNetNuke.UI.Skins.Skin" %>
+            <dnn:TERMS ID="t1" runat="server" />
+            """;
+
+        var (body, _, _) = BundleWriter.ConvertAscxToTemplateHtml(ascx);
+
+        Assert.Contains("Terms of Use", body);
+        Assert.Contains("href=", body);
+        Assert.DoesNotContain("<!-- Terms", body);
+    }
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_PrivacyRendersVisibleLink()
+    {
+        const string ascx = """
+            <%@ Control Inherits="DotNetNuke.UI.Skins.Skin" %>
+            <dnn:PRIVACY ID="p1" runat="server" />
+            """;
+
+        var (body, _, _) = BundleWriter.ConvertAscxToTemplateHtml(ascx);
+
+        Assert.Contains("Privacy", body);
+        Assert.Contains("href=", body);
+        Assert.DoesNotContain("<!-- Privacy", body);
+    }
+
+    [Fact]
+    public void Write_WithFooterPaneContent_MultiTreeRelationTypeMatchesFooterSlot()
+    {
+        // Footer modules placed in high-numbered pane slots (e.g. slot 5 for
+        // FooterLeft in a skin with 5 runat="server" divs) must get the
+        // correct relation_type in multiTree so DotCMS renders the content
+        // in the matching #parseContainer directive.
+        string tabId = "footer-pane-test";
+        var pages = new[]
+        {
+            new DnnPortalPage(tabId, "Home", "Home", "", "//Home", 0, true, ""),
+        };
+        // Skin with content panes followed by 4 footer panes — mimics a
+        // real DNN skin like Xcillion Home.ascx.
+        string skinAscx = """
+            <%@ Control Inherits="DotNetNuke.UI.Skins.Skin" %>
+            <div id="HeaderPane" runat="server"></div>
+            <div id="ContentPane" runat="server"></div>
+            <div id="SidePane" runat="server"></div>
+            <footer>
+                <div id="FooterLeft" runat="server"></div>
+                <div id="FooterLeftCenter" runat="server"></div>
+                <div id="FooterRightCenter" runat="server"></div>
+                <div id="FooterRight" runat="server"></div>
+            </footer>
+            """;
+        // Content module lives in FooterLeft (slot 4) and FooterRight (slot 7).
+        var contents = new[]
+        {
+            new DnnHtmlContent("Footer 1", "<p>about</p>", TabUniqueId: tabId, PaneName: "FooterLeft"),
+            new DnnHtmlContent("Footer 4", "<p>logo</p>",  TabUniqueId: tabId, PaneName: "FooterRight"),
+        };
+
+        string zipPath = BuildThemesZip(skinAscx: skinAscx);
+        try
+        {
+            var (ms, names) = WriteBundleWithPagesAndContents(pages, contents,
+                themesZipPath: zipPath);
+
+            string? pageXml = null;
+            foreach (string name in names.Where(n =>
+                n.Contains("/1/") && n.EndsWith(".content.xml") && !n.Contains("host.xml")))
+            {
+                string candidate = ReadTarEntry(ms, name)!;
+                if (candidate.Contains("<assetSubType>htmlpageasset</assetSubType>"))
+                {
+                    pageXml = candidate;
+                    break;
+                }
+            }
+
+            Assert.NotNull(pageXml);
+            // FooterLeft is the 4th runat="server" div → slot 4.
+            // FooterRight is the 7th runat="server" div → slot 7.
+            int idx1 = pageXml!.IndexOf("<string>relation_type</string>", StringComparison.Ordinal);
+            Assert.True(idx1 >= 0);
+            string afterFirst = pageXml[(idx1 + "<string>relation_type</string>".Length)..];
+            Assert.Contains("<string>4</string>", afterFirst);
+
+            int idx2 = pageXml.IndexOf("<string>relation_type</string>", idx1 + 1, StringComparison.Ordinal);
+            Assert.True(idx2 >= 0);
+            string afterSecond = pageXml[(idx2 + "<string>relation_type</string>".Length)..];
+            Assert.Contains("<string>7</string>", afterSecond);
         }
         finally { File.Delete(zipPath); }
     }

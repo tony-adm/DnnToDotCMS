@@ -1,5 +1,7 @@
 using System.IO.Compression;
+using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using DnnToDotCms.Models;
 using LiteDB;
@@ -209,11 +211,46 @@ public static class DnnXmlParser
             tabUniqueIds[tabIdVal.AsInt32] = uidVal.AsGuid.ToString();
         }
 
-        // Build mappings of ModuleID → display title and ModuleID → tab UniqueId
-        // from ExportTabModule.  When a module appears on multiple tabs, the first
-        // association wins for the UniqueId lookup.
+        // Build mappings of ModuleID → display title and ModuleID → list of
+        // (tab UniqueId, PaneName) from ExportTabModule.  A module may appear
+        // on many tabs (e.g. shared footer modules), so we collect ALL
+        // associations together with the pane each module instance lives in.
         var moduleTitles    = new Dictionary<int, string>();
-        var moduleTabIds    = new Dictionary<int, string>();
+        var moduleTabPanes  = new Dictionary<int, List<(string tabUniqueId, string paneName, string containerSrc, string iconFile)>>();
+        var moduleSeenTabs  = new Dictionary<int, HashSet<string>>(); // dedup guard
+
+        // Build a mapping of FileId → folder/fileName from ExportFile so that
+        // IconFile values like "FileID=58791" can be resolved to actual paths.
+        // Also collect image files grouped by folder so FisSlider modules can
+        // have a carousel generated from any slider-named image folders.
+        var fileIdPaths = new Dictionary<int, string>();
+        var imageFilesByFolder = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        ILiteCollection<BsonDocument> exportFiles = db.GetCollection("ExportFile");
+        foreach (BsonDocument doc in exportFiles.FindAll())
+        {
+            if (!doc.TryGetValue("FileId", out BsonValue fIdVal)) continue;
+            string folder = doc.TryGetValue("Folder", out BsonValue folderVal)
+                ? (folderVal.AsString ?? string.Empty) : string.Empty;
+            string fileName = doc.TryGetValue("FileName", out BsonValue fnVal)
+                ? (fnVal.AsString ?? string.Empty) : string.Empty;
+            if (!string.IsNullOrEmpty(fileName))
+                fileIdPaths[fIdVal.AsInt32] = folder + fileName;
+
+            // Collect image files for slider carousel generation.
+            string contentType = doc.TryGetValue("ContentType", out BsonValue ctVal)
+                ? (ctVal.AsString ?? string.Empty) : string.Empty;
+            if (contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrEmpty(folder) && !string.IsNullOrEmpty(fileName))
+            {
+                if (!imageFilesByFolder.TryGetValue(folder, out var imgs))
+                {
+                    imgs = [];
+                    imageFilesByFolder[folder] = imgs;
+                }
+                imgs.Add(folder + fileName);
+            }
+        }
+
         ILiteCollection<BsonDocument> tabModules = db.GetCollection("ExportTabModule");
         foreach (BsonDocument doc in tabModules.FindAll())
         {
@@ -232,12 +269,50 @@ public static class DnnXmlParser
             if (doc.TryGetValue("TabID", out BsonValue tabIdVal)
                 && tabUniqueIds.TryGetValue(tabIdVal.AsInt32, out string? tabUniqueId))
             {
-                moduleTabIds.TryAdd(moduleId, tabUniqueId);
+                string paneName = doc.TryGetValue("PaneName", out BsonValue paneVal)
+                    ? (paneVal.AsString ?? string.Empty)
+                    : string.Empty;
+
+                string containerSrc = doc.TryGetValue("ContainerSrc", out BsonValue cVal)
+                    ? (cVal.AsString ?? string.Empty)
+                    : string.Empty;
+
+                // Resolve IconFile: may be a path like "Images/foo.png" or
+                // a reference like "FileID=58791".
+                string iconFile = doc.TryGetValue("IconFile", out BsonValue iVal)
+                    ? (iVal.AsString ?? string.Empty)
+                    : string.Empty;
+                if (iconFile.StartsWith("FileID=", StringComparison.OrdinalIgnoreCase)
+                    && int.TryParse(iconFile.AsSpan("FileID=".Length), out int fid)
+                    && fileIdPaths.TryGetValue(fid, out string? resolvedPath))
+                {
+                    iconFile = resolvedPath;
+                }
+
+                if (!moduleTabPanes.TryGetValue(moduleId, out var tabPanes))
+                {
+                    tabPanes = [];
+                    moduleTabPanes[moduleId] = tabPanes;
+                    moduleSeenTabs[moduleId] = [];
+                }
+                // Avoid duplicate tab associations for the same module.
+                if (!moduleSeenTabs.TryGetValue(moduleId, out var seen))
+                {
+                    seen = [];
+                    moduleSeenTabs[moduleId] = seen;
+                }
+                if (seen.Add(tabUniqueId))
+                    tabPanes.Add((tabUniqueId, paneName, containerSrc, iconFile));
             }
         }
 
         var results = new List<DnnHtmlContent>();
         ILiteCollection<BsonDocument> moduleContents = db.GetCollection("ExportModuleContent");
+
+        // Track which modules have content in ExportModuleContent so we can
+        // create placeholder entries for modules that don't (e.g. custom
+        // modules like FisSlider that store data in their own SQL tables).
+        var modulesWithContent = new HashSet<int>();
 
         foreach (BsonDocument doc in moduleContents.FindAll())
         {
@@ -253,13 +328,104 @@ public static class DnnXmlParser
                 continue;
 
             int moduleId = moduleIdVal.AsInt32;
+            modulesWithContent.Add(moduleId);
             moduleTitles.TryGetValue(moduleId,    out string? title);
-            moduleTabIds.TryGetValue(moduleId,    out string? tabUniqueId);
+            string displayTitle = string.IsNullOrWhiteSpace(title) ? "Content" : title;
 
-            results.Add(new DnnHtmlContent(
-                Title:       string.IsNullOrWhiteSpace(title) ? "Content" : title,
-                HtmlBody:    htmlBody,
-                TabUniqueId: tabUniqueId ?? string.Empty));
+            // Create a content entry for EVERY tab the module appears on.
+            // Shared modules (e.g. footer) appear on many tabs in DNN and
+            // their content must be present on each corresponding DotCMS page.
+            if (moduleTabPanes.TryGetValue(moduleId, out var associatedTabPanes) && associatedTabPanes.Count > 0)
+            {
+                foreach (var (tabUniqueId, paneName, containerSrc, iconFile) in associatedTabPanes)
+                {
+                    results.Add(new DnnHtmlContent(
+                        Title:       displayTitle,
+                        HtmlBody:    htmlBody,
+                        TabUniqueId: tabUniqueId,
+                        PaneName:    paneName,
+                        ContainerSrc: containerSrc,
+                        IconFile:    iconFile));
+                }
+            }
+            else
+            {
+                // Module has no tab association; include it anyway so it
+                // appears in the bundle even if unlinked to a page.
+                results.Add(new DnnHtmlContent(
+                    Title:       displayTitle,
+                    HtmlBody:    htmlBody,
+                    TabUniqueId: string.Empty));
+            }
+        }
+
+        // Build a mapping of ModuleID → FriendlyName from ExportModule so
+        // placeholder entries for non-HTML modules include the module type.
+        var moduleFriendlyNames = new Dictionary<int, string>();
+        ILiteCollection<BsonDocument> exportModules = db.GetCollection("ExportModule");
+        foreach (BsonDocument doc in exportModules.FindAll())
+        {
+            if (!doc.TryGetValue("ModuleID", out BsonValue midVal)) continue;
+            string fn = doc.TryGetValue("FriendlyName", out BsonValue fnVal)
+                ? (fnVal.AsString ?? string.Empty) : string.Empty;
+            if (!string.IsNullOrWhiteSpace(fn))
+                moduleFriendlyNames[midVal.AsInt32] = fn;
+        }
+
+        // Create entries for modules that have page/pane associations but no
+        // content in ExportModuleContent (e.g. custom modules like FisSlider
+        // that store data in their own SQL tables).  FisSlider modules receive
+        // a Bootstrap 5 carousel populated with any slider images found in the
+        // portal file export; other custom modules get a generic placeholder.
+        foreach (var (moduleId, tabPanes) in moduleTabPanes)
+        {
+            if (modulesWithContent.Contains(moduleId))
+                continue;
+
+            moduleTitles.TryGetValue(moduleId, out string? title);
+            string displayTitle = string.IsNullOrWhiteSpace(title) ? "Content" : title;
+
+            moduleFriendlyNames.TryGetValue(moduleId, out string? friendlyName);
+            string moduleType = string.IsNullOrWhiteSpace(friendlyName) ? "Custom Module" : friendlyName;
+
+            string body;
+            if (string.Equals(moduleType, "FisSlider", StringComparison.OrdinalIgnoreCase))
+            {
+                // Collect images from portal folders whose name contains "slider"
+                // (case-insensitive), e.g. "FisSlider-Images/".  Sort them so
+                // the carousel order is deterministic across runs.
+                List<string> sliderImages = imageFilesByFolder
+                    .Where(kv => kv.Key.Contains("slider", StringComparison.OrdinalIgnoreCase))
+                    .SelectMany(kv => kv.Value)
+                    .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                body = BuildSliderHtml(displayTitle, sliderImages);
+            }
+            else
+            {
+                // Generic placeholder for other custom modules so that content
+                // editors know what needs to be recreated in DotCMS.
+                string escapedType  = System.Security.SecurityElement.Escape(moduleType) ?? moduleType;
+                string escapedTitle = System.Security.SecurityElement.Escape(displayTitle) ?? displayTitle;
+                body =
+                    $"""
+                    <div class="dnn-module-placeholder" data-module-type="{escapedType}">
+                      <p><strong>{escapedType}</strong>: {escapedTitle}</p>
+                      <p><em>This content was managed by a custom DNN module and needs to be recreated in DotCMS.</em></p>
+                    </div>
+                    """;
+            }
+
+            foreach (var (tabUniqueId, paneName, containerSrc, iconFile) in tabPanes)
+            {
+                results.Add(new DnnHtmlContent(
+                    Title:        displayTitle,
+                    HtmlBody:     body,
+                    TabUniqueId:  tabUniqueId,
+                    PaneName:     paneName,
+                    ContainerSrc: containerSrc,
+                    IconFile:     iconFile));
+            }
         }
 
         return results;
@@ -352,6 +518,100 @@ public static class DnnXmlParser
 
 
     /// <summary>
+    /// Builds a Bootstrap 5 carousel (<c>div.carousel</c>) for a FisSlider
+    /// module instance.  When <paramref name="imagePaths"/> is empty an empty
+    /// carousel structure ready to be configured in DotCMS is produced.
+    /// Each slide uses the image filename (without extension) as the caption
+    /// heading — the only slide-specific text available from DNN exports.
+    /// FisSlider slide descriptions and link URLs are stored in a custom SQL
+    /// table (<c>FisSlider_Slides</c>) that is not included in DNN exports,
+    /// so those fields are omitted.
+    /// </summary>
+    /// <param name="title">
+    /// The DNN module title — used to derive a stable, unique HTML element ID
+    /// for the carousel so that prev/next controls bind to the correct widget.
+    /// </param>
+    /// <param name="imagePaths">
+    /// Zero or more portal-relative image paths found in slider-named folders
+    /// (e.g. <c>FisSlider-Images/slide.jpg</c>).  Each path is prefixed with
+    /// <c>/</c> so it resolves from the DotCMS site root.
+    /// </param>
+    private static string BuildSliderHtml(string title, IReadOnlyList<string> imagePaths)
+    {
+        // Derive a safe HTML id attribute value from the module title.
+        // Include a short SHA-256 hash of the original title to prevent
+        // collisions between sliders whose titles share all alphanumeric chars
+        // (e.g. "Banner #1" and "Banner $1" would both normalise to "banner1").
+        string safeName = Regex.Replace(title, @"[^a-zA-Z0-9]", string.Empty).ToLowerInvariant();
+        if (string.IsNullOrEmpty(safeName)) safeName = "slider";
+        byte[] hashBytes = System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(title));
+        string shortHash = Convert.ToHexString(hashBytes)[..8].ToLowerInvariant();
+        string carouselId = $"dnn-slider-{safeName}-{shortHash}";
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"""<div id="{carouselId}" class="carousel slide" data-bs-ride="carousel">""");
+
+        if (imagePaths.Count > 0)
+        {
+            // Carousel indicators (navigation dots).
+            sb.AppendLine("""  <div class="carousel-indicators">""");
+            for (int i = 0; i < imagePaths.Count; i++)
+            {
+                string extraAttrs = i == 0 ? " class=\"active\" aria-current=\"true\"" : string.Empty;
+                sb.AppendLine($"""    <button type="button" data-bs-target="#{carouselId}" data-bs-slide-to="{i}"{extraAttrs} aria-label="Slide {i + 1}"></button>""");
+            }
+            sb.AppendLine("  </div>");
+
+            // Carousel slides.
+            sb.AppendLine("""  <div class="carousel-inner">""");
+            for (int i = 0; i < imagePaths.Count; i++)
+            {
+                string activeClass = i == 0 ? " active" : string.Empty;
+                string src = "/" + imagePaths[i].TrimStart('/');
+                // Use the filename (without extension) as alt text; it is more
+                // descriptive than a generic "Slide N" and can be refined by
+                // content editors in DotCMS after import.
+                string altText = Path.GetFileNameWithoutExtension(imagePaths[i]);
+                if (string.IsNullOrWhiteSpace(altText)) altText = $"Slide {i + 1}";
+                sb.AppendLine($"""    <div class="carousel-item{activeClass}">""");
+                sb.AppendLine($"""      <img src="{src}" class="d-block w-100" alt="{altText}">""");
+                // Caption overlay using the image filename as the slide title.
+                // FisSlider stores slide descriptions and links in its own SQL
+                // tables which are not included in DNN exports, so only the
+                // title (derived from the image filename) is populated here.
+                sb.AppendLine("""      <div class="carousel-caption d-none d-md-block">""");
+                sb.AppendLine($"""        <h5>{altText}</h5>""");
+                sb.AppendLine("      </div>");
+                sb.AppendLine("    </div>");
+            }
+            sb.AppendLine("  </div>");
+        }
+        else
+        {
+            // No images found in the export — produce an empty carousel shell
+            // that content editors can populate directly inside DotCMS.
+            sb.AppendLine("""  <div class="carousel-inner">""");
+            sb.AppendLine("""    <div class="carousel-item active">""");
+            sb.AppendLine("    </div>");
+            sb.AppendLine("  </div>");
+        }
+
+        // Previous / next controls.
+        sb.AppendLine($"""  <button class="carousel-control-prev" type="button" data-bs-target="#{carouselId}" data-bs-slide="prev">""");
+        sb.AppendLine("""    <span class="carousel-control-prev-icon" aria-hidden="true"></span>""");
+        sb.AppendLine("""    <span class="visually-hidden">Previous</span>""");
+        sb.AppendLine("  </button>");
+        sb.AppendLine($"""  <button class="carousel-control-next" type="button" data-bs-target="#{carouselId}" data-bs-slide="next">""");
+        sb.AppendLine("""    <span class="carousel-control-next-icon" aria-hidden="true"></span>""");
+        sb.AppendLine("""    <span class="visually-hidden">Next</span>""");
+        sb.AppendLine("  </button>");
+        sb.Append("</div>");
+
+        return sb.ToString();
+    }
+
+    /// <summary>
     /// Extracts and HTML-decodes the content stored inside a DNN HTML module's
     /// <c>&lt;htmltext&gt;&lt;content&gt;&lt;![CDATA[…]]&gt;&lt;/content&gt;&lt;/htmltext&gt;</c>
     /// XML payload.  Returns <see langword="null"/> when the input cannot be
@@ -372,17 +632,13 @@ public static class DnnXmlParser
             if (string.IsNullOrWhiteSpace(decoded))
                 return null;
 
-            // Replace the DNN portal-root token {{PortalRoot}} with valid DotCMS paths.
+            // Replace the DNN portal-root token {{PortalRoot}} with "/".
             // In DNN, {{PortalRoot}} expands to "/Portals/{id}/" at runtime.
-            // After migration, files in the DNN Images/ folder are served from the DotCMS
-            // static resource directory /application/images/, so that specific prefix is
-            // replaced first (more specific wins) to produce correct image URLs.
-            // e.g. "{{PortalRoot}}Images/logo.png" → "/application/images/logo.png"
-            decoded = decoded.Replace("{{PortalRoot}}Images/", "/application/images/", StringComparison.OrdinalIgnoreCase);
-
-            // Replace any remaining portal-root tokens (non-Images paths) with the
-            // site root so other asset references stay valid.
-            // e.g. "{{PortalRoot}}home.css" → "/home.css"
+            // After migration, portal files are imported as DotCMS FileAsset
+            // contentlets whose folder path mirrors the original DNN structure
+            // (e.g. /Images/, /Documents/), so the token simply becomes "/".
+            // e.g. "{{PortalRoot}}Images/logo.png" → "/Images/logo.png"
+            //      "{{PortalRoot}}home.css"         → "/home.css"
             decoded = decoded.Replace("{{PortalRoot}}", "/", StringComparison.OrdinalIgnoreCase);
 
             return decoded.Trim();
