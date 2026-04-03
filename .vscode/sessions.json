@@ -1,0 +1,111 @@
+{
+    "$schema": "https://cdn.statically.io/gh/nguyenngoclongdev/cdn/main/schema/v11/terminal-keeper.json",
+    "theme": "tribe",
+    "active": "dotCMS-dev",
+    "activateOnStartup": true,
+    "keepExistingTerminals": false,
+    "sessions": {
+        "dotCMS-dev": [
+            {
+                "name": "dotcms-container",
+                "icon": "server",
+                "color": "terminal.ansiGreen",
+                "autoExecuteCommands": true,
+                "cwd": "C:\\Repos\\DotCMS",
+                "commands": [
+                    "docker compose exec -u 0 dotcms bash -lc \"clear && echo 'Inside dotCMS docker container' && echo '  # You are now running as root' && exec bash\""
+                ]
+            },
+            {
+                "name": "Docker-Compose DotCMS",
+                "icon": "cloud",
+                "color": "terminal.ansiYellow",
+                "autoExecuteCommands": true,
+                "cwd": "/mnt/c/Repos/DotCMS",
+                "commands": [
+                    "bash -lc \"cd /mnt/c/Repos/DotCMS && clear && echo 'Run when ready:' && echo '  docker compose logs dotcms -f --tail=10' && echo '  docker compose up -d' && exec bash\""
+                ]
+            },
+            {
+                "name": "Workspace DotCMS",
+                "icon": "repo",
+                "color": "terminal.ansiWhite",
+                "autoExecuteCommands": true,
+                "cwd": "/mnt/c/Repos/DotCMS/dotcms-workspace",
+                "commands": [
+                    "bash -lc \"cd /mnt/c/Repos/DotCMS/dotcms-workspace && clear && echo 'Run when ready:' && echo '  ./update-local.sh --overwrite' && echo '  ./update-local.sh --pull' && exec bash\""
+                ]
+            },
+            {
+                "name": "Developer Browser",
+                "icon": "search",
+                "color": "terminal.ansiRed",
+                "autoExecuteCommands": true,
+                "cwd": "C:\\Repos\\Browser",
+                "commands": [
+                    "Clear-Host; Write-Host 'Developer Web Browser Session'; Write-Host 'Run when ready:'; Write-Host '  npm run start' -ForegroundColor Cyan"
+                ]
+            },
+            {
+                "name": "DNN to DotCMS Migration",
+                "color": "terminal.ansiYellow",
+                "autoExecuteCommands": true,
+                "cwd": "C:\\Repos\\DnnToDotcms",
+                "commands": [
+                    "Clear-Host; Write-Host 'DNN to DotCMS Migration Session'; Write-Host 'Run when ready:'; Write-Host '  dotnet run --project DnnToDotCms -- example/2026-03-29_01-49-26 --output test-site.tar.gz' -ForegroundColor Blue; Write-Host '  git pull origin main' -ForegroundColor Yellow"
+                ]
+            }
+        ],
+        "emailScript-dev": [
+            {
+                "name": "demo-emailScript",
+                "icon": "mail",
+                "color": "terminal.ansiMagenta",
+                "autoExecuteCommands": true,
+                "cwd": "/mnt/c/Repos/DotCMS",
+                "commands": [
+                    "bash -lc \"cd /mnt/c/Repos/DotCMS && clear && echo 'Email Script Dev Session' && echo 'Run when ready:' && echo '  ls -la' && echo '  # (replace with your email script command)' && exec bash\""
+                ]
+            },
+            [
+                {
+                    "name": "plugin:Results",
+                    "icon": "package",
+                    "color": "terminal.ansiBlue",
+                    "autoExecuteCommands": true,
+                    "cwd": "/mnt/c/Repos/DotCMS/dev/plugin-seeds/com.fis.formresults",
+                    "commands": [
+                        "bash -lc \"cd /mnt/c/Repos/DotCMS/dev/plugin-seeds/com.fis.formresults && clear && echo 'Run when ready:' && echo '  mvn -DskipTests clean package' && exec bash\""
+                    ]
+                },
+                {
+                    "name": "plugin:Endpoint",
+                    "icon": "package",
+                    "color": "terminal.ansiBlue",
+                    "autoExecuteCommands": true,
+                    "cwd": "/mnt/c/Repos/DotCMS/dev/plugin-seeds/com.fis.formendpoint",
+                    "commands": [
+                        "bash -lc \"cd /mnt/c/Repos/DotCMS/dev/plugin-seeds/com.fis.formendpoint && clear && echo 'Run when ready:' && echo '  mvn -DskipTests clean package' && exec bash\""
+                    ]
+                }
+            ],
+            {
+                "name": "build-tools",
+                "icon": "tools",
+                "color": "terminal.ansiCyan",
+                "autoExecuteCommands": true,
+                "cwd": "/mnt/c/Repos/DotCMS/dev/dotcms-dev-workspace/build-tools",
+                "commands": [
+                    "bash -lc \"cd /mnt/c/Repos/DotCMS/dev/dotcms-dev-workspace/build-tools && clear && echo 'Run when ready:' && echo '  npm run build' && exec bash\""
+                ]
+            },
+            {
+                "name": "Powershell DotCMS",
+                "color": "terminal.ansiBlue",
+                "autoExecuteCommands": true,
+                "cwd": "C:\\Repos\\DotCMS",
+                "commands": []
+            }
+        ]
+    }
+}
