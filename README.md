@@ -1,18 +1,25 @@
 # DnnToDotCMS
 
-A C# (.NET 8) command-line tool that converts **DNN (DotNetNuke)** site exports into a **DotCMS push-publish site bundle** (`.tar.gz`) that can be uploaded directly to DotCMS.
+A C# (.NET 8) command-line tool that converts **DNN (DotNetNuke)** site exports — or **any live website** — into a **DotCMS push-publish site bundle** (`.tar.gz`) that can be uploaded directly to DotCMS.
 
 ## Overview
 
-DNN organises content in *modules* placed on pages. DotCMS organises content in *Content Types* with structured fields. This tool reads a DNN export and produces a DotCMS-compatible push-publish bundle containing:
+DNN organises content in *modules* placed on pages. DotCMS organises content in *Content Types* with structured fields. This tool reads a DNN export — or crawls a live website — and produces a DotCMS-compatible push-publish bundle containing:
 
-- **Content types** — converted from DNN module definitions
+- **Content types** — converted from DNN module definitions (or generated from crawled HTML)
 - **Containers** — converted from DNN container ASCX templates (`.containers.container.xml`)
 - **Templates/Layouts** — converted from DNN skin ASCX templates (`.template.template.xml`)
 - **Static theme assets** — CSS, JS, images and fonts from the DNN skin
+- **Crawled pages & assets** — HTML content and static files downloaded from a live website (crawl mode)
 
 ## Features
 
+- **Crawl mode** (`--crawl <url>`): crawl a live website and produce a DotCMS bundle from its content. The crawler:
+  - Follows same-origin links starting from the given URL
+  - Extracts page titles, meta descriptions, and body content
+  - Downloads static assets (images, CSS, JS, fonts, favicons)
+  - Respects a configurable page limit (`--max-pages`, default 200)
+  - Produces the same bundle format as the DNN export mode
 - Parses three DNN export formats:
   - **Official site export folder** — the folder produced by DNN's built-in Export/Import feature (e.g. `2026-03-29_01-49-26/`). The tool reads `export_packages.zip` inside the folder, extracts every `Module_*.resources` archive, and parses the `.dnn` manifest inside each one.
   - **Package manifests** (`.dnn` files) — the standard DNN module-installation format
