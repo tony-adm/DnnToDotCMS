@@ -74,7 +74,13 @@ public static class CrawlToBundleConverter
     /// <see cref="Bundle.BundleWriter"/> can link content items to their
     /// pages via <c>multiTree</c> entries — matching the export path.
     /// </summary>
-    public static (IReadOnlyList<DnnHtmlContent> HtmlContents, IReadOnlyList<DnnPortalPage> PortalPages) Convert(CrawlResult crawlResult)
+    /// <param name="crawlResult">The crawl result.</param>
+    /// <param name="themeName">
+    /// Optional theme name. When provided, asset references in HTML bodies
+    /// are rewritten to <c>/application/themes/{themeName}/</c> instead of
+    /// <c>/application/</c>.
+    /// </param>
+    public static (IReadOnlyList<DnnHtmlContent> HtmlContents, IReadOnlyList<DnnPortalPage> PortalPages) Convert(CrawlResult crawlResult, string? themeName = null)
     {
         var htmlContents = new List<DnnHtmlContent>(crawlResult.Pages.Count);
         var portalPages  = new List<DnnPortalPage>(crawlResult.Pages.Count);
@@ -88,8 +94,8 @@ public static class CrawlToBundleConverter
             string title = string.IsNullOrWhiteSpace(page.Title) ? slug : page.Title;
 
             // Rewrite asset references in the HTML body so they point to
-            // the /application/ folder where crawled assets are placed.
-            string rewrittenBody = RewriteAssetPaths(page.HtmlBody, crawlResult);
+            // the correct application folder where crawled assets are placed.
+            string rewrittenBody = RewriteAssetPaths(page.HtmlBody, crawlResult, themeName);
 
             htmlContents.Add(new DnnHtmlContent(
                 Title:       title,
@@ -123,9 +129,14 @@ public static class CrawlToBundleConverter
     /// crawl result.  The <c>TabUniqueId</c> of each content item is set to the
     /// matching page's <c>UniqueId</c> (same positional index).
     /// </param>
+    /// <param name="themeName">
+    /// Optional theme name. When provided, asset references in HTML bodies
+    /// are rewritten to <c>/application/themes/{themeName}/</c>.
+    /// </param>
     public static IReadOnlyList<DnnHtmlContent> ConvertPages(
         CrawlResult crawlResult,
-        IReadOnlyList<DnnPortalPage>? portalPages = null)
+        IReadOnlyList<DnnPortalPage>? portalPages = null,
+        string? themeName = null)
     {
         if (portalPages is not null && portalPages.Count != crawlResult.Pages.Count)
             throw new ArgumentException(
@@ -140,7 +151,7 @@ public static class CrawlToBundleConverter
                     : "";
                 return new DnnHtmlContent(
                     Title:       string.IsNullOrWhiteSpace(p.Title) ? DeriveSlug(p.Url) : p.Title,
-                    HtmlBody:    RewriteAssetPaths(p.HtmlBody, crawlResult),
+                    HtmlBody:    RewriteAssetPaths(p.HtmlBody, crawlResult, themeName),
                     TabUniqueId: tabUniqueId,
                     PaneName:    "ContentPane");
             })
@@ -177,8 +188,17 @@ public static class CrawlToBundleConverter
     /// that <see cref="Bundle.BundleWriter"/> can write as a <c>FileAsset</c>
     /// contentlet.
     /// </summary>
-    public static IReadOnlyList<DnnPortalFile> ConvertAssets(CrawlResult crawlResult)
+    /// <param name="crawlResult">The crawl result.</param>
+    /// <param name="themeName">
+    /// Optional theme name. When provided, assets are placed under
+    /// <c>application/themes/{themeName}/</c> instead of <c>application/</c>.
+    /// </param>
+    public static IReadOnlyList<DnnPortalFile> ConvertAssets(CrawlResult crawlResult, string? themeName = null)
     {
+        string folderRoot = string.IsNullOrWhiteSpace(themeName)
+            ? "application/"
+            : $"application/themes/{themeName}/";
+
         return crawlResult.Assets
             .Select(a =>
             {
@@ -187,10 +207,10 @@ public static class CrawlToBundleConverter
                 if (folder.Length > 0 && !folder.EndsWith('/'))
                     folder += "/";
 
-                // Place all crawled assets inside the /application/ folder
-                // so they match the DNN-export convention where theme files
-                // live under /application/themes/{themeName}/.
-                folder = "application/" + folder;
+                // Place all crawled assets inside the theme folder so that
+                // the DotCMS bundle has proper theme structure matching the
+                // export path convention.
+                folder = folderRoot + folder;
 
                 return new DnnPortalFile(
                     UniqueId:    Guid.NewGuid().ToString(),
@@ -205,14 +225,19 @@ public static class CrawlToBundleConverter
 
     /// <summary>
     /// Rewrite asset URL references in the HTML body so they point to
-    /// <c>/application/{relativePath}</c> instead of <c>/{relativePath}</c>,
-    /// matching the folder structure where <see cref="ConvertAssets"/>
-    /// places crawled files.
+    /// the correct folder where <see cref="ConvertAssets"/> places files.
+    /// When <paramref name="themeName"/> is provided, paths use
+    /// <c>/application/themes/{themeName}/{relativePath}</c>; otherwise
+    /// they use <c>/application/{relativePath}</c>.
     /// </summary>
-    internal static string RewriteAssetPaths(string html, CrawlResult crawlResult)
+    internal static string RewriteAssetPaths(string html, CrawlResult crawlResult, string? themeName = null)
     {
         if (string.IsNullOrEmpty(html) || crawlResult.Assets.Count == 0)
             return html;
+
+        string prefix = string.IsNullOrWhiteSpace(themeName)
+            ? "/application/"
+            : $"/application/themes/{themeName}/";
 
         string baseAuthority = crawlResult.BaseUrl.GetLeftPart(UriPartial.Authority);
 
@@ -223,16 +248,16 @@ public static class CrawlToBundleConverter
                 continue;
 
             // Replace absolute URLs from the same origin.
-            // e.g. https://example.com/images/logo.png → /application/images/logo.png
+            // e.g. https://example.com/images/logo.png → {prefix}images/logo.png
             string absoluteUrl = baseAuthority + "/" + relPath;
-            html = html.Replace(absoluteUrl, "/application/" + relPath, StringComparison.OrdinalIgnoreCase);
+            html = html.Replace(absoluteUrl, prefix + relPath, StringComparison.OrdinalIgnoreCase);
 
             // Replace root-relative references.
-            // e.g. /images/logo.png → /application/images/logo.png
+            // e.g. /images/logo.png → {prefix}images/logo.png
             // Only replace when preceded by a delimiter that indicates an
             // HTML attribute value or CSS url() to avoid false positives.
             string rootRelative = "/" + relPath;
-            html = ReplacePrefixed(html, rootRelative, "/application/" + relPath);
+            html = ReplacePrefixed(html, rootRelative, prefix + relPath);
         }
 
         return html;

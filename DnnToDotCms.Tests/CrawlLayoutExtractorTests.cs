@@ -138,8 +138,8 @@ public class CrawlLayoutExtractorTests
         var layout = CrawlLayoutExtractor.ExtractLayout(html, "test", BaseUrl);
 
         Assert.NotNull(layout);
-        Assert.Contains("/application/css/style.css", layout.TemplateHeader);
-        Assert.Contains("/application/css/theme.css", layout.TemplateHeader);
+        Assert.Contains("/application/themes/test/css/style.css", layout.TemplateHeader);
+        Assert.Contains("/application/themes/test/css/theme.css", layout.TemplateHeader);
     }
 
     [Fact]
@@ -157,7 +157,7 @@ public class CrawlLayoutExtractorTests
         var layout = CrawlLayoutExtractor.ExtractLayout(html, "test", BaseUrl);
 
         Assert.NotNull(layout);
-        Assert.Contains("/application/css/style.css", layout.TemplateHeader);
+        Assert.Contains("/application/themes/test/css/style.css", layout.TemplateHeader);
         Assert.DoesNotContain("https://example.com", layout.TemplateHeader);
     }
 
@@ -201,7 +201,7 @@ public class CrawlLayoutExtractorTests
         var layout = CrawlLayoutExtractor.ExtractLayout(html, "test", BaseUrl);
 
         Assert.NotNull(layout);
-        Assert.Contains("/application/js/app.js", layout.TemplateBody);
+        Assert.Contains("/application/themes/test/js/app.js", layout.TemplateBody);
         // Script should be at the end of the template body
         int scriptPos = layout.TemplateBody.LastIndexOf("<script");
         int footerPos = layout.TemplateBody.IndexOf("<footer>");
@@ -224,7 +224,7 @@ public class CrawlLayoutExtractorTests
         var layout = CrawlLayoutExtractor.ExtractLayout(html, "test", BaseUrl);
 
         Assert.NotNull(layout);
-        Assert.Contains("/application/js/main.js", layout.TemplateBody);
+        Assert.Contains("/application/themes/test/js/main.js", layout.TemplateBody);
     }
 
     // ------------------------------------------------------------------
@@ -247,7 +247,7 @@ public class CrawlLayoutExtractorTests
         var layout = CrawlLayoutExtractor.ExtractLayout(html, "test", BaseUrl);
 
         Assert.NotNull(layout);
-        Assert.Contains("/application/images/logo.png", layout.TemplateBody);
+        Assert.Contains("/application/themes/test/images/logo.png", layout.TemplateBody);
     }
 
     [Fact]
@@ -483,16 +483,100 @@ public class CrawlLayoutExtractorTests
         Assert.DoesNotContain("This is the main content", layout.TemplateBody);
 
         // CSS should be in header
-        Assert.Contains("/application/css/bootstrap.css", layout.TemplateHeader);
-        Assert.Contains("/application/css/custom.css", layout.TemplateHeader);
+        Assert.Contains("/application/themes/my-site/css/bootstrap.css", layout.TemplateHeader);
+        Assert.Contains("/application/themes/my-site/css/custom.css", layout.TemplateHeader);
 
         // JS should be in body
-        Assert.Contains("/application/js/app.js", layout.TemplateBody);
+        Assert.Contains("/application/themes/my-site/js/app.js", layout.TemplateBody);
 
         // Theme name
         Assert.Equal("my-site", layout.ThemeName);
 
         // Pane map
         Assert.Contains("ContentPane", layout.PaneMap.Keys);
+    }
+
+    // ------------------------------------------------------------------
+    // Theme prefix: BuildThemePrefix
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void BuildThemePrefix_WithThemeName_ReturnsThemePath()
+    {
+        Assert.Equal("/application/themes/my-theme/",
+            CrawlLayoutExtractor.BuildThemePrefix("my-theme"));
+    }
+
+    [Fact]
+    public void BuildThemePrefix_NullOrEmpty_ReturnsFallback()
+    {
+        Assert.Equal("/application/", CrawlLayoutExtractor.BuildThemePrefix(null));
+        Assert.Equal("/application/", CrawlLayoutExtractor.BuildThemePrefix(""));
+        Assert.Equal("/application/", CrawlLayoutExtractor.BuildThemePrefix("  "));
+    }
+
+    // ------------------------------------------------------------------
+    // ExtractHeadReferences / ExtractScriptReferences with theme prefix
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void ExtractHeadReferences_WithThemePrefix_RewritesToThemePath()
+    {
+        var doc = new HtmlAgilityPack.HtmlDocument();
+        doc.LoadHtml("""
+            <html>
+            <head>
+              <link rel="stylesheet" href="/css/style.css">
+            </head>
+            <body></body>
+            </html>
+            """);
+
+        string result = CrawlLayoutExtractor.ExtractHeadReferences(
+            doc, BaseUrl, "/application/themes/my-theme/");
+
+        Assert.Contains("/application/themes/my-theme/css/style.css", result);
+    }
+
+    [Fact]
+    public void ExtractScriptReferences_WithThemePrefix_RewritesToThemePath()
+    {
+        var doc = new HtmlAgilityPack.HtmlDocument();
+        doc.LoadHtml("""
+            <html>
+            <head></head>
+            <body>
+              <script src="/js/app.js"></script>
+            </body>
+            </html>
+            """);
+
+        string result = CrawlLayoutExtractor.ExtractScriptReferences(
+            doc, BaseUrl, "/application/themes/my-theme/");
+
+        Assert.Contains("/application/themes/my-theme/js/app.js", result);
+    }
+
+    [Fact]
+    public void RewriteAssetRefsInTemplate_WithThemePrefix_RewritesToThemePath()
+    {
+        string html = """<img src="/images/logo.png">""";
+
+        string result = CrawlLayoutExtractor.RewriteAssetRefsInTemplate(
+            html, BaseUrl, "/application/themes/my-theme/");
+
+        Assert.Contains("/application/themes/my-theme/images/logo.png", result);
+    }
+
+    [Fact]
+    public void RewriteAssetRefsInTemplate_WithThemePrefix_DoesNotDoubleRewrite()
+    {
+        string html = """<img src="/application/themes/my-theme/images/logo.png">""";
+
+        string result = CrawlLayoutExtractor.RewriteAssetRefsInTemplate(
+            html, BaseUrl, "/application/themes/my-theme/");
+
+        Assert.Contains("/application/themes/my-theme/images/logo.png", result);
+        Assert.DoesNotContain("/application/themes/my-theme/application/", result);
     }
 }
