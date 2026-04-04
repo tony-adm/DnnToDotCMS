@@ -98,7 +98,9 @@ public static class BundleWriter
         string? siteName = null,
         IReadOnlyList<DnnHtmlContent>? htmlContents = null,
         IReadOnlyList<DnnPortalPage>? pages = null,
-        IReadOnlyList<DnnPortalFile>? portalFiles = null)
+        IReadOnlyList<DnnPortalFile>? portalFiles = null,
+        IReadOnlyList<(string id, string inode, string name, string html, string themeName)>? prebuiltContainers = null,
+        IReadOnlyList<(string id, string inode, string name, string html, string header, string themeName, IReadOnlyDictionary<string, int> paneUuidMap)>? prebuiltTemplates = null)
     {
         string bundleId = Guid.NewGuid().ToString("N").ToUpperInvariant();
 
@@ -121,7 +123,16 @@ public static class BundleWriter
         var containerDefs = new List<(string id, string inode, string name, string html, string themeName)>();
         var templateDefs  = new List<(string id, string inode, string name, string html, string header, string themeName, IReadOnlyDictionary<string, int> paneUuidMap)>();
 
-        if (themesZipPath is not null && File.Exists(themesZipPath))
+        // When pre-built container/template definitions are supplied (e.g.
+        // from the --crawl code path with layout extraction) use them
+        // directly, bypassing both the themes-zip and fallback paths.
+        if (prebuiltContainers is not null && prebuiltContainers.Count > 0
+            && prebuiltTemplates is not null && prebuiltTemplates.Count > 0)
+        {
+            containerDefs.AddRange(prebuiltContainers);
+            templateDefs.AddRange(prebuiltTemplates);
+        }
+        else if (themesZipPath is not null && File.Exists(themesZipPath))
         {
             try
             {

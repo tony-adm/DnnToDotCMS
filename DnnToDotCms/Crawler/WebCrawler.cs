@@ -65,8 +65,9 @@ public sealed class WebCrawler
 
             pages.Add(page);
 
-            // Parse the original full HTML (not just body content) to find links and assets.
-            string fullHtml = await FetchHtmlAsync(currentUrl, cancellationToken);
+            // Reuse the full HTML stored on the page to extract links and
+            // assets — avoids a redundant second HTTP request.
+            string fullHtml = page.FullHtml;
             if (string.IsNullOrEmpty(fullHtml))
                 continue;
 
@@ -202,7 +203,7 @@ public sealed class WebCrawler
             if (string.IsNullOrWhiteSpace(body))
                 return null;
 
-            return new CrawledPage(url, title, description, body);
+            return new CrawledPage(url, title, description, body, html);
         }
         catch (HttpRequestException)
         {

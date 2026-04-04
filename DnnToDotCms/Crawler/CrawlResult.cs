@@ -15,7 +15,13 @@ public sealed record CrawledPage(
     /// <c>role="main"</c> element exists its inner HTML is used;
     /// otherwise the full <c>&lt;body&gt;</c> inner HTML is used.
     /// </summary>
-    string HtmlBody);
+    string HtmlBody,
+    /// <summary>
+    /// Complete HTML of the page as returned by the server.  Used by
+    /// <see cref="CrawlLayoutExtractor"/> to derive template layout,
+    /// CSS/JS references, and page structure.  Empty when not available.
+    /// </summary>
+    string FullHtml = "");
 
 /// <summary>
 /// Represents a static asset (image, CSS, JS, font, etc.) downloaded during
