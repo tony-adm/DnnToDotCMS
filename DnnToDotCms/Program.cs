@@ -1,5 +1,6 @@
 ﻿using DnnToDotCms.Bundle;
 using DnnToDotCms.Converter;
+using DnnToDotCms.Crawler;
 using DnnToDotCms.Models;
 using DnnToDotCms.Parser;
 
@@ -9,6 +10,7 @@ using DnnToDotCms.Parser;
 //
 // Usage:
 //   DnnToDotCms <input> [--output <site.tar.gz>] [--help]
+//   DnnToDotCms --crawl <url> [--output <site.tar.gz>] [--max-pages <n>]
 //   DnnToDotCms --help
 //
 // Arguments:
@@ -16,6 +18,8 @@ using DnnToDotCms.Parser;
 //                            inside that folder, or a DNN XML file (.dnn / IPortable)
 //
 // Options:
+//   --crawl <url>            Crawl a live website and create a bundle from its content
+//   --max-pages <n>          Maximum pages to crawl (default: 200, only with --crawl)
 //   --output <path>          Write the bundle to a file (default: site.tar.gz)
 //   --help, -h               Show this help and exit
 // ---------------------------------------------------------------------------
@@ -29,6 +33,8 @@ if (args.Length == 0 || args.Any(a => a is "--help" or "-h"))
 // Parse arguments
 string? inputPath  = null;
 string? outputPath = null;
+string? crawlUrl   = null;
+int     maxPages   = 200;
 
 for (int i = 0; i < args.Length; i++)
 {
@@ -36,6 +42,16 @@ for (int i = 0; i < args.Length; i++)
     {
         case "--output" when i + 1 < args.Length:
             outputPath = args[++i];
+            break;
+        case "--crawl" when i + 1 < args.Length:
+            crawlUrl = args[++i];
+            break;
+        case "--max-pages" when i + 1 < args.Length:
+            if (!int.TryParse(args[++i], out maxPages) || maxPages < 1)
+            {
+                Console.Error.WriteLine("Error: --max-pages must be a positive integer.");
+                return 1;
+            }
             break;
         default:
             if (!args[i].StartsWith("--"))
@@ -49,6 +65,10 @@ for (int i = 0; i < args.Length; i++)
             break;
     }
 }
+
+// --crawl mode: crawl a live website and produce a bundle.
+if (crawlUrl is not null)
+    return await RunCrawlModeAsync(crawlUrl, maxPages, outputPath ?? "site.tar.gz");
 
 if (string.IsNullOrWhiteSpace(inputPath))
 {
@@ -178,14 +198,88 @@ catch (Exception ex)
 
 // ---------------------------------------------------------------------------
 
+static async Task<int> RunCrawlModeAsync(string url, int maxPages, string outputPath)
+{
+    if (!Uri.TryCreate(url, UriKind.Absolute, out Uri? startUri)
+        || (startUri.Scheme != "http" && startUri.Scheme != "https"))
+    {
+        Console.Error.WriteLine($"Error: Invalid URL: {url}");
+        return 1;
+    }
+
+    try
+    {
+        Console.WriteLine($"Crawling {startUri} (max {maxPages} pages)…");
+
+        using var httpClient = new HttpClient();
+        httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(
+            "DnnToDotCms-Crawler/1.0 (+https://github.com/tony-adm/DnnToDotCMS)");
+        httpClient.Timeout = TimeSpan.FromSeconds(30);
+
+        var crawler = new WebCrawler(httpClient, maxPages);
+        CrawlResult result = await crawler.CrawlAsync(startUri);
+
+        Console.WriteLine(
+            $"Crawl complete: {result.Pages.Count} page(s), {result.Assets.Count} asset(s).");
+
+        if (result.Pages.Count == 0)
+        {
+            Console.Error.WriteLine("Warning: No pages were crawled. No bundle produced.");
+            return 0;
+        }
+
+        // Build content types, HTML contents, pages, and file assets from the crawl.
+        var contentTypes = new List<DotCmsContentType> { CrawlToBundleConverter.BuildHtmlContentType() };
+        IReadOnlyList<DnnHtmlContent> htmlContents = CrawlToBundleConverter.ConvertPages(result);
+        IReadOnlyList<DnnPortalPage> portalPages   = CrawlToBundleConverter.ConvertPortalPages(result);
+        IReadOnlyList<DnnPortalFile> portalFiles   = CrawlToBundleConverter.ConvertAssets(result);
+
+        // Derive a site name from the hostname.
+        string siteName = startUri.Host;
+
+        if (File.Exists(outputPath))
+            File.Delete(outputPath);
+
+        using (var outStream = File.Create(outputPath))
+            BundleWriter.Write(contentTypes, outStream, themesZipPath: null, siteName,
+                htmlContents, portalPages, portalFiles);
+
+        Console.WriteLine(
+            $"Bundle written to: {outputPath}" +
+            $" ({htmlContents.Count} content item(s)," +
+            $" {portalPages.Count} page(s)," +
+            $" {portalFiles.Count} static file(s)).");
+        return 0;
+    }
+    catch (HttpRequestException ex)
+    {
+        Console.Error.WriteLine($"HTTP error while crawling: {ex.Message}");
+        return 1;
+    }
+    catch (TaskCanceledException)
+    {
+        Console.Error.WriteLine("Crawl timed out.");
+        return 1;
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"Unexpected error during crawl: {ex.Message}");
+        return 1;
+    }
+}
+
+// ---------------------------------------------------------------------------
+
 static void PrintUsage()
 {
     Console.WriteLine("""
         DNN to DotCMS Converter v1.0.0
-        Converts DNN (DotNetNuke) site exports to a DotCMS push-publish bundle.
+        Converts DNN (DotNetNuke) site exports — or a live website — to a
+        DotCMS push-publish bundle.
 
         Usage:
           DnnToDotCms <input> [--output <site.tar.gz>]
+          DnnToDotCms --crawl <url> [--max-pages <n>] [--output <site.tar.gz>]
           DnnToDotCms --help
 
         Arguments:
@@ -194,11 +288,15 @@ static void PrintUsage()
                               XML file (.dnn or IPortable export)
 
         Options:
+          --crawl <url>       Crawl a live website and create a bundle from its
+                              HTML pages and static assets (images, CSS, JS)
+          --max-pages <n>     Maximum number of pages to crawl (default: 200,
+                              only used with --crawl)
           --output <path>     Write the bundle to a specific file
                               (default: site.tar.gz in the current directory)
           --help, -h          Show this help message
 
-        Supported DNN module types:
+        Supported DNN module types (export-folder mode):
           HTML / Text-HTML, Announcements, Events, FAQs, Forms, Blog,
           Documents, Links, Contacts, News Feed, Gallery, Feedback.
           Unknown module types produce a generic HTMLContent content type.
@@ -218,6 +316,8 @@ static void PrintUsage()
           DnnToDotCms example/2026-03-29_01-49-26 --output my-site.tar.gz
           DnnToDotCms site-export.dnn
           DnnToDotCms module-export.xml
+          DnnToDotCms --crawl https://www.example.com
+          DnnToDotCms --crawl https://www.example.com --max-pages 50 --output crawled.tar.gz
         """);
 }
 
