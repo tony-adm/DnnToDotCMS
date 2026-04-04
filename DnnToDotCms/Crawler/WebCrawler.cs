@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text.RegularExpressions;
 using HtmlAgilityPack;
 
 namespace DnnToDotCms.Crawler;
@@ -83,15 +84,31 @@ public sealed class WebCrawler
             }
 
             // Discover static asset URLs.
-            foreach (Uri assetUrl in ExtractAssetUrls(doc, baseUri))
+            // Use a queue so that sub-resources discovered inside CSS files
+            // (e.g. @import, url()) are also downloaded.
+            var assetQueue = new Queue<Uri>(ExtractAssetUrls(doc, baseUri));
+
+            while (assetQueue.Count > 0)
             {
+                Uri assetUrl = assetQueue.Dequeue();
                 string key = NormalizeUrl(assetUrl);
                 if (!visitedAssets.Add(key) || !IsSameOrigin(assetUrl, baseUri))
                     continue;
 
                 CrawledAsset? asset = await TryDownloadAssetAsync(assetUrl, baseUri, cancellationToken);
-                if (asset is not null)
-                    assets.Add(asset);
+                if (asset is null)
+                    continue;
+
+                assets.Add(asset);
+
+                // If the asset is a CSS file, parse it for sub-resource
+                // references (@import and url()) so that fonts, images,
+                // and imported stylesheets are also downloaded.
+                if (IsCssAsset(asset))
+                {
+                    foreach (Uri subUrl in ExtractCssReferences(asset.Content, asset.Url))
+                        assetQueue.Enqueue(subUrl);
+                }
             }
         }
 
@@ -152,6 +169,80 @@ public sealed class WebCrawler
             if (Uri.TryCreate(baseUri, href, out Uri? uri))
                 yield return uri;
         }
+    }
+
+    /// <summary>
+    /// Regex matching CSS <c>@import</c> rules and <c>url()</c> references.
+    /// Captures the URL from patterns like:
+    /// <list type="bullet">
+    /// <item><c>@import url("file.css")</c></item>
+    /// <item><c>@import "file.css"</c></item>
+    /// <item><c>url("image.png")</c></item>
+    /// <item><c>url(image.png)</c></item>
+    /// </list>
+    /// Skips <c>data:</c> URIs.
+    /// </summary>
+    private static readonly Regex CssUrlRegex = new(
+        @"(?:@import\s+)?url\(\s*[""']?(?<url>[^""')\s]+?)[""']?\s*\)|@import\s+[""'](?<import>[^""']+)[""']",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>
+    /// Extract sub-resource URLs from a CSS file's content.  This discovers
+    /// <c>@import</c> rules, <c>url()</c> references for fonts, background
+    /// images, and other assets referenced within stylesheets.
+    /// </summary>
+    /// <param name="cssContent">Raw CSS file bytes.</param>
+    /// <param name="cssUrl">
+    /// Absolute URL of the CSS file, used to resolve relative paths.
+    /// </param>
+    /// <returns>Absolute URIs discovered in the CSS.</returns>
+    internal static IEnumerable<Uri> ExtractCssReferences(byte[] cssContent, Uri cssUrl)
+    {
+        if (cssContent.Length == 0)
+            yield break;
+
+        string css;
+        try
+        {
+            css = System.Text.Encoding.UTF8.GetString(cssContent);
+        }
+        catch
+        {
+            yield break;
+        }
+
+        foreach (Match match in CssUrlRegex.Matches(css))
+        {
+            string url = match.Groups["url"].Success
+                ? match.Groups["url"].Value
+                : match.Groups["import"].Value;
+
+            if (string.IsNullOrWhiteSpace(url))
+                continue;
+
+            // Skip data URIs and fragment-only references.
+            if (url.StartsWith("data:", StringComparison.OrdinalIgnoreCase)
+                || url.StartsWith('#'))
+                continue;
+
+            if (Uri.TryCreate(cssUrl, url.Trim(), out Uri? resolved)
+                && (resolved.Scheme == "http" || resolved.Scheme == "https"))
+                yield return resolved;
+        }
+    }
+
+    /// <summary>
+    /// Determine whether a crawled asset is a CSS file based on its MIME
+    /// type or file extension so that its content can be parsed for
+    /// sub-resource references.
+    /// </summary>
+    internal static bool IsCssAsset(CrawledAsset asset)
+    {
+        if (!string.IsNullOrEmpty(asset.MimeType)
+            && asset.MimeType.Contains("css", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return asset.RelativePath.EndsWith(".css", StringComparison.OrdinalIgnoreCase);
     }
 
     internal static string ExtractTitle(HtmlDocument doc)
