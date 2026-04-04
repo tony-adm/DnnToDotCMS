@@ -229,10 +229,11 @@ static async Task<int> RunCrawlModeAsync(string url, int maxPages, string output
         }
 
         // Build content types, HTML contents, pages, and file assets from the crawl.
+        // Use the paired Convert() method so that content items are linked to their
+        // pages via shared TabUniqueId — matching the export-folder path.
         var contentTypes = new List<DotCmsContentType> { CrawlToBundleConverter.BuildHtmlContentType() };
-        IReadOnlyList<DnnHtmlContent> htmlContents = CrawlToBundleConverter.ConvertPages(result);
-        IReadOnlyList<DnnPortalPage> portalPages   = CrawlToBundleConverter.ConvertPortalPages(result);
-        IReadOnlyList<DnnPortalFile> portalFiles   = CrawlToBundleConverter.ConvertAssets(result);
+        var (htmlContents, portalPages) = CrawlToBundleConverter.Convert(result);
+        IReadOnlyList<DnnPortalFile> portalFiles = CrawlToBundleConverter.ConvertAssets(result);
 
         // Derive a site name from the hostname.
         string siteName = startUri.Host;

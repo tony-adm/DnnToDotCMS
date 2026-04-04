@@ -134,6 +134,30 @@ public static class BundleWriter
             }
         }
 
+        // When no theme definitions were collected but we have both HTML
+        // content and portal pages, create a minimal default container and
+        // template so that BundleWriter can link content to pages via
+        // multiTree — matching the bundle structure produced by the export
+        // path.  This is the typical scenario for the --crawl code path
+        // where no export_themes.zip is available.
+        if (containerDefs.Count == 0 && templateDefs.Count == 0
+            && htmlContents is not null && htmlContents.Count > 0
+            && pages is not null && pages.Count > 0)
+        {
+            string defaultContainerCode = "$!{dotContent.body}";
+            string containerId   = Guid.NewGuid().ToString();
+            string containerInode = Guid.NewGuid().ToString();
+            containerDefs.Add((containerId, containerInode, "Standard", defaultContainerCode, ""));
+
+            var paneMap = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["ContentPane"] = 1
+            };
+            string templateBody = $"#parseContainer('{containerId}', '1')";
+            templateDefs.Add((Guid.NewGuid().ToString(), Guid.NewGuid().ToString(),
+                "Default", templateBody, "", "", paneMap));
+        }
+
         using var gz  = new GZipStream(output, CompressionLevel.Optimal, leaveOpen: true);
         using var tar = new TarWriter(gz, TarEntryFormat.Ustar);
 

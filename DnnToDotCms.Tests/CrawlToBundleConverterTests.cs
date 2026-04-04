@@ -17,9 +17,10 @@ public class CrawlToBundleConverterTests
 
         Assert.Equal("HTMLContent", ct.Name);
         Assert.Equal("htmlContent", ct.Variable);
-        Assert.Equal(2, ct.Fields.Count);
+        Assert.Equal(3, ct.Fields.Count);
         Assert.Contains(ct.Fields, f => f.Variable == "title");
         Assert.Contains(ct.Fields, f => f.Variable == "body");
+        Assert.Contains(ct.Fields, f => f.Variable == "image");
     }
 
     [Fact]
@@ -39,8 +40,69 @@ public class CrawlToBundleConverterTests
         Assert.Equal("WYSIWYG", bodyField.FieldTypeLabel);
     }
 
+    [Fact]
+    public void BuildHtmlContentType_MatchesExportPathContentType()
+    {
+        // The crawl content type must match the export-path htmlContent
+        // definition: same description, icon, and field structure.
+        var ct = CrawlToBundleConverter.BuildHtmlContentType();
+
+        Assert.Equal("Converted from DNN HTML module", ct.Description);
+        Assert.Equal("fa fa-code", ct.Icon);
+
+        // Image field should be a searchable text field with a hint.
+        var imageField = ct.Fields.Single(f => f.Variable == "image");
+        Assert.Equal("TEXT", imageField.DataType);
+        Assert.Equal("Text", imageField.FieldTypeLabel);
+        Assert.Equal("Icon or image URL for container rendering", imageField.Hint);
+    }
+
     // -----------------------------------------------------------------------
-    // ConvertPages
+    // Convert (paired content + pages)
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public void Convert_LinksContentToPageViaTabUniqueId()
+    {
+        var result = MakeCrawlResult(
+            new CrawledPage(new Uri("https://example.com/about"), "About Us", "Our story", "<p>Hello</p>"));
+
+        var (contents, pages) = CrawlToBundleConverter.Convert(result);
+
+        Assert.Single(contents);
+        Assert.Single(pages);
+        Assert.Equal(pages[0].UniqueId, contents[0].TabUniqueId);
+    }
+
+    [Fact]
+    public void Convert_SetsContentPaneName()
+    {
+        var result = MakeCrawlResult(
+            new CrawledPage(new Uri("https://example.com/about"), "About Us", "", "<p>Hi</p>"));
+
+        var (contents, _) = CrawlToBundleConverter.Convert(result);
+
+        Assert.Equal("ContentPane", contents[0].PaneName);
+    }
+
+    [Fact]
+    public void Convert_MultiplePages_EachLinked()
+    {
+        var result = MakeCrawlResult(
+            new CrawledPage(new Uri("https://example.com/"), "Home", "", "<p>Home</p>"),
+            new CrawledPage(new Uri("https://example.com/about"), "About", "", "<p>About</p>"));
+
+        var (contents, pages) = CrawlToBundleConverter.Convert(result);
+
+        Assert.Equal(2, contents.Count);
+        Assert.Equal(2, pages.Count);
+        Assert.Equal(pages[0].UniqueId, contents[0].TabUniqueId);
+        Assert.Equal(pages[1].UniqueId, contents[1].TabUniqueId);
+        Assert.NotEqual(pages[0].UniqueId, pages[1].UniqueId);
+    }
+
+    // -----------------------------------------------------------------------
+    // ConvertPages (with portal pages linkage)
     // -----------------------------------------------------------------------
 
     [Fact]
@@ -78,6 +140,41 @@ public class CrawlToBundleConverterTests
         var contents = CrawlToBundleConverter.ConvertPages(result);
 
         Assert.Equal(3, contents.Count);
+    }
+
+    [Fact]
+    public void ConvertPages_WithPortalPages_LinksViaTabUniqueId()
+    {
+        var result = MakeCrawlResult(
+            new CrawledPage(new Uri("https://example.com/about"), "About", "", "<p>About</p>"));
+
+        var pages = CrawlToBundleConverter.ConvertPortalPages(result);
+        var contents = CrawlToBundleConverter.ConvertPages(result, pages);
+
+        Assert.Equal(pages[0].UniqueId, contents[0].TabUniqueId);
+    }
+
+    [Fact]
+    public void ConvertPages_WithPortalPages_SetsContentPane()
+    {
+        var result = MakeCrawlResult(
+            new CrawledPage(new Uri("https://example.com/about"), "About", "", "<p>About</p>"));
+
+        var pages = CrawlToBundleConverter.ConvertPortalPages(result);
+        var contents = CrawlToBundleConverter.ConvertPages(result, pages);
+
+        Assert.Equal("ContentPane", contents[0].PaneName);
+    }
+
+    [Fact]
+    public void ConvertPages_WithoutPortalPages_EmptyTabUniqueId()
+    {
+        var result = MakeCrawlResult(
+            new CrawledPage(new Uri("https://example.com/about"), "About", "", "<p>About</p>"));
+
+        var contents = CrawlToBundleConverter.ConvertPages(result);
+
+        Assert.Equal("", contents[0].TabUniqueId);
     }
 
     // -----------------------------------------------------------------------
