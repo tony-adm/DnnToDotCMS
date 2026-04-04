@@ -253,13 +253,13 @@ public class CrawlToBundleConverterTests
 
         Assert.Single(files);
         Assert.Equal("logo.png", files[0].FileName);
-        Assert.Equal("images/", files[0].FolderPath);
+        Assert.Equal("application/images/", files[0].FolderPath);
         Assert.Equal("image/png", files[0].MimeType);
         Assert.Equal(content, files[0].Content);
     }
 
     [Fact]
-    public void ConvertAssets_RootLevelFile_EmptyFolderPath()
+    public void ConvertAssets_RootLevelFile_ApplicationFolderPath()
     {
         var asset = new CrawledAsset(
             new Uri("https://example.com/favicon.ico"),
@@ -271,7 +271,7 @@ public class CrawlToBundleConverterTests
         var files = CrawlToBundleConverter.ConvertAssets(result);
 
         Assert.Equal("favicon.ico", files[0].FileName);
-        Assert.Equal("", files[0].FolderPath);
+        Assert.Equal("application/", files[0].FolderPath);
     }
 
     [Fact]
@@ -289,6 +289,107 @@ public class CrawlToBundleConverterTests
         Assert.Equal(2, files.Count);
         Assert.NotEqual(files[0].UniqueId, files[1].UniqueId);
         Assert.NotEqual(files[0].VersionGuid, files[1].VersionGuid);
+    }
+
+    // -----------------------------------------------------------------------
+    // RewriteAssetPaths
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public void RewriteAssetPaths_RewritesRootRelativeReferences()
+    {
+        var asset = new CrawledAsset(
+            new Uri("https://example.com/images/logo.png"),
+            "images/logo.png", "image/png", [1]);
+        var result = new CrawlResult(BaseUrl, [], [asset]);
+
+        string html = """<img src="/images/logo.png" alt="Logo">""";
+        string rewritten = CrawlToBundleConverter.RewriteAssetPaths(html, result);
+
+        Assert.Equal("""<img src="/application/images/logo.png" alt="Logo">""", rewritten);
+    }
+
+    [Fact]
+    public void RewriteAssetPaths_RewritesAbsoluteUrls()
+    {
+        var asset = new CrawledAsset(
+            new Uri("https://example.com/css/style.css"),
+            "css/style.css", "text/css", [1]);
+        var result = new CrawlResult(BaseUrl, [], [asset]);
+
+        string html = """<link href="https://example.com/css/style.css">""";
+        string rewritten = CrawlToBundleConverter.RewriteAssetPaths(html, result);
+
+        Assert.Contains("/application/css/style.css", rewritten);
+        Assert.DoesNotContain("https://example.com/css/style.css", rewritten);
+    }
+
+    [Fact]
+    public void RewriteAssetPaths_DoesNotRewritePlainText()
+    {
+        var asset = new CrawledAsset(
+            new Uri("https://example.com/images/logo.png"),
+            "images/logo.png", "image/png", [1]);
+        var result = new CrawlResult(BaseUrl, [], [asset]);
+
+        string html = "<p>See /images/logo.png for details</p>";
+        string rewritten = CrawlToBundleConverter.RewriteAssetPaths(html, result);
+
+        // Plain text references should NOT be rewritten.
+        Assert.Equal(html, rewritten);
+    }
+
+    [Fact]
+    public void RewriteAssetPaths_NoAssets_ReturnsOriginal()
+    {
+        var result = new CrawlResult(BaseUrl, [], []);
+        string html = "<p>Hello</p>";
+        Assert.Equal(html, CrawlToBundleConverter.RewriteAssetPaths(html, result));
+    }
+
+    [Fact]
+    public void RewriteAssetPaths_SingleQuoteAttribute()
+    {
+        var asset = new CrawledAsset(
+            new Uri("https://example.com/js/main.js"),
+            "js/main.js", "application/javascript", [1]);
+        var result = new CrawlResult(BaseUrl, [], [asset]);
+
+        string html = "<script src='/js/main.js'></script>";
+        string rewritten = CrawlToBundleConverter.RewriteAssetPaths(html, result);
+
+        Assert.Equal("<script src='/application/js/main.js'></script>", rewritten);
+    }
+
+    [Fact]
+    public void RewriteAssetPaths_CssUrlFunction()
+    {
+        var asset = new CrawledAsset(
+            new Uri("https://example.com/images/bg.jpg"),
+            "images/bg.jpg", "image/jpeg", [1]);
+        var result = new CrawlResult(BaseUrl, [], [asset]);
+
+        string html = """<div style="background: url(/images/bg.jpg)"></div>""";
+        string rewritten = CrawlToBundleConverter.RewriteAssetPaths(html, result);
+
+        Assert.Contains("url(/application/images/bg.jpg)", rewritten);
+    }
+
+    [Fact]
+    public void Convert_RewritesHtmlBodyAssetPaths()
+    {
+        var page = new CrawledPage(
+            new Uri("https://example.com/about"),
+            "About", "", """<img src="/images/photo.jpg">""");
+        var asset = new CrawledAsset(
+            new Uri("https://example.com/images/photo.jpg"),
+            "images/photo.jpg", "image/jpeg", [1]);
+
+        var result = new CrawlResult(BaseUrl, [page], [asset]);
+        var (contents, _) = CrawlToBundleConverter.Convert(result);
+
+        Assert.Contains("/application/images/photo.jpg", contents[0].HtmlBody);
+        Assert.DoesNotContain("\"/images/photo.jpg\"", contents[0].HtmlBody);
     }
 
     // -----------------------------------------------------------------------
