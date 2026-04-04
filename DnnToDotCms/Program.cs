@@ -232,8 +232,6 @@ static async Task<int> RunCrawlModeAsync(string url, int maxPages, string output
         // Use the paired Convert() method so that content items are linked to their
         // pages via shared TabUniqueId — matching the export-folder path.
         var contentTypes = new List<DotCmsContentType> { CrawlToBundleConverter.BuildHtmlContentType() };
-        var (htmlContents, portalPages) = CrawlToBundleConverter.Convert(result);
-        IReadOnlyList<DnnPortalFile> portalFiles = CrawlToBundleConverter.ConvertAssets(result);
 
         // Derive a site name from the hostname.
         string siteName = startUri.Host;
@@ -264,6 +262,12 @@ static async Task<int> RunCrawlModeAsync(string url, int maxPages, string output
                 }
             }
         }
+
+        // Pass the theme name to Convert and ConvertAssets so that asset
+        // references in HTML bodies and file folder paths use the
+        // /application/themes/{themeName}/ namespace matching the template.
+        var (htmlContents, portalPages) = CrawlToBundleConverter.Convert(result, themeName);
+        IReadOnlyList<DnnPortalFile> portalFiles = CrawlToBundleConverter.ConvertAssets(result, themeName);
 
         if (File.Exists(outputPath))
             File.Delete(outputPath);

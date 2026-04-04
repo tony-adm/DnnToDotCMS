@@ -595,4 +595,94 @@ public class CrawlToBundleConverterTests
 
     private static CrawlResult MakeCrawlResult(CrawledPage[] pages, CrawledAsset[] assets)
         => new(BaseUrl, pages, assets);
+
+    // -----------------------------------------------------------------------
+    // Theme-aware asset placement
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public void ConvertAssets_WithThemeName_PlacesUnderThemeFolder()
+    {
+        var asset = new CrawledAsset(
+            new Uri("https://example.com/css/style.css"),
+            "css/style.css",
+            "text/css",
+            [1, 2, 3]);
+
+        var result = new CrawlResult(BaseUrl, [], [asset]);
+        var files = CrawlToBundleConverter.ConvertAssets(result, "my-theme");
+
+        Assert.Single(files);
+        Assert.Equal("application/themes/my-theme/css/", files[0].FolderPath);
+        Assert.Equal("style.css", files[0].FileName);
+    }
+
+    [Fact]
+    public void ConvertAssets_WithThemeName_RootLevelFile_ThemeFolder()
+    {
+        var asset = new CrawledAsset(
+            new Uri("https://example.com/favicon.ico"),
+            "favicon.ico",
+            "image/x-icon",
+            [0]);
+
+        var result = new CrawlResult(BaseUrl, [], [asset]);
+        var files = CrawlToBundleConverter.ConvertAssets(result, "my-theme");
+
+        Assert.Equal("favicon.ico", files[0].FileName);
+        Assert.Equal("application/themes/my-theme/", files[0].FolderPath);
+    }
+
+    [Fact]
+    public void ConvertAssets_WithoutThemeName_PlacesUnderApplication()
+    {
+        var asset = new CrawledAsset(
+            new Uri("https://example.com/css/style.css"),
+            "css/style.css",
+            "text/css",
+            [1]);
+
+        var result = new CrawlResult(BaseUrl, [], [asset]);
+        var files = CrawlToBundleConverter.ConvertAssets(result);
+
+        Assert.Equal("application/css/", files[0].FolderPath);
+    }
+
+    [Fact]
+    public void RewriteAssetPaths_WithThemeName_RewritesToThemePath()
+    {
+        var asset = new CrawledAsset(
+            new Uri("https://example.com/images/logo.png"),
+            "images/logo.png",
+            "image/png",
+            [1]);
+        string html = """<img src="/images/logo.png">""";
+
+        var result = MakeCrawlResult([], [asset]);
+        string rewritten = CrawlToBundleConverter.RewriteAssetPaths(html, result, "my-theme");
+
+        Assert.Contains("/application/themes/my-theme/images/logo.png", rewritten);
+    }
+
+    [Fact]
+    public void Convert_WithThemeName_RewritesBodyToThemePaths()
+    {
+        var asset = new CrawledAsset(
+            new Uri("https://example.com/images/hero.jpg"),
+            "images/hero.jpg",
+            "image/jpeg",
+            [1]);
+        var page = new CrawledPage(
+            new Uri("https://example.com/about"),
+            "About",
+            "About us",
+            """<img src="/images/hero.jpg">""",
+            "<html><body></body></html>");
+
+        var result = new CrawlResult(BaseUrl, [page], [asset]);
+        var (htmlContents, _) = CrawlToBundleConverter.Convert(result, "my-theme");
+
+        Assert.Single(htmlContents);
+        Assert.Contains("/application/themes/my-theme/images/hero.jpg", htmlContents[0].HtmlBody);
+    }
 }

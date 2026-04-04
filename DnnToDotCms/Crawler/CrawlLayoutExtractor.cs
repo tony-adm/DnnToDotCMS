@@ -67,8 +67,13 @@ public static class CrawlLayoutExtractor
         var doc = new HtmlDocument();
         doc.LoadHtml(fullHtml);
 
+        // Build the theme prefix so all same-origin asset references in the
+        // template point to /application/themes/{themeName}/ — matching the
+        // folder structure where ConvertAssets places crawled files.
+        string themePrefix = BuildThemePrefix(themeName);
+
         // --- Extract <head> CSS/JS references ---
-        string header = ExtractHeadReferences(doc, baseUrl);
+        string header = ExtractHeadReferences(doc, baseUrl, themePrefix);
 
         // --- Build template body from <body> ---
         var body = doc.DocumentNode.SelectSingleNode("//body");
@@ -100,14 +105,15 @@ public static class CrawlLayoutExtractor
         templateBody = RemoveScriptElements(templateBody);
 
         // Append JS <script> tags collected from the page.
-        string scriptTags = ExtractScriptReferences(doc, baseUrl);
+        string scriptTags = ExtractScriptReferences(doc, baseUrl, themePrefix);
         if (!string.IsNullOrEmpty(scriptTags))
             templateBody = templateBody + "\n" + scriptTags;
 
         // Rewrite remaining asset paths in the template body so that
         // same-origin absolute URLs and root-relative paths point to
-        // /application/ — matching where ConvertAssets places files.
-        templateBody = RewriteAssetRefsInTemplate(templateBody, baseUrl);
+        // /application/themes/{themeName}/ — matching where ConvertAssets
+        // places files.
+        templateBody = RewriteAssetRefsInTemplate(templateBody, baseUrl, themePrefix);
 
         var paneMap = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
         {
@@ -124,9 +130,10 @@ public static class CrawlLayoutExtractor
     /// <summary>
     /// Extract <c>&lt;link rel="stylesheet"&gt;</c> tags from the
     /// <c>&lt;head&gt;</c> element, rewriting same-origin URLs to
-    /// <c>/application/</c>-prefixed paths.
+    /// theme-prefixed paths.
     /// </summary>
-    internal static string ExtractHeadReferences(HtmlDocument doc, Uri baseUrl)
+    internal static string ExtractHeadReferences(HtmlDocument doc, Uri baseUrl,
+        string assetPrefix = "/application/")
     {
         var head = doc.DocumentNode.SelectSingleNode("//head");
         if (head is null)
@@ -142,7 +149,7 @@ public static class CrawlLayoutExtractor
             if (string.IsNullOrWhiteSpace(href))
                 continue;
 
-            string rewritten = RewriteSingleUrl(href, authority);
+            string rewritten = RewriteSingleUrl(href, authority, assetPrefix);
             links.Add($"<link rel=\"stylesheet\" href=\"{rewritten}\">");
         }
 
@@ -153,7 +160,8 @@ public static class CrawlLayoutExtractor
     /// Extract external <c>&lt;script src="…"&gt;</c> tags from the
     /// page, rewriting same-origin URLs.
     /// </summary>
-    internal static string ExtractScriptReferences(HtmlDocument doc, Uri baseUrl)
+    internal static string ExtractScriptReferences(HtmlDocument doc, Uri baseUrl,
+        string assetPrefix = "/application/")
     {
         var tags = new List<string>();
         string authority = baseUrl.GetLeftPart(UriPartial.Authority);
@@ -165,7 +173,7 @@ public static class CrawlLayoutExtractor
             if (string.IsNullOrWhiteSpace(src))
                 continue;
 
-            string rewritten = RewriteSingleUrl(src, authority);
+            string rewritten = RewriteSingleUrl(src, authority, assetPrefix);
             tags.Add($"<script src=\"{rewritten}\"></script>");
         }
 
@@ -197,50 +205,67 @@ public static class CrawlLayoutExtractor
 
     /// <summary>
     /// Rewrite same-origin asset URLs in the template body HTML so they
-    /// point to <c>/application/{path}</c>.
+    /// point to the given <paramref name="assetPrefix"/> (typically
+    /// <c>/application/themes/{themeName}/</c>).
     /// </summary>
-    internal static string RewriteAssetRefsInTemplate(string html, Uri baseUrl)
+    internal static string RewriteAssetRefsInTemplate(string html, Uri baseUrl,
+        string assetPrefix = "/application/")
     {
         if (string.IsNullOrEmpty(html))
             return html;
 
         string authority = baseUrl.GetLeftPart(UriPartial.Authority);
 
-        // Rewrite absolute same-origin URLs (e.g. https://example.com/img/x.png → /application/img/x.png).
+        // Rewrite absolute same-origin URLs (e.g. https://example.com/img/x.png → {prefix}img/x.png).
         if (html.Contains(authority, StringComparison.OrdinalIgnoreCase))
         {
-            html = html.Replace(authority + "/", "/application/", StringComparison.OrdinalIgnoreCase);
+            html = html.Replace(authority + "/", assetPrefix, StringComparison.OrdinalIgnoreCase);
         }
 
         // Rewrite root-relative paths in attribute contexts.
         // We use a simple regex to find href="/{path}" or src="/{path}"
-        // patterns and prepend /application.
+        // patterns and prepend the asset prefix.  The negative lookahead
+        // prevents double-rewriting any path already under /application/.
         html = System.Text.RegularExpressions.Regex.Replace(
             html,
             @"((?:href|src|action)=[""'])/(?!application/)(?!/)",
-            "$1/application/");
+            "$1" + assetPrefix);
 
         return html;
     }
 
     /// <summary>
-    /// Rewrite a single URL: strip the origin from absolute same-origin
-    /// URLs and prepend <c>/application/</c> to root-relative paths.
+    /// Build the asset prefix for a theme:
+    /// <c>/application/themes/{themeName}/</c> when a theme name is
+    /// provided, or <c>/application/</c> as fallback.
     /// </summary>
-    private static string RewriteSingleUrl(string url, string authority)
+    internal static string BuildThemePrefix(string? themeName)
+    {
+        if (string.IsNullOrWhiteSpace(themeName))
+            return "/application/";
+        return $"/application/themes/{themeName}/";
+    }
+
+    /// <summary>
+    /// Rewrite a single URL: strip the origin from absolute same-origin
+    /// URLs and prepend the given <paramref name="assetPrefix"/> to
+    /// root-relative paths.
+    /// </summary>
+    private static string RewriteSingleUrl(string url, string authority,
+        string assetPrefix = "/application/")
     {
         if (url.StartsWith(authority, StringComparison.OrdinalIgnoreCase))
         {
             string path = url[authority.Length..];
             if (path.Length == 0 || path[0] != '/')
                 path = "/" + path;
-            return "/application" + path;
+            return assetPrefix.TrimEnd('/') + path;
         }
 
         // Root-relative path on the same origin.
         if (url.StartsWith('/') && !url.StartsWith("//"))
         {
-            return "/application" + url;
+            return assetPrefix.TrimEnd('/') + url;
         }
 
         // External or protocol-relative — leave as-is.
