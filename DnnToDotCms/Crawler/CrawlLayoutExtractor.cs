@@ -217,8 +217,8 @@ public static class CrawlLayoutExtractor
         // patterns and prepend /application.
         html = System.Text.RegularExpressions.Regex.Replace(
             html,
-            @"((?:href|src|action)=[""'])(/(?!application/)(?!/))",
-            "$1/application/$2");
+            @"((?:href|src|action)=[""'])/(?!application/)(?!/)",
+            "$1/application/");
 
         return html;
     }
