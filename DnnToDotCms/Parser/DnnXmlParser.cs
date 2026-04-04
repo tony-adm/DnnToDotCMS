@@ -605,7 +605,7 @@ public static class DnnXmlParser
                     var slide = scrapedSlides![i];
                     src = slide.ImageUrl;
                     altText = !string.IsNullOrWhiteSpace(slide.Caption)
-                        ? System.Security.SecurityElement.Escape(slide.Caption) ?? $"Slide {i + 1}"
+                        ? System.Security.SecurityElement.Escape(slide.Caption)!
                         : $"Slide {i + 1}";
                     linkHref = slide.LinkUrl ?? "#";
                     captionHeading = slide.Caption;
@@ -626,12 +626,12 @@ public static class DnnXmlParser
                 sb.AppendLine("""      <div class="carousel-caption d-none d-md-block">""");
                 if (!string.IsNullOrWhiteSpace(captionHeading))
                 {
-                    string escapedCaption = System.Security.SecurityElement.Escape(captionHeading) ?? captionHeading;
+                    string escapedCaption = System.Security.SecurityElement.Escape(captionHeading)!;
                     sb.AppendLine($"""        <h5>{escapedCaption}</h5>""");
                 }
                 if (!string.IsNullOrWhiteSpace(captionDescription))
                 {
-                    string escapedDesc = System.Security.SecurityElement.Escape(captionDescription) ?? captionDescription;
+                    string escapedDesc = System.Security.SecurityElement.Escape(captionDescription)!;
                     sb.AppendLine($"""        <p>{escapedDesc}</p>""");
                 }
                 if (!useScraped || linkHref == "#")

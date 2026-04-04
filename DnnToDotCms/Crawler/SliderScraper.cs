@@ -180,9 +180,9 @@ public static class SliderScraper
             }
 
             string? caption = WebUtility.HtmlDecode(
-                img.GetAttributeValue("title", "")!);
+                img.GetAttributeValue("title", ""));
             if (string.IsNullOrEmpty(caption))
-                caption = WebUtility.HtmlDecode(img.GetAttributeValue("alt", "")!);
+                caption = WebUtility.HtmlDecode(img.GetAttributeValue("alt", ""));
             if (string.IsNullOrEmpty(caption))
                 caption = null;
 
@@ -265,7 +265,7 @@ public static class SliderScraper
         if (string.IsNullOrEmpty(caption))
         {
             string altVal = img.GetAttributeValue("alt", "");
-            caption = string.IsNullOrWhiteSpace(altVal) ? null : WebUtility.HtmlDecode(altVal)?.Trim();
+            caption = string.IsNullOrWhiteSpace(altVal) ? null : WebUtility.HtmlDecode(altVal).Trim();
         }
 
         // Find description text (paragraph after heading).
