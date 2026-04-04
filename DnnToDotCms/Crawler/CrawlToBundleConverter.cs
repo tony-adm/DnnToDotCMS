@@ -285,4 +285,57 @@ public static class CrawlToBundleConverter
             .Replace(' ', '-')
             .ToLowerInvariant();
     }
+
+    // ------------------------------------------------------------------
+    // Theme / container / template definitions from crawled layout
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Build container definitions from a crawled layout.  The container
+    /// uses <c>$!{dotContent.body}</c> Velocity syntax to render content.
+    /// </summary>
+    /// <param name="themeName">
+    /// Theme name to associate with the container (may be empty).
+    /// </param>
+    /// <returns>
+    /// A list of container tuples in the format consumed by
+    /// <see cref="Bundle.BundleWriter.Write"/>.
+    /// </returns>
+    public static IReadOnlyList<(string id, string inode, string name, string html, string themeName)>
+        BuildContainerDefs(string themeName)
+    {
+        string id    = Guid.NewGuid().ToString();
+        string inode = Guid.NewGuid().ToString();
+        return [(id, inode, "Standard", "$!{dotContent.body}", themeName)];
+    }
+
+    /// <summary>
+    /// Build a template definition from a <see cref="CrawlLayout"/> extracted
+    /// from the first crawled page.  The layout's
+    /// <see cref="CrawlLayoutExtractor.ContentPanePlaceholder"/> is replaced
+    /// with a <c>#parseContainer</c> Velocity directive referencing the
+    /// supplied container.
+    /// </summary>
+    /// <param name="layout">Layout extracted by <see cref="CrawlLayoutExtractor"/>.</param>
+    /// <param name="containerId">
+    /// Container identifier to embed in the <c>#parseContainer</c> directive.
+    /// </param>
+    /// <returns>
+    /// A list containing a single template tuple in the format consumed by
+    /// <see cref="Bundle.BundleWriter.Write"/>.
+    /// </returns>
+    public static IReadOnlyList<(string id, string inode, string name, string html,
+        string header, string themeName, IReadOnlyDictionary<string, int> paneUuidMap)>
+        BuildTemplateDef(CrawlLayout layout, string containerId)
+    {
+        string templateBody = layout.TemplateBody.Replace(
+            CrawlLayoutExtractor.ContentPanePlaceholder,
+            $"#parseContainer('{containerId}', '1')");
+
+        string id    = Guid.NewGuid().ToString();
+        string inode = Guid.NewGuid().ToString();
+
+        return [(id, inode, "Default", templateBody, layout.TemplateHeader,
+                 layout.ThemeName, layout.PaneMap)];
+    }
 }

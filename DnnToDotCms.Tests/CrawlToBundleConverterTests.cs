@@ -472,6 +472,121 @@ public class CrawlToBundleConverterTests
     }
 
     // -----------------------------------------------------------------------
+    // BuildContainerDefs
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public void BuildContainerDefs_ReturnsSingleStandardContainer()
+    {
+        var defs = CrawlToBundleConverter.BuildContainerDefs("my-theme");
+
+        Assert.Single(defs);
+        Assert.Equal("Standard", defs[0].name);
+        Assert.Contains("$!{dotContent.body}", defs[0].html);
+        Assert.Equal("my-theme", defs[0].themeName);
+    }
+
+    [Fact]
+    public void BuildContainerDefs_GeneratesUniqueIds()
+    {
+        var defs1 = CrawlToBundleConverter.BuildContainerDefs("theme");
+        var defs2 = CrawlToBundleConverter.BuildContainerDefs("theme");
+
+        Assert.NotEqual(defs1[0].id, defs2[0].id);
+        Assert.NotEqual(defs1[0].inode, defs2[0].inode);
+    }
+
+    [Fact]
+    public void BuildContainerDefs_EmptyThemeName_Allowed()
+    {
+        var defs = CrawlToBundleConverter.BuildContainerDefs("");
+
+        Assert.Single(defs);
+        Assert.Equal("", defs[0].themeName);
+    }
+
+    // -----------------------------------------------------------------------
+    // BuildTemplateDef
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public void BuildTemplateDef_ReplacesPlaceholderWithParseContainer()
+    {
+        string containerId = "test-container-id";
+        var paneMap = new Dictionary<string, int> { ["ContentPane"] = 1 };
+        var layout = new CrawlLayout(
+            $"<header>H</header>\n{CrawlLayoutExtractor.ContentPanePlaceholder}\n<footer>F</footer>",
+            "<link rel=\"stylesheet\" href=\"/application/css/style.css\">",
+            paneMap,
+            "my-theme");
+
+        var defs = CrawlToBundleConverter.BuildTemplateDef(layout, containerId);
+
+        Assert.Single(defs);
+        Assert.Contains($"#parseContainer('{containerId}', '1')", defs[0].html);
+        Assert.DoesNotContain(CrawlLayoutExtractor.ContentPanePlaceholder, defs[0].html);
+    }
+
+    [Fact]
+    public void BuildTemplateDef_PreservesLayoutHtml()
+    {
+        string containerId = "ctr-id";
+        var paneMap = new Dictionary<string, int> { ["ContentPane"] = 1 };
+        var layout = new CrawlLayout(
+            $"<header>Header</header>\n{CrawlLayoutExtractor.ContentPanePlaceholder}\n<footer>Footer</footer>",
+            "",
+            paneMap,
+            "theme");
+
+        var defs = CrawlToBundleConverter.BuildTemplateDef(layout, containerId);
+
+        Assert.Contains("<header>Header</header>", defs[0].html);
+        Assert.Contains("<footer>Footer</footer>", defs[0].html);
+    }
+
+    [Fact]
+    public void BuildTemplateDef_SetsThemeNameAndHeader()
+    {
+        var paneMap = new Dictionary<string, int> { ["ContentPane"] = 1 };
+        var layout = new CrawlLayout(
+            CrawlLayoutExtractor.ContentPanePlaceholder,
+            "<link rel=\"stylesheet\" href=\"/app.css\">",
+            paneMap,
+            "site-name");
+
+        var defs = CrawlToBundleConverter.BuildTemplateDef(layout, "ctr-id");
+
+        Assert.Equal("site-name", defs[0].themeName);
+        Assert.Contains("/app.css", defs[0].header);
+        Assert.Equal("Default", defs[0].name);
+    }
+
+    [Fact]
+    public void BuildTemplateDef_PaneMapPassedThrough()
+    {
+        var paneMap = new Dictionary<string, int> { ["ContentPane"] = 1 };
+        var layout = new CrawlLayout(CrawlLayoutExtractor.ContentPanePlaceholder, "", paneMap, "t");
+
+        var defs = CrawlToBundleConverter.BuildTemplateDef(layout, "ctr");
+
+        Assert.True(defs[0].paneUuidMap.ContainsKey("ContentPane"));
+        Assert.Equal(1, defs[0].paneUuidMap["ContentPane"]);
+    }
+
+    [Fact]
+    public void BuildTemplateDef_GeneratesUniqueIds()
+    {
+        var paneMap = new Dictionary<string, int> { ["ContentPane"] = 1 };
+        var layout = new CrawlLayout(CrawlLayoutExtractor.ContentPanePlaceholder, "", paneMap, "t");
+
+        var defs1 = CrawlToBundleConverter.BuildTemplateDef(layout, "ctr");
+        var defs2 = CrawlToBundleConverter.BuildTemplateDef(layout, "ctr");
+
+        Assert.NotEqual(defs1[0].id, defs2[0].id);
+        Assert.NotEqual(defs1[0].inode, defs2[0].inode);
+    }
+
+    // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------
 

@@ -238,12 +238,39 @@ static async Task<int> RunCrawlModeAsync(string url, int maxPages, string output
         // Derive a site name from the hostname.
         string siteName = startUri.Host;
 
+        // Extract layout structure from the first crawled page so that
+        // the generated bundle includes a proper DotCMS theme, template,
+        // and container derived from the original site's HTML structure
+        // rather than a minimal fallback template.
+        string themeName = BundleWriter.SanitizeHostname(siteName);
+        IReadOnlyList<(string id, string inode, string name, string html, string themeName)>? containerDefs = null;
+        IReadOnlyList<(string id, string inode, string name, string html, string header, string themeName, IReadOnlyDictionary<string, int> paneUuidMap)>? templateDefs = null;
+
+        CrawledPage firstPage = result.Pages[0];
+        if (!string.IsNullOrEmpty(firstPage.FullHtml))
+        {
+            CrawlLayout? layout = CrawlLayoutExtractor.ExtractLayout(
+                firstPage.FullHtml, themeName, result.BaseUrl);
+            if (layout is not null)
+            {
+                containerDefs = CrawlToBundleConverter.BuildContainerDefs(themeName);
+                if (containerDefs.Count > 0)
+                {
+                    templateDefs = CrawlToBundleConverter.BuildTemplateDef(
+                        layout, containerDefs[0].id);
+                    Console.WriteLine(
+                        $"Layout extracted from first page — theme '{themeName}' with " +
+                        $"{containerDefs.Count} container(s) and {templateDefs.Count} template(s).");
+                }
+            }
+        }
+
         if (File.Exists(outputPath))
             File.Delete(outputPath);
 
         using (var outStream = File.Create(outputPath))
             BundleWriter.Write(contentTypes, outStream, themesZipPath: null, siteName,
-                htmlContents, portalPages, portalFiles);
+                htmlContents, portalPages, portalFiles, containerDefs, templateDefs);
 
         Console.WriteLine(
             $"Bundle written to: {outputPath}" +
