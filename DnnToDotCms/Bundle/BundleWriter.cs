@@ -2550,6 +2550,42 @@ public static class BundleWriter
                     existingPaths.Add(cssRelPath);
                 }
             }
+
+            // Ensure the portal logo image is placed in each theme's Images/
+            // directory.  ConvertAscxToTemplateHtml replaces <dnn:LOGO> with
+            // <img src="/application/themes/{themeName}/Images/logo.png">, but
+            // the actual logo file often lives in the portal's Images/ folder
+            // (export_files.zip) rather than in the skin directory inside
+            // export_themes.zip.  Without this step the template references a
+            // file that does not exist in the bundle.
+            //
+            // Unlike per-skin CSS files, the portal logo is NOT marked as
+            // consumed because HTML content may still reference it via
+            // {{PortalRoot}}Images/logo.png → /Images/logo.png.
+            var resolvedThemes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (_, _, _, _, _, themeName, _) in templateDefs)
+            {
+                if (string.IsNullOrWhiteSpace(themeName) || !resolvedThemes.Add(themeName))
+                    continue;
+
+                string logoRelPath = $"application/themes/{themeName}/Images/logo.png";
+                if (existingPaths.Contains(logoRelPath))
+                    continue;
+
+                // Look for logo.png in the portal's Images/ folder.
+                if (portalFiles is not null)
+                {
+                    DnnPortalFile? logoFile = portalFiles.FirstOrDefault(pf =>
+                        pf.FileName.Equals("logo.png", StringComparison.OrdinalIgnoreCase) &&
+                        pf.FolderPath.TrimEnd('/').Equals("Images", StringComparison.OrdinalIgnoreCase));
+
+                    if (logoFile is not null)
+                    {
+                        themeFiles.Add((logoRelPath, "logo.png", logoFile.Content));
+                        existingPaths.Add(logoRelPath);
+                    }
+                }
+            }
         }
 
         if (themeFiles.Count == 0)
