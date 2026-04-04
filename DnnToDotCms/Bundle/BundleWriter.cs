@@ -144,11 +144,17 @@ public static class BundleWriter
             && htmlContents is not null && htmlContents.Count > 0
             && pages is not null && pages.Count > 0)
         {
+            // $!{dotContent.body} is DotCMS Velocity syntax that renders the
+            // "body" field of each contentlet placed in this container.  The
+            // $! prefix suppresses null output when the field is empty.
             string defaultContainerCode = "$!{dotContent.body}";
             string containerId   = Guid.NewGuid().ToString();
             string containerInode = Guid.NewGuid().ToString();
             containerDefs.Add((containerId, containerInode, "Standard", defaultContainerCode, ""));
 
+            // #parseContainer is a DotCMS Velocity directive that renders a
+            // container slot in the template.  The first argument is the
+            // container identifier, the second is a unique instance UUID.
             var paneMap = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
             {
                 ["ContentPane"] = 1

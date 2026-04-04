@@ -123,10 +123,15 @@ public static class CrawlToBundleConverter
         CrawlResult crawlResult,
         IReadOnlyList<DnnPortalPage>? portalPages = null)
     {
+        if (portalPages is not null && portalPages.Count != crawlResult.Pages.Count)
+            throw new ArgumentException(
+                $"portalPages count ({portalPages.Count}) must match crawlResult.Pages count ({crawlResult.Pages.Count}).",
+                nameof(portalPages));
+
         return crawlResult.Pages
             .Select((p, i) =>
             {
-                string tabUniqueId = portalPages is not null && i < portalPages.Count
+                string tabUniqueId = portalPages is not null
                     ? portalPages[i].UniqueId
                     : "";
                 return new DnnHtmlContent(
