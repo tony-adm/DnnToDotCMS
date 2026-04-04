@@ -2604,6 +2604,37 @@ public class BundleWriterTests
         Assert.DoesNotContain(names, n => n.EndsWith(".template.template.xml"));
     }
 
+    [Fact]
+    public void Write_CrawlModeFiles_PlacedUnderApplicationFolder()
+    {
+        // Crawl-mode portal files have FolderPath prefixed with "application/"
+        // so that BundleWriter places them under ROOT/application/.
+        var files = new[]
+        {
+            new DnnPortalFile(
+                Guid.NewGuid().ToString(), Guid.NewGuid().ToString(),
+                "logo.png", "application/images/", "image/png", [1, 2, 3]),
+            new DnnPortalFile(
+                Guid.NewGuid().ToString(), Guid.NewGuid().ToString(),
+                "style.css", "application/css/", "text/css",
+                Encoding.UTF8.GetBytes("body{}")),
+            new DnnPortalFile(
+                Guid.NewGuid().ToString(), Guid.NewGuid().ToString(),
+                "favicon.ico", "application/", "image/x-icon", [0]),
+        };
+
+        var (_, names) = WriteBundleWithFiles(files);
+
+        // Files must be under ROOT/application/.
+        Assert.Contains("ROOT/application/images/logo.png", names);
+        Assert.Contains("ROOT/application/css/style.css", names);
+        Assert.Contains("ROOT/application/favicon.ico", names);
+
+        // Must NOT be at the site root.
+        Assert.DoesNotContain("ROOT/images/logo.png", names);
+        Assert.DoesNotContain("ROOT/css/style.css", names);
+    }
+
     // ------------------------------------------------------------------
     // Portal static files (FileAsset) tests
     // ------------------------------------------------------------------

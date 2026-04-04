@@ -87,9 +87,13 @@ public static class CrawlToBundleConverter
             string slug  = DeriveSlug(page.Url);
             string title = string.IsNullOrWhiteSpace(page.Title) ? slug : page.Title;
 
+            // Rewrite asset references in the HTML body so they point to
+            // the /application/ folder where crawled assets are placed.
+            string rewrittenBody = RewriteAssetPaths(page.HtmlBody, crawlResult);
+
             htmlContents.Add(new DnnHtmlContent(
                 Title:       title,
-                HtmlBody:    page.HtmlBody,
+                HtmlBody:    rewrittenBody,
                 TabUniqueId: tabUniqueId,
                 PaneName:    "ContentPane"));
 
@@ -136,7 +140,7 @@ public static class CrawlToBundleConverter
                     : "";
                 return new DnnHtmlContent(
                     Title:       string.IsNullOrWhiteSpace(p.Title) ? DeriveSlug(p.Url) : p.Title,
-                    HtmlBody:    p.HtmlBody,
+                    HtmlBody:    RewriteAssetPaths(p.HtmlBody, crawlResult),
                     TabUniqueId: tabUniqueId,
                     PaneName:    "ContentPane");
             })
@@ -183,6 +187,11 @@ public static class CrawlToBundleConverter
                 if (folder.Length > 0 && !folder.EndsWith('/'))
                     folder += "/";
 
+                // Place all crawled assets inside the /application/ folder
+                // so they match the DNN-export convention where theme files
+                // live under /application/themes/{themeName}/.
+                folder = "application/" + folder;
+
                 return new DnnPortalFile(
                     UniqueId:    Guid.NewGuid().ToString(),
                     VersionGuid: Guid.NewGuid().ToString(),
@@ -192,6 +201,73 @@ public static class CrawlToBundleConverter
                     Content:     a.Content);
             })
             .ToList();
+    }
+
+    /// <summary>
+    /// Rewrite asset URL references in the HTML body so they point to
+    /// <c>/application/{relativePath}</c> instead of <c>/{relativePath}</c>,
+    /// matching the folder structure where <see cref="ConvertAssets"/>
+    /// places crawled files.
+    /// </summary>
+    internal static string RewriteAssetPaths(string html, CrawlResult crawlResult)
+    {
+        if (string.IsNullOrEmpty(html) || crawlResult.Assets.Count == 0)
+            return html;
+
+        string baseAuthority = crawlResult.BaseUrl.GetLeftPart(UriPartial.Authority);
+
+        foreach (CrawledAsset asset in crawlResult.Assets)
+        {
+            string relPath = asset.RelativePath;
+            if (string.IsNullOrEmpty(relPath))
+                continue;
+
+            // Replace absolute URLs from the same origin.
+            // e.g. https://example.com/images/logo.png → /application/images/logo.png
+            string absoluteUrl = baseAuthority + "/" + relPath;
+            html = html.Replace(absoluteUrl, "/application/" + relPath, StringComparison.OrdinalIgnoreCase);
+
+            // Replace root-relative references.
+            // e.g. /images/logo.png → /application/images/logo.png
+            // Only replace when preceded by a delimiter that indicates an
+            // HTML attribute value or CSS url() to avoid false positives.
+            string rootRelative = "/" + relPath;
+            html = ReplacePrefixed(html, rootRelative, "/application/" + relPath);
+        }
+
+        return html;
+    }
+
+    /// <summary>
+    /// Replace occurrences of <paramref name="oldValue"/> with
+    /// <paramref name="newValue"/> only when preceded by a character
+    /// that indicates an HTML attribute value or CSS <c>url()</c>
+    /// context: <c>"</c>, <c>'</c>, <c>(</c>, or <c>=</c>.
+    /// </summary>
+    private static string ReplacePrefixed(string html, string oldValue, string newValue)
+    {
+        int idx = 0;
+        while (true)
+        {
+            int pos = html.IndexOf(oldValue, idx, StringComparison.OrdinalIgnoreCase);
+            if (pos < 0)
+                break;
+
+            if (pos > 0)
+            {
+                char prev = html[pos - 1];
+                if (prev is '"' or '\'' or '(' or '=')
+                {
+                    html = string.Concat(html.AsSpan(0, pos), newValue, html.AsSpan(pos + oldValue.Length));
+                    idx = pos + newValue.Length;
+                    continue;
+                }
+            }
+
+            idx = pos + oldValue.Length;
+        }
+
+        return html;
     }
 
     /// <summary>
