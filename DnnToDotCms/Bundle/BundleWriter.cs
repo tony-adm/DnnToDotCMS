@@ -134,6 +134,36 @@ public static class BundleWriter
             }
         }
 
+        // When no theme definitions were collected but we have both HTML
+        // content and portal pages, create a minimal default container and
+        // template so that BundleWriter can link content to pages via
+        // multiTree — matching the bundle structure produced by the export
+        // path.  This is the typical scenario for the --crawl code path
+        // where no export_themes.zip is available.
+        if (containerDefs.Count == 0 && templateDefs.Count == 0
+            && htmlContents is not null && htmlContents.Count > 0
+            && pages is not null && pages.Count > 0)
+        {
+            // $!{dotContent.body} is DotCMS Velocity syntax that renders the
+            // "body" field of each contentlet placed in this container.  The
+            // $! prefix suppresses null output when the field is empty.
+            string defaultContainerCode = "$!{dotContent.body}";
+            string containerId   = Guid.NewGuid().ToString();
+            string containerInode = Guid.NewGuid().ToString();
+            containerDefs.Add((containerId, containerInode, "Standard", defaultContainerCode, ""));
+
+            // #parseContainer is a DotCMS Velocity directive that renders a
+            // container slot in the template.  The first argument is the
+            // container identifier, the second is a unique instance UUID.
+            var paneMap = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["ContentPane"] = 1
+            };
+            string templateBody = $"#parseContainer('{containerId}', '1')";
+            templateDefs.Add((Guid.NewGuid().ToString(), Guid.NewGuid().ToString(),
+                "Default", templateBody, "", "", paneMap));
+        }
+
         using var gz  = new GZipStream(output, CompressionLevel.Optimal, leaveOpen: true);
         using var tar = new TarWriter(gz, TarEntryFormat.Ustar);
 

@@ -2506,6 +2506,105 @@ public class BundleWriterTests
     }
 
     // ------------------------------------------------------------------
+    // Fallback container / template tests (no themes zip)
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Write_WithPagesAndContentsButNoThemes_CreatesDefaultContainer()
+    {
+        // When there is no themes zip but pages and content exist, a default
+        // "Standard" container should be created automatically so that
+        // multiTree linkage works.
+        string tabId = "tab-fallback-1";
+        var pages = new[]
+        {
+            new DnnPortalPage(tabId, "Home", "Home", "", "//Home", 0, true, ""),
+        };
+        var contents = new[]
+        {
+            new DnnHtmlContent("Welcome", "<h1>Hello</h1>",
+                TabUniqueId: tabId, PaneName: "ContentPane"),
+        };
+
+        var (ms, names) = WriteBundleWithPagesAndContents(pages, contents);
+
+        // Should have a container XML entry.
+        Assert.Contains(names, n => n.EndsWith(".containers.container.xml"));
+    }
+
+    [Fact]
+    public void Write_WithPagesAndContentsButNoThemes_CreatesDefaultTemplate()
+    {
+        string tabId = "tab-fallback-2";
+        var pages = new[]
+        {
+            new DnnPortalPage(tabId, "About", "About", "", "//About", 0, true, ""),
+        };
+        var contents = new[]
+        {
+            new DnnHtmlContent("About Us", "<p>About</p>",
+                TabUniqueId: tabId, PaneName: "ContentPane"),
+        };
+
+        var (ms, names) = WriteBundleWithPagesAndContents(pages, contents);
+
+        // Should have a template XML entry.
+        Assert.Contains(names, n => n.EndsWith(".template.template.xml"));
+    }
+
+    [Fact]
+    public void Write_WithPagesAndContentsButNoThemes_PageHasPopulatedMultiTree()
+    {
+        // The page's multiTree should link to the content item when fallback
+        // container/template are used (the crawl-mode scenario).
+        string tabId = "tab-fallback-3";
+        var pages = new[]
+        {
+            new DnnPortalPage(tabId, "Home", "Home", "", "//Home", 0, true, ""),
+        };
+        var contents = new[]
+        {
+            new DnnHtmlContent("Welcome", "<h1>Hello</h1>",
+                TabUniqueId: tabId, PaneName: "ContentPane"),
+        };
+
+        var (ms, names) = WriteBundleWithPagesAndContents(pages, contents);
+
+        // Find the page XML (htmlpageasset).
+        string? pageXml = null;
+        foreach (string name in names.Where(n =>
+            n.Contains("/1/") && n.EndsWith(".content.xml") && !n.Contains("host.xml")))
+        {
+            string? xml = ReadTarEntry(ms, name);
+            if (xml is not null && xml.Contains("htmlpageasset"))
+            {
+                pageXml = xml;
+                break;
+            }
+        }
+
+        Assert.NotNull(pageXml);
+        Assert.Contains("<multiTree>", pageXml);
+        Assert.DoesNotContain("<multiTree/>", pageXml);
+    }
+
+    [Fact]
+    public void Write_WithPagesOnly_NoFallbackContainerOrTemplate()
+    {
+        // When there are pages but NO content, no fallback container/template
+        // should be created (the fallback is only needed when linking content).
+        var pages = new[]
+        {
+            new DnnPortalPage("aaa", "Home", "Home", "", "//Home", 0, true, ""),
+        };
+
+        var (_, names) = WriteBundleWithPages(pages);
+
+        Assert.DoesNotContain(names, n => n.EndsWith(".containers.container.xml"));
+        Assert.DoesNotContain(names, n => n.EndsWith(".template.template.xml"));
+    }
+
+    // ------------------------------------------------------------------
     // Portal static files (FileAsset) tests
     // ------------------------------------------------------------------
 

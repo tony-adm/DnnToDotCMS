@@ -11,7 +11,10 @@ public static class CrawlToBundleConverter
 {
     /// <summary>
     /// Build the single <c>htmlContent</c> content type that the crawled
-    /// HTML pages will be stored under.
+    /// HTML pages will be stored under.  The field structure matches
+    /// <c>ModuleMappings.HtmlContent()</c> (Title, Body, Image) so that
+    /// crawl-produced bundles have the same content-type shape as
+    /// export-produced bundles.
     /// </summary>
     public static DotCmsContentType BuildHtmlContentType()
     {
@@ -20,46 +23,123 @@ public static class CrawlToBundleConverter
             Clazz       = "com.dotcms.contenttype.model.type.SimpleContentType",
             Name        = "HTMLContent",
             Variable    = "htmlContent",
-            Description = "HTML content migrated from a crawled website.",
-            Icon        = "fa fa-file-text",
+            Description = "Converted from DNN HTML module",
+            Icon        = "fa fa-code",
             Fields =
             [
                 new DotCmsField
                 {
-                    Clazz          = "com.dotcms.contenttype.model.field.ImmutableTextField",
+                    Clazz          = "com.dotcms.contenttype.model.field.TextField",
                     Name           = "Title",
                     Variable       = "title",
                     DataType       = "TEXT",
                     FieldTypeLabel = "Text",
                     Indexed        = true,
                     Searchable     = true,
+                    Sortable       = true,
                     Listed         = true,
                     Required       = true,
                 },
                 new DotCmsField
                 {
-                    Clazz          = "com.dotcms.contenttype.model.field.ImmutableWysiwygField",
+                    Clazz          = "com.dotcms.contenttype.model.field.WysiwygField",
                     Name           = "Body",
                     Variable       = "body",
                     DataType       = "LONG_TEXT",
                     FieldTypeLabel = "WYSIWYG",
                     Indexed        = true,
                     Searchable     = true,
+                    Required       = true,
+                },
+                new DotCmsField
+                {
+                    Clazz          = "com.dotcms.contenttype.model.field.TextField",
+                    Name           = "Image",
+                    Variable       = "image",
+                    DataType       = "TEXT",
+                    FieldTypeLabel = "Text",
+                    Indexed        = true,
+                    Searchable     = true,
+                    Sortable       = true,
+                    Hint           = "Icon or image URL for container rendering",
                 },
             ],
         };
     }
 
     /// <summary>
+    /// Convert crawled pages into paired <see cref="DnnHtmlContent"/> and
+    /// <see cref="DnnPortalPage"/> lists that share the same
+    /// <c>TabUniqueId</c> / <c>UniqueId</c>, so that
+    /// <see cref="Bundle.BundleWriter"/> can link content items to their
+    /// pages via <c>multiTree</c> entries — matching the export path.
+    /// </summary>
+    public static (IReadOnlyList<DnnHtmlContent> HtmlContents, IReadOnlyList<DnnPortalPage> PortalPages) Convert(CrawlResult crawlResult)
+    {
+        var htmlContents = new List<DnnHtmlContent>(crawlResult.Pages.Count);
+        var portalPages  = new List<DnnPortalPage>(crawlResult.Pages.Count);
+
+        foreach (CrawledPage page in crawlResult.Pages)
+        {
+            // Generate a shared tab identifier so BundleWriter can link
+            // the content item to its page via multiTree.
+            string tabUniqueId = Guid.NewGuid().ToString();
+            string slug  = DeriveSlug(page.Url);
+            string title = string.IsNullOrWhiteSpace(page.Title) ? slug : page.Title;
+
+            htmlContents.Add(new DnnHtmlContent(
+                Title:       title,
+                HtmlBody:    page.HtmlBody,
+                TabUniqueId: tabUniqueId,
+                PaneName:    "ContentPane"));
+
+            portalPages.Add(new DnnPortalPage(
+                UniqueId:    tabUniqueId,
+                Name:        slug,
+                Title:       title,
+                Description: page.Description,
+                TabPath:     "//" + slug,
+                Level:       0,
+                IsVisible:   true,
+                SkinSrc:     ""));
+        }
+
+        return (htmlContents, portalPages);
+    }
+
+    /// <summary>
     /// Convert each <see cref="CrawledPage"/> to a <see cref="DnnHtmlContent"/>
     /// that <see cref="Bundle.BundleWriter"/> can write as a published contentlet.
+    /// Each content item is linked to a page via <c>TabUniqueId</c> and placed
+    /// in the <c>ContentPane</c> pane.
     /// </summary>
-    public static IReadOnlyList<DnnHtmlContent> ConvertPages(CrawlResult crawlResult)
+    /// <param name="crawlResult">The crawl result.</param>
+    /// <param name="portalPages">
+    /// Portal pages produced by <see cref="ConvertPortalPages"/> from the same
+    /// crawl result.  The <c>TabUniqueId</c> of each content item is set to the
+    /// matching page's <c>UniqueId</c> (same positional index).
+    /// </param>
+    public static IReadOnlyList<DnnHtmlContent> ConvertPages(
+        CrawlResult crawlResult,
+        IReadOnlyList<DnnPortalPage>? portalPages = null)
     {
+        if (portalPages is not null && portalPages.Count != crawlResult.Pages.Count)
+            throw new ArgumentException(
+                $"portalPages count ({portalPages.Count}) must match crawlResult.Pages count ({crawlResult.Pages.Count}).",
+                nameof(portalPages));
+
         return crawlResult.Pages
-            .Select(p => new DnnHtmlContent(
-                Title:       string.IsNullOrWhiteSpace(p.Title) ? DeriveSlug(p.Url) : p.Title,
-                HtmlBody:    p.HtmlBody))
+            .Select((p, i) =>
+            {
+                string tabUniqueId = portalPages is not null
+                    ? portalPages[i].UniqueId
+                    : "";
+                return new DnnHtmlContent(
+                    Title:       string.IsNullOrWhiteSpace(p.Title) ? DeriveSlug(p.Url) : p.Title,
+                    HtmlBody:    p.HtmlBody,
+                    TabUniqueId: tabUniqueId,
+                    PaneName:    "ContentPane");
+            })
             .ToList();
     }
 
