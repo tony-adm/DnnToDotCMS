@@ -357,6 +357,197 @@ public class WebCrawlerTests
         Assert.DoesNotContain(result.Pages, p => p.Url.Host == "external.com");
     }
 
+    // -----------------------------------------------------------------------
+    // ExtractCssReferences
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public void ExtractCssReferences_FindsImportUrl()
+    {
+        byte[] css = System.Text.Encoding.UTF8.GetBytes("""
+            @import url("fonts.css");
+            body { color: red; }
+            """);
+        var cssUrl = new Uri("https://example.com/css/main.css");
+        var refs = WebCrawler.ExtractCssReferences(css, cssUrl).ToList();
+
+        Assert.Single(refs);
+        Assert.Equal("https://example.com/css/fonts.css", refs[0].AbsoluteUri);
+    }
+
+    [Fact]
+    public void ExtractCssReferences_FindsBareImport()
+    {
+        byte[] css = System.Text.Encoding.UTF8.GetBytes("""
+            @import "reset.css";
+            """);
+        var cssUrl = new Uri("https://example.com/css/main.css");
+        var refs = WebCrawler.ExtractCssReferences(css, cssUrl).ToList();
+
+        Assert.Single(refs);
+        Assert.Equal("https://example.com/css/reset.css", refs[0].AbsoluteUri);
+    }
+
+    [Fact]
+    public void ExtractCssReferences_FindsUrlReferences()
+    {
+        byte[] css = System.Text.Encoding.UTF8.GetBytes("""
+            body { background: url('../images/bg.png'); }
+            @font-face { src: url('/fonts/font.woff2'); }
+            """);
+        var cssUrl = new Uri("https://example.com/css/main.css");
+        var refs = WebCrawler.ExtractCssReferences(css, cssUrl).ToList();
+
+        Assert.Equal(2, refs.Count);
+        Assert.Contains(refs, u => u.AbsoluteUri == "https://example.com/images/bg.png");
+        Assert.Contains(refs, u => u.AbsoluteUri == "https://example.com/fonts/font.woff2");
+    }
+
+    [Fact]
+    public void ExtractCssReferences_SkipsDataUris()
+    {
+        byte[] css = System.Text.Encoding.UTF8.GetBytes("""
+            .icon { background: url(data:image/png;base64,abc123); }
+            """);
+        var cssUrl = new Uri("https://example.com/css/main.css");
+        var refs = WebCrawler.ExtractCssReferences(css, cssUrl).ToList();
+
+        Assert.Empty(refs);
+    }
+
+    [Fact]
+    public void ExtractCssReferences_EmptyContent_ReturnsEmpty()
+    {
+        var cssUrl = new Uri("https://example.com/css/main.css");
+        var refs = WebCrawler.ExtractCssReferences(Array.Empty<byte>(), cssUrl).ToList();
+        Assert.Empty(refs);
+    }
+
+    [Fact]
+    public void ExtractCssReferences_HandlesUnquotedUrl()
+    {
+        byte[] css = System.Text.Encoding.UTF8.GetBytes("""
+            .bg { background: url(../img/hero.jpg); }
+            """);
+        var cssUrl = new Uri("https://example.com/css/style.css");
+        var refs = WebCrawler.ExtractCssReferences(css, cssUrl).ToList();
+
+        Assert.Single(refs);
+        Assert.Equal("https://example.com/img/hero.jpg", refs[0].AbsoluteUri);
+    }
+
+    [Fact]
+    public void ExtractCssReferences_HandlesSingleQuotedUrl()
+    {
+        byte[] css = System.Text.Encoding.UTF8.GetBytes("""
+            .bg { background: url('/img/hero.jpg'); }
+            """);
+        var cssUrl = new Uri("https://example.com/css/style.css");
+        var refs = WebCrawler.ExtractCssReferences(css, cssUrl).ToList();
+
+        Assert.Single(refs);
+        Assert.Equal("https://example.com/img/hero.jpg", refs[0].AbsoluteUri);
+    }
+
+    // -----------------------------------------------------------------------
+    // IsCssAsset
+    // -----------------------------------------------------------------------
+
+    [Theory]
+    [InlineData("text/css", "style.css", true)]
+    [InlineData("text/css", "style.min.css", true)]
+    [InlineData("text/css; charset=utf-8", "style.css", true)]
+    [InlineData("application/javascript", "app.js", false)]
+    [InlineData("image/png", "logo.png", false)]
+    [InlineData("", "styles/main.css", true)]
+    [InlineData("", "app.js", false)]
+    public void IsCssAsset_CorrectlyIdentifiesCssFiles(string mime, string path, bool expected)
+    {
+        var asset = new CrawledAsset(new Uri("https://example.com/" + path), path, mime, Array.Empty<byte>());
+        Assert.Equal(expected, WebCrawler.IsCssAsset(asset));
+    }
+
+    // -----------------------------------------------------------------------
+    // CrawlAsync — CSS sub-resource integration test
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task CrawlAsync_DownloadsCssSubResources()
+    {
+        string html = """
+            <html>
+            <head><link rel="stylesheet" href="/css/main.css"></head>
+            <body><main><p>Hello</p></main></body>
+            </html>
+            """;
+        string css = """
+            @import url("reset.css");
+            body { background: url('../images/bg.png'); }
+            @font-face { src: url('/fonts/font.woff2'); }
+            """;
+
+        var handler = new MockHttpHandler(
+            new Dictionary<string, (string Content, string ContentType)>
+            {
+                ["/"] = (html, "text/html"),
+            },
+            new Dictionary<string, (byte[] Content, string ContentType)>
+            {
+                ["/css/main.css"] = (System.Text.Encoding.UTF8.GetBytes(css), "text/css"),
+                ["/css/reset.css"] = (System.Text.Encoding.UTF8.GetBytes("* { margin: 0; }"), "text/css"),
+                ["/images/bg.png"] = (new byte[] { 0x89, 0x50 }, "image/png"),
+                ["/fonts/font.woff2"] = (new byte[] { 0x77, 0x4F }, "font/woff2"),
+            });
+
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://test.local/") };
+        var crawler = new WebCrawler(http, maxPages: 10);
+        var result = await crawler.CrawlAsync(new Uri("https://test.local/"));
+
+        // The main CSS plus all 3 sub-resources should be discovered.
+        Assert.Equal(4, result.Assets.Count);
+        Assert.Contains(result.Assets, a => a.RelativePath == "css/main.css");
+        Assert.Contains(result.Assets, a => a.RelativePath == "css/reset.css");
+        Assert.Contains(result.Assets, a => a.RelativePath == "images/bg.png");
+        Assert.Contains(result.Assets, a => a.RelativePath == "fonts/font.woff2");
+    }
+
+    [Fact]
+    public async Task CrawlAsync_CssSubResourcesNoDuplicates()
+    {
+        string html = """
+            <html>
+            <head>
+                <link rel="stylesheet" href="/css/a.css">
+                <link rel="stylesheet" href="/css/b.css">
+            </head>
+            <body><main><p>Hello</p></main></body>
+            </html>
+            """;
+        // Both CSS files import the same reset.css
+        string cssA = """@import url("reset.css");""";
+        string cssB = """@import url("reset.css");""";
+
+        var handler = new MockHttpHandler(
+            new Dictionary<string, (string Content, string ContentType)>
+            {
+                ["/"] = (html, "text/html"),
+            },
+            new Dictionary<string, (byte[] Content, string ContentType)>
+            {
+                ["/css/a.css"] = (System.Text.Encoding.UTF8.GetBytes(cssA), "text/css"),
+                ["/css/b.css"] = (System.Text.Encoding.UTF8.GetBytes(cssB), "text/css"),
+                ["/css/reset.css"] = (System.Text.Encoding.UTF8.GetBytes("* {}"), "text/css"),
+            });
+
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://test.local/") };
+        var crawler = new WebCrawler(http, maxPages: 10);
+        var result = await crawler.CrawlAsync(new Uri("https://test.local/"));
+
+        // a.css, b.css, and reset.css (only once, no duplicate)
+        Assert.Equal(3, result.Assets.Count);
+        Assert.Single(result.Assets, a => a.RelativePath == "css/reset.css");
+    }
+
     [Fact]
     public void Constructor_ThrowsOnNullHttpClient()
     {
