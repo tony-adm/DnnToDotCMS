@@ -62,11 +62,23 @@ DNN organises content in *modules* placed on pages. DotCMS organises content in 
 
 ## Quick Start
 
+### From a DNN export folder
+
 ```bash
 git clone https://github.com/tony-adm/DnnToDotCMS.git
 cd DnnToDotCMS
 dotnet run --project DnnToDotCms -- example/2026-03-29_01-49-26
 # → produces site.tar.gz in the current directory
+```
+
+### From a live website (crawl mode)
+
+```bash
+dotnet run --project DnnToDotCms -- --crawl https://www.example.com
+# → crawls the site and produces site.tar.gz
+
+dotnet run --project DnnToDotCms -- --crawl https://www.example.com --max-pages 50 --output crawled.tar.gz
+# → crawl up to 50 pages, write to crawled.tar.gz
 ```
 
 > **Note:** The executable project lives in the `DnnToDotCms/` subfolder.
@@ -91,6 +103,8 @@ All commands below are run from the **repo root**. The `--project DnnToDotCms`
 flag tells the .NET SDK which project to run (the executable is in the
 `DnnToDotCms/` subfolder, not in the root).
 
+### DNN Export mode
+
 ```bash
 # Use an export folder (also picks up export_themes.zip for theme assets)
 dotnet run --project DnnToDotCms -- example/2026-03-29_01-49-26
@@ -107,6 +121,21 @@ dotnet run --project DnnToDotCms -- example/2026-03-29_01-49-26 --output my-site
 # Help
 dotnet run --project DnnToDotCms -- --help
 ```
+
+### Crawl mode (live website)
+
+```bash
+# Crawl a live website and produce a bundle
+dotnet run --project DnnToDotCms -- --crawl https://www.example.com
+
+# Crawl with a page limit and custom output
+dotnet run --project DnnToDotCms -- --crawl https://www.example.com --max-pages 50 --output crawled.tar.gz
+```
+
+The crawler follows same-origin links starting from the given URL, extracts
+the main body content from each page, and downloads static assets (images,
+CSS, JS, fonts).  The result is a standard DotCMS push-publish bundle
+identical in structure to the DNN export output.
 
 Or build a self-contained executable first:
 
@@ -128,7 +157,29 @@ dotnet publish DnnToDotCms -c Release -o ./publish
 
 ## Input Formats
 
-### 1. DNN Official Site-Export folder (recommended)
+### 1. Crawl a live website (crawl mode)
+
+Pass `--crawl <url>` to crawl any publicly accessible website and create a
+DotCMS bundle from the crawled content.  No DNN export is needed — this mode
+works with any website.
+
+```bash
+dotnet run --project DnnToDotCms -- --crawl https://www.example.com
+dotnet run --project DnnToDotCms -- --crawl https://www.example.com --max-pages 100 --output site.tar.gz
+```
+
+The crawler:
+- Starts at the given URL and follows same-origin `<a href>` links
+- Extracts page `<title>`, meta description, and `<main>` / `<body>` content
+- Downloads static assets: `<img>`, `<link rel="stylesheet">`, `<script>`,
+  and `<link rel="icon">` resources
+- Stays within the same host/port/scheme (does not follow external links)
+- Stops after `--max-pages` pages (default 200)
+
+The crawled pages are written as DotCMS `htmlContent` contentlets and
+`htmlpageasset` page entries; static assets become `FileAsset` contentlets.
+
+### 2. DNN Official Site-Export folder (recommended)
 
 DNN's built-in **Export / Import** wizard produces a timestamped folder (e.g.
 `2026-03-29_01-49-26`) containing `export.json` and several ZIP archives.
@@ -160,7 +211,7 @@ Typical folder layout produced by DNN Export:
   export_themes.zip      ← installed themes  ← static assets extracted into bundle
 ```
 
-### 2. DNN Package Manifest (`.dnn` file)
+### 3. DNN Package Manifest (`.dnn` file)
 
 A standard DNN module-installation manifest with a
 `<dotnetnuke type="Package">` root element:
@@ -169,7 +220,7 @@ A standard DNN module-installation manifest with a
 dotnet run --project DnnToDotCms -- samples/sample-site-export.dnn
 ```
 
-### 3. IPortable Module-Content Export (`.xml` file)
+### 4. IPortable Module-Content Export (`.xml` file)
 
 Produced when a single module is exported from a DNN page:
 
@@ -274,7 +325,7 @@ Each `contentType.json` file uses the DotCMS push-publish bundle format:
 
 ```
 DnnToDotCms/
-  Program.cs                  CLI entry point
+  Program.cs                  CLI entry point (DNN export + crawl modes)
   Models/
     DnnModels.cs              DNN data models (DnnModule, DnnModuleDefinition, …)
     DotCmsModels.cs           DotCMS data models (content type, field, and bundle-format models)
@@ -286,12 +337,18 @@ DnnToDotCms/
     DnnConverter.cs           Converts DnnModule objects to DotCmsContentType objects
   Bundle/
     BundleWriter.cs           Writes a DotCMS push-publish bundle (.tar.gz)
+  Crawler/
+    CrawlResult.cs            Models for crawled data (CrawledPage, CrawledAsset, CrawlResult)
+    WebCrawler.cs             Crawls a live website following same-origin links
+    CrawlToBundleConverter.cs Converts crawl results into DotCMS models for BundleWriter
 
 DnnToDotCms.Tests/
   DnnXmlParserTests.cs        Tests for the DNN XML parser (including export-folder format)
   ModuleMappingsTests.cs      Tests for the module-type mappings
   DnnConverterTests.cs        Tests for the conversion logic
   BundleWriterTests.cs        Tests for the bundle writer
+  WebCrawlerTests.cs          Tests for the web crawler (mock HTTP handler)
+  CrawlToBundleConverterTests.cs  Tests for crawl-to-bundle conversion
 
 example/
   2026-03-29_01-49-26/        Real DNN official site-export folder ("My Website")
@@ -313,5 +370,5 @@ samples/
 dotnet test
 ```
 
-All 71 unit tests cover the parser (including the export-folder format), mappings, converter, and bundle writer.
+All 336 unit tests cover the parser (including the export-folder format), mappings, converter, bundle writer, web crawler, and crawl-to-bundle converter.
 
