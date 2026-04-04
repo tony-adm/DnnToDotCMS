@@ -254,11 +254,14 @@ static async Task<int> RunCrawlModeAsync(string url, int maxPages, string output
             if (layout is not null)
             {
                 containerDefs = CrawlToBundleConverter.BuildContainerDefs(themeName);
-                templateDefs = CrawlToBundleConverter.BuildTemplateDef(
-                    layout, containerDefs[0].id);
-                Console.WriteLine(
-                    $"Layout extracted from first page — theme '{themeName}' with " +
-                    $"{containerDefs.Count} container(s) and {templateDefs.Count} template(s).");
+                if (containerDefs.Count > 0)
+                {
+                    templateDefs = CrawlToBundleConverter.BuildTemplateDef(
+                        layout, containerDefs[0].id);
+                    Console.WriteLine(
+                        $"Layout extracted from first page — theme '{themeName}' with " +
+                        $"{containerDefs.Count} container(s) and {templateDefs.Count} template(s).");
+                }
             }
         }
 
