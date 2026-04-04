@@ -140,7 +140,7 @@ public static class CrawlToBundleConverter
                     : "";
                 return new DnnHtmlContent(
                     Title:       string.IsNullOrWhiteSpace(p.Title) ? DeriveSlug(p.Url) : p.Title,
-                    HtmlBody:    p.HtmlBody,
+                    HtmlBody:    RewriteAssetPaths(p.HtmlBody, crawlResult),
                     TabUniqueId: tabUniqueId,
                     PaneName:    "ContentPane");
             })
@@ -225,13 +225,12 @@ public static class CrawlToBundleConverter
             // Replace absolute URLs from the same origin.
             // e.g. https://example.com/images/logo.png → /application/images/logo.png
             string absoluteUrl = baseAuthority + "/" + relPath;
-            if (html.Contains(absoluteUrl, StringComparison.OrdinalIgnoreCase))
-                html = html.Replace(absoluteUrl, "/application/" + relPath, StringComparison.OrdinalIgnoreCase);
+            html = html.Replace(absoluteUrl, "/application/" + relPath, StringComparison.OrdinalIgnoreCase);
 
             // Replace root-relative references.
             // e.g. /images/logo.png → /application/images/logo.png
-            // Only replace when preceded by a quote or parenthesis to avoid
-            // false positives in plain text.
+            // Only replace when preceded by a delimiter that indicates an
+            // HTML attribute value or CSS url() to avoid false positives.
             string rootRelative = "/" + relPath;
             html = ReplacePrefixed(html, rootRelative, "/application/" + relPath);
         }
@@ -241,9 +240,9 @@ public static class CrawlToBundleConverter
 
     /// <summary>
     /// Replace occurrences of <paramref name="oldValue"/> with
-    /// <paramref name="newValue"/> only when preceded by a quote
-    /// (<c>"</c>, <c>'</c>) or <c>(</c> — typical HTML attribute or
-    /// CSS <c>url()</c> delimiters.
+    /// <paramref name="newValue"/> only when preceded by a character
+    /// that indicates an HTML attribute value or CSS <c>url()</c>
+    /// context: <c>"</c>, <c>'</c>, <c>(</c>, or <c>=</c>.
     /// </summary>
     private static string ReplacePrefixed(string html, string oldValue, string newValue)
     {
@@ -257,7 +256,7 @@ public static class CrawlToBundleConverter
             if (pos > 0)
             {
                 char prev = html[pos - 1];
-                if (prev == '"' || prev == '\'' || prev == '(')
+                if (prev is '"' or '\'' or '(' or '=')
                 {
                     html = string.Concat(html.AsSpan(0, pos), newValue, html.AsSpan(pos + oldValue.Length));
                     idx = pos + newValue.Length;

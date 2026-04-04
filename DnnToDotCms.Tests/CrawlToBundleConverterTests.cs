@@ -392,6 +392,71 @@ public class CrawlToBundleConverterTests
         Assert.DoesNotContain("\"/images/photo.jpg\"", contents[0].HtmlBody);
     }
 
+    [Fact]
+    public void ConvertPages_RewritesHtmlBodyAssetPaths()
+    {
+        // ConvertPages must also rewrite asset paths, not just Convert().
+        var page = new CrawledPage(
+            new Uri("https://example.com/about"),
+            "About", "", """<img src="/images/photo.jpg">""");
+        var asset = new CrawledAsset(
+            new Uri("https://example.com/images/photo.jpg"),
+            "images/photo.jpg", "image/jpeg", [1]);
+
+        var result = new CrawlResult(BaseUrl, [page], [asset]);
+        var contents = CrawlToBundleConverter.ConvertPages(result);
+
+        Assert.Contains("/application/images/photo.jpg", contents[0].HtmlBody);
+        Assert.DoesNotContain("\"/images/photo.jpg\"", contents[0].HtmlBody);
+    }
+
+    [Fact]
+    public void RewriteAssetPaths_UnquotedAttribute()
+    {
+        var asset = new CrawledAsset(
+            new Uri("https://example.com/images/logo.png"),
+            "images/logo.png", "image/png", [1]);
+        var result = new CrawlResult(BaseUrl, [], [asset]);
+
+        string html = "<img src=/images/logo.png>";
+        string rewritten = CrawlToBundleConverter.RewriteAssetPaths(html, result);
+
+        Assert.Equal("<img src=/application/images/logo.png>", rewritten);
+    }
+
+    [Fact]
+    public void RewriteAssetPaths_MultipleAssetsInSameHtml()
+    {
+        var assets = new[]
+        {
+            new CrawledAsset(new Uri("https://example.com/images/a.png"), "images/a.png", "image/png", [1]),
+            new CrawledAsset(new Uri("https://example.com/css/style.css"), "css/style.css", "text/css", [2]),
+        };
+        var result = new CrawlResult(BaseUrl, [], assets);
+
+        string html = """<link href="/css/style.css"><img src="/images/a.png">""";
+        string rewritten = CrawlToBundleConverter.RewriteAssetPaths(html, result);
+
+        Assert.Contains("/application/images/a.png", rewritten);
+        Assert.Contains("/application/css/style.css", rewritten);
+        Assert.DoesNotContain("\"/images/a.png\"", rewritten);
+        Assert.DoesNotContain("\"/css/style.css\"", rewritten);
+    }
+
+    [Fact]
+    public void RewriteAssetPaths_DeepNestedPath()
+    {
+        var asset = new CrawledAsset(
+            new Uri("https://example.com/assets/fonts/roboto/roboto.woff2"),
+            "assets/fonts/roboto/roboto.woff2", "font/woff2", [1]);
+        var result = new CrawlResult(BaseUrl, [], [asset]);
+
+        string html = """url("/assets/fonts/roboto/roboto.woff2")""";
+        string rewritten = CrawlToBundleConverter.RewriteAssetPaths(html, result);
+
+        Assert.Contains("/application/assets/fonts/roboto/roboto.woff2", rewritten);
+    }
+
     // -----------------------------------------------------------------------
     // DeriveSlug
     // -----------------------------------------------------------------------
@@ -412,4 +477,7 @@ public class CrawlToBundleConverterTests
 
     private static CrawlResult MakeCrawlResult(params CrawledPage[] pages)
         => new(BaseUrl, pages, []);
+
+    private static CrawlResult MakeCrawlResult(CrawledPage[] pages, CrawledAsset[] assets)
+        => new(BaseUrl, pages, assets);
 }
