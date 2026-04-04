@@ -9,7 +9,7 @@ using DnnToDotCms.Parser;
 // ---------------------------------------------------------------------------
 //
 // Usage:
-//   DnnToDotCms <input> [--output <site.tar.gz>] [--help]
+//   DnnToDotCms <input> [--output <site.tar.gz>] [--site-url <url>] [--help]
 //   DnnToDotCms --crawl <url> [--output <site.tar.gz>] [--max-pages <n>]
 //   DnnToDotCms --help
 //
@@ -20,6 +20,7 @@ using DnnToDotCms.Parser;
 // Options:
 //   --crawl <url>            Crawl a live website and create a bundle from its content
 //   --max-pages <n>          Maximum pages to crawl (default: 200, only with --crawl)
+//   --site-url <url>         Scrape slider/carousel data from the live site (export mode)
 //   --output <path>          Write the bundle to a file (default: site.tar.gz)
 //   --help, -h               Show this help and exit
 // ---------------------------------------------------------------------------
@@ -34,6 +35,7 @@ if (args.Length == 0 || args.Any(a => a is "--help" or "-h"))
 string? inputPath  = null;
 string? outputPath = null;
 string? crawlUrl   = null;
+string? siteUrl    = null;
 int     maxPages   = 200;
 
 for (int i = 0; i < args.Length; i++)
@@ -45,6 +47,9 @@ for (int i = 0; i < args.Length; i++)
             break;
         case "--crawl" when i + 1 < args.Length:
             crawlUrl = args[++i];
+            break;
+        case "--site-url" when i + 1 < args.Length:
+            siteUrl = args[++i];
             break;
         case "--max-pages" when i + 1 < args.Length:
             if (!int.TryParse(args[++i], out maxPages) || maxPages < 1)
@@ -132,8 +137,40 @@ try
 
     // Extract HTML module content from the LiteDB database (export_db.zip).
     // Available only when the input is a DNN official site-export folder.
+    // When --site-url is provided, scrape slider data from the live site
+    // to supplement the export (FisSlider stores slide metadata in a custom
+    // SQL table that is not included in DNN exports).
+    IReadOnlyList<ScrapedSlide>? scrapedSlides = null;
+    if (siteUrl is not null)
+    {
+        if (Uri.TryCreate(siteUrl, UriKind.Absolute, out Uri? siteUri)
+            && (siteUri.Scheme == "http" || siteUri.Scheme == "https"))
+        {
+            try
+            {
+                using var httpClient = new HttpClient();
+                httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(
+                    "DnnToDotCms/1.0 (+https://github.com/tony-adm/DnnToDotCMS)");
+                httpClient.Timeout = TimeSpan.FromSeconds(30);
+                scrapedSlides = await SliderScraper.ScrapeAsync(httpClient, siteUri);
+                if (scrapedSlides.Count > 0)
+                    Console.WriteLine($"Scraped {scrapedSlides.Count} slide(s) from {siteUrl}.");
+                else
+                    Console.WriteLine($"No slider/carousel found at {siteUrl}.");
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Warning: Could not scrape slider data from '{siteUrl}': {ex.Message}");
+            }
+        }
+        else
+        {
+            Console.Error.WriteLine($"Warning: Invalid --site-url: {siteUrl}");
+        }
+    }
+
     IReadOnlyList<DnnHtmlContent> htmlContents = exportDir is not null
-        ? DnnXmlParser.ParseHtmlContents(exportDir)
+        ? DnnXmlParser.ParseHtmlContents(exportDir, scrapedSlides)
         : [];
 
     // Extract portal pages (tabs) from the LiteDB database.
@@ -310,7 +347,7 @@ static void PrintUsage()
         DotCMS push-publish bundle.
 
         Usage:
-          DnnToDotCms <input> [--output <site.tar.gz>]
+          DnnToDotCms <input> [--output <site.tar.gz>] [--site-url <url>]
           DnnToDotCms --crawl <url> [--max-pages <n>] [--output <site.tar.gz>]
           DnnToDotCms --help
 
@@ -324,6 +361,9 @@ static void PrintUsage()
                               HTML pages and static assets (images, CSS, JS)
           --max-pages <n>     Maximum number of pages to crawl (default: 200,
                               only used with --crawl)
+          --site-url <url>    Scrape slider/carousel data from the live DNN site
+                              to supplement the export (FisSlider stores slide
+                              metadata in a custom SQL table not in exports)
           --output <path>     Write the bundle to a specific file
                               (default: site.tar.gz in the current directory)
           --help, -h          Show this help message

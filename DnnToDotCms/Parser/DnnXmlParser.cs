@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
+using DnnToDotCms.Crawler;
 using DnnToDotCms.Models;
 using LiteDB;
 
@@ -79,7 +80,18 @@ public static class DnnXmlParser
     /// inside that folder.
     /// </param>
     public static IReadOnlyList<DnnHtmlContent> ParseHtmlContents(string exportFolderOrJson)
-        => WithLiteDb(exportFolderOrJson, ExtractHtmlContents);
+        => WithLiteDb(exportFolderOrJson, db => ExtractHtmlContents(db));
+
+    /// <summary>
+    /// Overload that accepts pre-scraped slider data from a live site.
+    /// When <paramref name="scrapedSlides"/> is provided, FisSlider modules
+    /// use the scraped image URLs, link destinations, and captions instead of
+    /// placeholders.
+    /// </summary>
+    public static IReadOnlyList<DnnHtmlContent> ParseHtmlContents(
+        string exportFolderOrJson,
+        IReadOnlyList<ScrapedSlide>? scrapedSlides)
+        => WithLiteDb(exportFolderOrJson, db => ExtractHtmlContents(db, scrapedSlides));
 
     // ------------------------------------------------------------------
     // Shared LiteDB helper
@@ -199,7 +211,8 @@ public static class DnnXmlParser
     // LiteDB HTML content extraction
     // ------------------------------------------------------------------
 
-    private static IReadOnlyList<DnnHtmlContent> ExtractHtmlContents(LiteDatabase db)
+    private static IReadOnlyList<DnnHtmlContent> ExtractHtmlContents(
+        LiteDatabase db, IReadOnlyList<ScrapedSlide>? scrapedSlides = null)
     {
         // Build a mapping of TabID (int) → UniqueId (GUID string) from ExportTab.
         var tabUniqueIds = new Dictionary<int, string>();
@@ -399,7 +412,7 @@ public static class DnnXmlParser
                     .SelectMany(kv => kv.Value)
                     .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
                     .ToList();
-                body = BuildSliderHtml(displayTitle, sliderImages);
+                body = BuildSliderHtml(displayTitle, sliderImages, scrapedSlides);
             }
             else
             {
@@ -519,15 +532,11 @@ public static class DnnXmlParser
 
     /// <summary>
     /// Builds a Bootstrap 5 carousel (<c>div.carousel</c>) for a FisSlider
-    /// module instance.  When <paramref name="imagePaths"/> is empty an empty
-    /// carousel structure ready to be configured in DotCMS is produced.
-    /// Each slide uses the image filename (without extension) as the caption
-    /// heading — the only slide-specific text available from DNN exports.
-    /// FisSlider slide descriptions and link URLs are stored in a custom SQL
-    /// table (<c>FisSlider_Slides</c>) that is not included in DNN exports;
-    /// a placeholder <c>&lt;a href="#"&gt;Learn More&lt;/a&gt;</c> button is
-    /// emitted for each slide so content editors can supply the correct URL in
-    /// DotCMS after import.
+    /// module instance.  When <paramref name="scrapedSlides"/> is provided
+    /// (from a live site scrape via <c>--site-url</c>), the carousel uses
+    /// scraped image URLs, link destinations, and captions.  Otherwise
+    /// falls back to export-only data: image filenames as captions and
+    /// placeholder links.
     /// </summary>
     /// <param name="title">
     /// The DNN module title — used to derive a stable, unique HTML element ID
@@ -538,7 +547,17 @@ public static class DnnXmlParser
     /// (e.g. <c>FisSlider-Images/slide.jpg</c>).  Each path is prefixed with
     /// <c>/</c> so it resolves from the DotCMS site root.
     /// </param>
-    private static string BuildSliderHtml(string title, IReadOnlyList<string> imagePaths)
+    /// <param name="scrapedSlides">
+    /// Optional slides scraped from the live site.  When provided and
+    /// non-empty, these take priority over <paramref name="imagePaths"/>
+    /// because they include link URLs, captions, and descriptions that
+    /// are stored in the <c>FisSlider_Slides</c> SQL table and not
+    /// available in DNN exports.
+    /// </param>
+    internal static string BuildSliderHtml(
+        string title,
+        IReadOnlyList<string> imagePaths,
+        IReadOnlyList<ScrapedSlide>? scrapedSlides = null)
     {
         // Derive a safe HTML id attribute value from the module title.
         // Include a short SHA-256 hash of the original title to prevent
@@ -551,14 +570,19 @@ public static class DnnXmlParser
         string shortHash = Convert.ToHexString(hashBytes)[..8].ToLowerInvariant();
         string carouselId = $"dnn-slider-{safeName}-{shortHash}";
 
+        // Use scraped slides when available; otherwise fall back to
+        // export-only image paths with placeholder metadata.
+        bool useScraped = scrapedSlides is not null && scrapedSlides.Count > 0;
+        int slideCount = useScraped ? scrapedSlides!.Count : imagePaths.Count;
+
         var sb = new StringBuilder();
         sb.AppendLine($"""<div id="{carouselId}" class="carousel slide" data-bs-ride="carousel">""");
 
-        if (imagePaths.Count > 0)
+        if (slideCount > 0)
         {
             // Carousel indicators (navigation dots).
             sb.AppendLine("""  <div class="carousel-indicators">""");
-            for (int i = 0; i < imagePaths.Count; i++)
+            for (int i = 0; i < slideCount; i++)
             {
                 string extraAttrs = i == 0 ? " class=\"active\" aria-current=\"true\"" : string.Empty;
                 sb.AppendLine($"""    <button type="button" data-bs-target="#{carouselId}" data-bs-slide-to="{i}"{extraAttrs} aria-label="Slide {i + 1}"></button>""");
@@ -567,26 +591,54 @@ public static class DnnXmlParser
 
             // Carousel slides.
             sb.AppendLine("""  <div class="carousel-inner">""");
-            for (int i = 0; i < imagePaths.Count; i++)
+            for (int i = 0; i < slideCount; i++)
             {
                 string activeClass = i == 0 ? " active" : string.Empty;
-                string src = "/" + imagePaths[i].TrimStart('/');
-                // Use the filename (without extension) as alt text; it is more
-                // descriptive than a generic "Slide N" and can be refined by
-                // content editors in DotCMS after import.
-                string altText = Path.GetFileNameWithoutExtension(imagePaths[i]);
-                if (string.IsNullOrWhiteSpace(altText)) altText = $"Slide {i + 1}";
+                string src;
+                string altText;
+                string linkHref;
+                string? captionHeading;
+                string? captionDescription;
+
+                if (useScraped)
+                {
+                    var slide = scrapedSlides![i];
+                    src = slide.ImageUrl;
+                    altText = !string.IsNullOrWhiteSpace(slide.Caption)
+                        ? System.Security.SecurityElement.Escape(slide.Caption) ?? $"Slide {i + 1}"
+                        : $"Slide {i + 1}";
+                    linkHref = slide.LinkUrl ?? "#";
+                    captionHeading = slide.Caption;
+                    captionDescription = slide.Description;
+                }
+                else
+                {
+                    src = "/" + imagePaths[i].TrimStart('/');
+                    altText = Path.GetFileNameWithoutExtension(imagePaths[i]);
+                    if (string.IsNullOrWhiteSpace(altText)) altText = $"Slide {i + 1}";
+                    linkHref = "#";
+                    captionHeading = altText;
+                    captionDescription = null;
+                }
+
                 sb.AppendLine($"""    <div class="carousel-item{activeClass}">""");
                 sb.AppendLine($"""      <img src="{src}" class="d-block w-100" alt="{altText}">""");
-                // Caption overlay using the image filename as the slide title.
-                // FisSlider stores per-slide link URLs in a custom SQL table
-                // (FisSlider_Slides.LinkUrl) that is not included in DNN exports.
-                // A placeholder link is emitted so content editors can supply
-                // the correct destination URL directly in DotCMS after import.
                 sb.AppendLine("""      <div class="carousel-caption d-none d-md-block">""");
-                sb.AppendLine($"""        <h5>{altText}</h5>""");
-                sb.AppendLine("""        <!-- TODO: replace '#' with the slide destination URL -->""");
-                sb.AppendLine("""        <a href="#" class="btn btn-primary">Learn More</a>""");
+                if (!string.IsNullOrWhiteSpace(captionHeading))
+                {
+                    string escapedCaption = System.Security.SecurityElement.Escape(captionHeading) ?? captionHeading;
+                    sb.AppendLine($"""        <h5>{escapedCaption}</h5>""");
+                }
+                if (!string.IsNullOrWhiteSpace(captionDescription))
+                {
+                    string escapedDesc = System.Security.SecurityElement.Escape(captionDescription) ?? captionDescription;
+                    sb.AppendLine($"""        <p>{escapedDesc}</p>""");
+                }
+                if (!useScraped || linkHref == "#")
+                {
+                    sb.AppendLine("""        <!-- TODO: replace '#' with the slide destination URL -->""");
+                }
+                sb.AppendLine($"""        <a href="{linkHref}" class="btn btn-primary">Learn More</a>""");
                 sb.AppendLine("      </div>");
                 sb.AppendLine("    </div>");
             }
