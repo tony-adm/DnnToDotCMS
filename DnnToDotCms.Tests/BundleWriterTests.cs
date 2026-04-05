@@ -3408,6 +3408,65 @@ public class BundleWriterTests
         finally { File.Delete(zipPath); }
     }
 
+    [Fact]
+    public void Write_WithTheme_PortalRootLogoFileIsCopiedToThemeImagesDir()
+    {
+        // When logo.png lives at the portal ROOT (FolderPath = "") instead
+        // of the Images/ sub-folder, it must still be copied into the
+        // theme's Images/ directory and consumed (not duplicated at ROOT/).
+        string zipPath = Path.GetTempFileName() + ".zip";
+        try
+        {
+            using (var zip = ZipFile.Open(zipPath, ZipArchiveMode.Create))
+            {
+                ZipArchiveEntry skin = zip.CreateEntry("_default/Skins/TestTheme/Home.ascx");
+                using (var w = new StreamWriter(skin.Open()))
+                    w.Write("""<div><dnn:LOGO runat="server" id="logo" /></div>""");
+
+                ZipArchiveEntry container = zip.CreateEntry("_default/Containers/TestTheme/C.ascx");
+                using (var w = new StreamWriter(container.Open()))
+                    w.Write("""<div id="ContentPane" runat="server"></div>""");
+            }
+
+            byte[] logoBytes = [0x89, 0x50, 0x4E, 0x47]; // minimal PNG header
+            var portalFiles = new List<DnnPortalFile>
+            {
+                // logo.png at the portal root – no Images/ folder
+                new("uid-logo", "ver-logo", "logo.png", "", "image/png", logoBytes)
+            };
+
+            var (ms, names) = WriteBundleWithFilesAndThemes(portalFiles, zipPath, "Test Site");
+
+            // The theme copy must exist.
+            var logoAssetEntries = names.Where(n =>
+                n.StartsWith("assets/") && n.EndsWith("/logo.png")).ToList();
+            Assert.True(logoAssetEntries.Count >= 1,
+                $"Expected at least 1 logo.png asset entry (theme), found {logoAssetEntries.Count}");
+
+            // Verify the theme copy's contentlet XML references the correct path.
+            var contentEntries = names.Where(n =>
+                n.StartsWith("live/") && n.EndsWith(".content.xml")).ToList();
+            bool foundThemeLogo = false;
+            foreach (string ce in contentEntries)
+            {
+                string? xml = ReadTarEntry(ms, ce);
+                if (xml is not null &&
+                    xml.Contains("application/themes/TestTheme/Images/") &&
+                    xml.Contains("logo.png"))
+                {
+                    foundThemeLogo = true;
+                    break;
+                }
+            }
+            Assert.True(foundThemeLogo,
+                "Expected a contentlet XML referencing application/themes/TestTheme/Images/logo.png");
+
+            // The portal logo must be consumed – NOT at the site root.
+            Assert.DoesNotContain(names, n => n == "ROOT/logo.png");
+        }
+        finally { File.Delete(zipPath); }
+    }
+
     // ------------------------------------------------------------------
     // Theme zip – all non-ASCX file types included
     // ------------------------------------------------------------------
