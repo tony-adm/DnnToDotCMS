@@ -2572,12 +2572,18 @@ public static class BundleWriter
                 if (existingPaths.Contains(logoRelPath))
                     continue;
 
-                // Look for logo.png in the portal's Images/ folder.
+                // Look for logo.png in the portal files – prefer the Images/
+                // folder, but fall back to the portal root (empty FolderPath)
+                // since some DNN exports place the logo at the root level.
                 if (portalFiles is not null)
                 {
                     DnnPortalFile? logoFile = portalFiles.FirstOrDefault(pf =>
                         pf.FileName.Equals("logo.png", StringComparison.OrdinalIgnoreCase) &&
                         pf.FolderPath.TrimEnd('/').Equals("Images", StringComparison.OrdinalIgnoreCase));
+
+                    logoFile ??= portalFiles.FirstOrDefault(pf =>
+                        pf.FileName.Equals("logo.png", StringComparison.OrdinalIgnoreCase) &&
+                        string.IsNullOrEmpty(pf.FolderPath));
 
                     if (logoFile is not null)
                     {
