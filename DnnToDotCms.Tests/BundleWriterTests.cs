@@ -3377,11 +3377,11 @@ public class BundleWriterTests
             var (ms, names) = WriteBundleWithFilesAndThemes(portalFiles, zipPath, "Test Site");
 
             // The theme binary asset for logo.png must exist (pattern: assets/…/logo.png).
-            // There should be at least two: one from the theme copy, one from the portal file.
+            // The logo should appear exactly once — in the theme directory only.
             var logoAssetEntries = names.Where(n =>
                 n.StartsWith("assets/") && n.EndsWith("/logo.png")).ToList();
-            Assert.True(logoAssetEntries.Count >= 2,
-                $"Expected at least 2 logo.png asset entries (theme + portal), found {logoAssetEntries.Count}");
+            Assert.True(logoAssetEntries.Count >= 1,
+                $"Expected at least 1 logo.png asset entry (theme), found {logoAssetEntries.Count}");
 
             // Verify the theme copy's contentlet XML references the correct folder path.
             var contentEntries = names.Where(n =>
@@ -3401,9 +3401,9 @@ public class BundleWriterTests
             Assert.True(foundThemeLogo,
                 "Expected a contentlet XML referencing application/themes/TestTheme/Images/logo.png");
 
-            // The portal file should ALSO still be written to the site root
-            // Images/ folder (not consumed) for HTML content references.
-            Assert.Contains(names, n => n == "ROOT/Images/logo.png");
+            // The portal logo file must be consumed (placed only in the theme
+            // directory) and NOT duplicated at the site root.
+            Assert.DoesNotContain(names, n => n == "ROOT/Images/logo.png");
         }
         finally { File.Delete(zipPath); }
     }

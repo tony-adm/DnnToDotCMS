@@ -2559,9 +2559,9 @@ public static class BundleWriter
             // export_themes.zip.  Without this step the template references a
             // file that does not exist in the bundle.
             //
-            // Unlike per-skin CSS files, the portal logo is NOT marked as
-            // consumed because HTML content may still reference it via
-            // {{PortalRoot}}Images/logo.png → /Images/logo.png.
+            // Mark the portal logo as consumed so it is placed only in
+            // the theme's Images/ directory and not duplicated at the
+            // site root (ROOT/Images/logo.png).
             var resolvedThemes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var (_, _, _, _, _, themeName, _) in templateDefs)
             {
@@ -2583,6 +2583,7 @@ public static class BundleWriter
                     {
                         themeFiles.Add((logoRelPath, "logo.png", logoFile.Content));
                         existingPaths.Add(logoRelPath);
+                        consumedPortalFileIds?.Add(logoFile.UniqueId);
                     }
                 }
             }
