@@ -288,15 +288,24 @@ public static class BundleWriter
                 }
 
                 // Track per-pane container votes for template resolution.
-                if (!string.IsNullOrEmpty(hc.PaneName) && !string.IsNullOrEmpty(hc.ContainerSrc))
+                // Modules with an empty ContainerSrc inherit the site/page
+                // default container.  They MUST still count as votes so that
+                // a single specialised container (e.g. zelle.ascx on one page)
+                // does not win the per-pane vote when the vast majority of
+                // pages use the default container for the same pane.
+                if (!string.IsNullOrEmpty(hc.PaneName))
                 {
+                    string voteSrc = string.IsNullOrEmpty(hc.ContainerSrc)
+                        ? "_default_"          // sentinel – won't match any real container
+                        : hc.ContainerSrc;
+
                     if (!paneContainerVotes.TryGetValue(hc.PaneName, out var votes))
                     {
                         votes = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
                         paneContainerVotes[hc.PaneName] = votes;
                     }
-                    votes.TryGetValue(hc.ContainerSrc, out int count);
-                    votes[hc.ContainerSrc] = count + 1;
+                    votes.TryGetValue(voteSrc, out int count);
+                    votes[voteSrc] = count + 1;
                 }
             }
         }
