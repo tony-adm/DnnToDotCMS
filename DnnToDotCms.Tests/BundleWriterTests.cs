@@ -4705,6 +4705,73 @@ public class BundleWriterTests
         return zipPath;
     }
 
+    [Fact]
+    public void Write_DefaultContainerVotesOutweighSingleSpecialised()
+    {
+        // Regression: when many modules in a pane use the default container
+        // (empty ContainerSrc) and only one uses a specialised container,
+        // the default should win the per-pane vote so the specialised
+        // container is NOT baked into the template for all pages.
+        string skinAscx = """
+            <%@ Control Inherits="DotNetNuke.UI.Skins.Skin" %>
+            <div id="ContentPane" runat="server"></div>
+            <div id="BannerPaneInner" runat="server"></div>
+            """;
+        string standardAscx = """
+            <%@ Control Inherits="DotNetNuke.UI.Containers.Container" %>
+            <div id="ContentPane" runat="server"></div>
+            """;
+        string zelleAscx = """
+            <%@ Control Inherits="DotNetNuke.UI.Containers.Container" %>
+            <div id="ContentPane" runat="server" style="display:none"></div>
+            <div class="zelle-faq">Zelle FAQ content</div>
+            """;
+
+        string zipPath = BuildThemesZipWithMultipleContainers(
+            skinAscx, standardAscx, "standard", zelleAscx, "zelle");
+        try
+        {
+            var pages = new[]
+            {
+                new DnnPortalPage("tab-1", "Home", "Home", "", "//Home", 0, true, ""),
+                new DnnPortalPage("tab-2", "About", "About", "", "//About", 0, true, ""),
+            };
+
+            // Three modules in BannerPaneInner: two use the default container
+            // (empty ContainerSrc), one uses the specialised "zelle" container.
+            var contents = new[]
+            {
+                new DnnHtmlContent("Banner", "<img src='banner.jpg'/>",
+                    TabUniqueId: "tab-1", PaneName: "BannerPaneInner"),
+                new DnnHtmlContent("Banner", "<img src='banner.jpg'/>",
+                    TabUniqueId: "tab-2", PaneName: "BannerPaneInner"),
+                new DnnHtmlContent("Zelle", "placeholder",
+                    TabUniqueId: "tab-1", PaneName: "BannerPaneInner",
+                    ContainerSrc: "[L]Containers/TestTheme/zelle.ascx"),
+            };
+
+            var (ms, names) = WriteBundleWithPagesAndContents(pages, contents,
+                themesZipPath: zipPath);
+
+            // Read the template XML – it should use the default ("standard")
+            // container for the BannerPaneInner pane, NOT the zelle container.
+            string? templateXml = null;
+            foreach (string name in names.Where(n => n.EndsWith(".template.template.xml")))
+            {
+                templateXml = ReadTarEntry(ms, name);
+                break;
+            }
+
+            Assert.NotNull(templateXml);
+            // The template must NOT reference the zelle container for the
+            // BannerPaneInner pane – verify by checking the template body
+            // does not contain "zelle-faq" (which would be the case if the
+            // zelle container code were embedded).
+            Assert.DoesNotContain("zelle-faq", templateXml);
+        }
+        finally { File.Delete(zipPath); }
+    }
+
     // ------------------------------------------------------------------
     // Tests for duplicate folder / identifier deduplication
     // ------------------------------------------------------------------
