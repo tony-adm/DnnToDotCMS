@@ -996,14 +996,7 @@ public static class BundleWriter
               </id>
               <multiTree/>
               <tree/>
-              <tags class="java.util.ImmutableCollections$ListN" resolves-to="java.util.CollSer" serialization="custom">
-                <java.util.CollSer>
-                  <default>
-                    <tag>1</tag>
-                  </default>
-                  <int>0</int>
-                </java.util.CollSer>
-              </tags>
+              <tags class="java.util.ArrayList"/>
               <operation>PUBLISH</operation>
             </com.dotcms.publisher.pusher.wrapper.HostWrapper>
             """;
@@ -1078,14 +1071,7 @@ public static class BundleWriter
               <multiTree/>
               <tree/>
               <categories/>
-              <tags class="java.util.ImmutableCollections$ListN" resolves-to="java.util.CollSer" serialization="custom">
-                <java.util.CollSer>
-                  <default>
-                    <tag>1</tag>
-                  </default>
-                  <int>0</int>
-                </java.util.CollSer>
-              </tags>
+              <tags class="java.util.ArrayList"/>
               <operation>PUBLISH</operation>
               <language>
                 <id>1</id>
@@ -1240,14 +1226,7 @@ public static class BundleWriter
               {multiTreeElement}
               <tree/>
               <categories/>
-              <tags class="java.util.ImmutableCollections$ListN" resolves-to="java.util.CollSer" serialization="custom">
-                <java.util.CollSer>
-                  <default>
-                    <tag>1</tag>
-                  </default>
-                  <int>0</int>
-                </java.util.CollSer>
-              </tags>
+              <tags class="java.util.ArrayList"/>
               <operation>PUBLISH</operation>
               <language>
                 <id>1</id>
@@ -1478,14 +1457,7 @@ public static class BundleWriter
               <multiTree/>
               <tree/>
               <categories/>
-              <tags class="java.util.ImmutableCollections$ListN" resolves-to="java.util.CollSer" serialization="custom">
-                <java.util.CollSer>
-                  <default>
-                    <tag>1</tag>
-                  </default>
-                  <int>0</int>
-                </java.util.CollSer>
-              </tags>
+              <tags class="java.util.ArrayList"/>
               <operation>PUBLISH</operation>
               <language>
                 <id>1</id>
