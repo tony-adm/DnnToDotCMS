@@ -140,6 +140,9 @@ public sealed class DotCmsBundleContentType
     [JsonPropertyName("id")]
     public string Id { get; set; } = string.Empty;
 
+    [JsonPropertyName("inode")]
+    public string Inode { get; set; } = string.Empty;
+
     [JsonPropertyName("description")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Description { get; set; }
