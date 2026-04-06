@@ -961,7 +961,7 @@ public static class BundleWriter
                 <publishDate class="sql-timestamp">{now}</publishDate>
               </info>
               <host>
-                <map class="com.dotmarketing.portlets.contentlet.model.Contentlet$ContentletHashMap">
+                <map class="java.util.concurrent.ConcurrentHashMap">
                   {EStr("type", "host")}
                   {EStr("inode", hostInode)}
                   {EStr("hostname", xmlHostname)}
@@ -1040,7 +1040,7 @@ public static class BundleWriter
                 <publishDate class="sql-timestamp">{now}</publishDate>
               </info>
               <content>
-                <map class="com.dotmarketing.portlets.contentlet.model.Contentlet$ContentletHashMap">
+                <map class="java.util.concurrent.ConcurrentHashMap">
                   {ETimestamp("modDate", now)}
                   {EStr("inode", inode)}
                   {EStr("host", hostId)}
@@ -1190,7 +1190,7 @@ public static class BundleWriter
                 <publishDate class="sql-timestamp">{now}</publishDate>
               </info>
               <content>
-                <map class="com.dotmarketing.portlets.contentlet.model.Contentlet$ContentletHashMap">
+                <map class="java.util.concurrent.ConcurrentHashMap">
                   {ETimestamp("modDate", now)}
                   {EStr("cachettl", "0")}
                   {EStr("inode", inode)}
@@ -1424,7 +1424,7 @@ public static class BundleWriter
                 <publishDate class="sql-timestamp">{now}</publishDate>
               </info>
               <content>
-                <map class="com.dotmarketing.portlets.contentlet.model.Contentlet$ContentletHashMap">
+                <map class="java.util.concurrent.ConcurrentHashMap">
                   {ETimestamp("modDate", now)}
                   {EStr("fileName", xmlFileName)}
                   {EStr("title", xmlFileName)}
@@ -1526,7 +1526,7 @@ public static class BundleWriter
                 <path>{folderPath}</path>
               </folderId>
               <host>
-                <map class="com.dotmarketing.portlets.contentlet.model.Contentlet$ContentletHashMap">
+                <map class="java.util.concurrent.ConcurrentHashMap">
                   {EStr("type", "host")}
                   {EStr("identifier", hostId)}
                 </map>
