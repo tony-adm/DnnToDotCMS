@@ -363,11 +363,65 @@ public static class BundleWriter
             // first container if no "standard" container exists.
             string defaultContainerId = ResolveDefaultContainerId(containerDefs);
 
+            // Build the folder hierarchy for child pages (Level > 0).
+            // DotCMS pages live inside folders; top-level pages use SYSTEM_FOLDER
+            // (the site root "/"), while child pages require explicit folders.
+            // DNN TabPath like "//Personal//CheckingAccounts" maps to a DotCMS
+            // folder "/personal/" with the page URL "checking-accounts".
+            var pageFolderInodes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (DnnPortalPage page in pages)
             {
-                // Only import non-deleted, non-admin Level-0 pages.
-                if (page.Level != 0) continue;
+                // Level-0 (top-level) pages use SYSTEM_FOLDER and parentPath="/"
+                // so they don't need explicit folder entries.  Only child pages
+                // (Level >= 1) require folder creation.
+                if (page.Level < 1) continue;
                 if (page.Name.Equals("Admin", StringComparison.OrdinalIgnoreCase)) continue;
+
+                // Parse TabPath to extract parent folder segments.
+                // "//Personal//CheckingAccounts" → ["Personal"]
+                string[] pathSegments = page.TabPath
+                    .Split("//", StringSplitOptions.RemoveEmptyEntries);
+                if (pathSegments.Length < 2) continue;
+
+                // Build each parent folder level (all segments except the last, which is the page itself).
+                for (int depth = 1; depth < pathSegments.Length; depth++)
+                {
+                    string folderSlug = string.Join("/",
+                        pathSegments[..depth].Select(s => PageNameToUrl(s)));
+                    pageFolderInodes.TryAdd(folderSlug, Guid.NewGuid().ToString());
+                }
+            }
+
+            // Write FolderWrapper XML for each page folder so DotCMS creates
+            // the folder structure before importing child pages.
+            if (siteId is not null && siteInode is not null)
+            {
+                foreach (var (folderSlug, folderInode) in pageFolderInodes)
+                {
+                    string folderName   = folderSlug.Split('/')[^1];
+                    string dotcmsPath   = "/" + folderSlug + "/";
+                    int lastSlash       = folderSlug.LastIndexOf('/');
+                    string pageFolderParent = lastSlash >= 0
+                        ? "/" + folderSlug[..lastSlash] + "/"
+                        : "/";
+
+                    string folderXml = BuildFolderXml(
+                        folderInode, folderName, dotcmsPath, pageFolderParent,
+                        siteId, siteInode);
+                    string entryDir = pageFolderParent == "/"
+                        ? "ROOT"
+                        : "ROOT/" + pageFolderParent.Trim('/');
+                    WriteTextEntry(tar, $"{entryDir}/{folderInode}.folder.xml", folderXml);
+                    manifestEntries.Add(("folder", folderInode, folderInode, dotcmsPath, contentWorkDir, "/"));
+                }
+            }
+
+            foreach (DnnPortalPage page in pages)
+            {
+                // Skip admin pages and deleted pages.
+                if (page.Name.Equals("Admin", StringComparison.OrdinalIgnoreCase)) continue;
+                // Skip child pages under Admin.
+                if (page.TabPath.Contains("//Admin//", StringComparison.OrdinalIgnoreCase)) continue;
 
                 string identifier = Guid.NewGuid().ToString();
                 string inode      = Guid.NewGuid().ToString();
@@ -380,10 +434,29 @@ public static class BundleWriter
                 // Resolve the pane-UUID mapping for the page's template.
                 templatePaneMaps.TryGetValue(templateId, out var paneUuidMap);
 
+                // Resolve the folder and parentPath for child pages.
+                string pageFolderInode = "SYSTEM_FOLDER";
+                string pageParentPath  = "/";
+                if (page.Level > 0)
+                {
+                    string[] pathSegments = page.TabPath
+                        .Split("//", StringSplitOptions.RemoveEmptyEntries);
+                    if (pathSegments.Length >= 2)
+                    {
+                        string folderSlug = string.Join("/",
+                            pathSegments[..^1].Select(s => PageNameToUrl(s)));
+                        if (pageFolderInodes.TryGetValue(folderSlug, out string? fi))
+                            pageFolderInode = fi;
+                        pageParentPath = "/" + folderSlug + "/";
+                    }
+                }
+
                 string pageXml = BuildPageXml(
                     identifier, inode, page.Title, url,
                     contentHostId, templateId,
-                    defaultContainerId, pageContentItems ?? [], paneUuidMap);
+                    defaultContainerId, pageContentItems ?? [], paneUuidMap,
+                    paneContainerIds, page.IsVisible, page.TabOrder,
+                    pageFolderInode, pageParentPath);
                 WriteTextEntry(
                     tar,
                     $"live/{contentWorkDir}/1/{identifier}.content.xml",
@@ -1191,19 +1264,29 @@ public static class BundleWriter
         string templateId,
         string containerId = "",
         IReadOnlyList<(string contentletId, string paneName)>? contentItems = null,
-        IReadOnlyDictionary<string, int>? paneUuidMap = null)
+        IReadOnlyDictionary<string, int>? paneUuidMap = null,
+        IReadOnlyDictionary<string, string>? paneContainerIds = null,
+        bool showOnMenu = true,
+        int sortOrder = 0,
+        string folderInode = "SYSTEM_FOLDER",
+        string parentPath = "/")
     {
         string now      = DateTime.UtcNow.ToString(XmlTimestampFormat);
         string xmlTitle = System.Security.SecurityElement.Escape(Truncate(title, MaxVarcharLength)) ?? string.Empty;
         string xmlUrl   = System.Security.SecurityElement.Escape(url) ?? string.Empty;
+        string xmlParentPath = System.Security.SecurityElement.Escape(parentPath) ?? "/";
+        string xmlFolderInode = System.Security.SecurityElement.Escape(folderInode) ?? "SYSTEM_FOLDER";
 
         string segments = string.Concat(Enumerable.Repeat(EmptyConcurrentHashMapSegment, 16));
 
         // Build multiTree entries linking this page to its contentlets via the container.
-        string multiTreeContent = BuildMultiTreeXml(identifier, containerId, contentItems ?? [], paneUuidMap);
+        string multiTreeContent = BuildMultiTreeXml(identifier, containerId,
+            contentItems ?? [], paneUuidMap, paneContainerIds);
         string multiTreeElement = string.IsNullOrEmpty(multiTreeContent)
             ? "<multiTree/>"
             : $"<multiTree>{multiTreeContent}</multiTree>";
+
+        string showOnMenuStr = showOnMenu ? "true" : "false";
 
         return $"""
             <com.dotcms.publisher.pusher.wrapper.PushContentWrapper>
@@ -1247,6 +1330,8 @@ public static class BundleWriter
                     <string>{xmlTitle}</string>
                     <string>friendlyName</string>
                     <string>{xmlTitle}</string>
+                    <string>showOnMenu</string>
+                    <boolean>{showOnMenuStr}</boolean>
                     <string>template</string>
                     <string>{templateId}</string>
                     <string>url</string>
@@ -1263,9 +1348,9 @@ public static class BundleWriter
                     <string>languageId</string>
                     <long>1</long>
                     <string>folder</string>
-                    <string>SYSTEM_FOLDER</string>
+                    <string>{xmlFolderInode}</string>
                     <string>sortOrder</string>
-                    <long>0</long>
+                    <long>{sortOrder}</long>
                     <string>modUser</string>
                     <string>dotcms.org.1</string>
                     <null/>
@@ -1284,7 +1369,7 @@ public static class BundleWriter
                 <id>{identifier}</id>
                 <assetName>{xmlUrl}</assetName>
                 <assetType>contentlet</assetType>
-                <parentPath>/</parentPath>
+                <parentPath>{xmlParentPath}</parentPath>
                 <hostId>{hostId}</hostId>
                 <owner>dotcms.org.1</owner>
                 <createDate class="sql-timestamp">{now}</createDate>
@@ -1323,7 +1408,7 @@ public static class BundleWriter
     /// <summary>
     /// Builds zero or more DotCMS <c>com.dotmarketing.beans.MultiTree</c> XML
     /// elements that associate a page (<paramref name="pageId"/>) with
-    /// content items placed in <paramref name="containerId"/>.
+    /// content items placed in <paramref name="defaultContainerId"/>.
     /// <para>
     /// When <paramref name="paneUuidMap"/> is provided, each content item's
     /// pane name is resolved to the matching <c>#parseContainer</c> UUID slot
@@ -1331,15 +1416,24 @@ public static class BundleWriter
     /// content) appear in the correct template region.  Multiple items sharing
     /// the same pane are distinguished by <c>tree_order</c>.
     /// </para>
+    /// <para>
+    /// When <paramref name="paneContainerIds"/> is provided, each content
+    /// item's pane name is resolved to the correct DotCMS container identifier.
+    /// This is critical for panes that use a non-default container (e.g.
+    /// <c>hpcard</c> or <c>card</c> containers) — without this, content items
+    /// in those panes would reference the wrong container and DotCMS would not
+    /// render them.
+    /// </para>
     /// Returns an empty string when no container or content items are given.
     /// </summary>
     private static string BuildMultiTreeXml(
         string pageId,
-        string containerId,
+        string defaultContainerId,
         IReadOnlyList<(string contentletId, string paneName)> contentItems,
-        IReadOnlyDictionary<string, int>? paneUuidMap = null)
+        IReadOnlyDictionary<string, int>? paneUuidMap = null,
+        IReadOnlyDictionary<string, string>? paneContainerIds = null)
     {
-        if (string.IsNullOrEmpty(containerId) || contentItems.Count == 0)
+        if (string.IsNullOrEmpty(defaultContainerId) || contentItems.Count == 0)
             return string.Empty;
 
         var sb = new StringBuilder();
@@ -1351,6 +1445,9 @@ public static class BundleWriter
             for (int i = 0; i < contentItems.Count; i++)
             {
                 string relationType = (i + 1).ToString();
+                // Resolve per-pane container ID when available.
+                string containerId = ResolveContentContainerId(
+                    contentItems[i].paneName, paneContainerIds, defaultContainerId);
                 AppendMultiTreeEntry(sb, pageId, containerId,
                     contentItems[i].contentletId, relationType, i);
             }
@@ -1376,12 +1473,33 @@ public static class BundleWriter
                     order = 0;
                 paneOrders[uuid] = order + 1;
 
+                // Resolve per-pane container ID when available.
+                string containerId = ResolveContentContainerId(
+                    paneName, paneContainerIds, defaultContainerId);
+
                 AppendMultiTreeEntry(sb, pageId, containerId,
                     contentletId, uuid.ToString(), globalOrder++);
             }
         }
 
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Resolves the container ID for a content item based on its pane name.
+    /// Returns the pane-specific container when available; otherwise falls
+    /// back to <paramref name="defaultContainerId"/>.
+    /// </summary>
+    private static string ResolveContentContainerId(
+        string paneName,
+        IReadOnlyDictionary<string, string>? paneContainerIds,
+        string defaultContainerId)
+    {
+        if (paneContainerIds is not null
+            && !string.IsNullOrEmpty(paneName)
+            && paneContainerIds.TryGetValue(paneName, out string? paneContainerId))
+            return paneContainerId;
+        return defaultContainerId;
     }
 
     /// <summary>Appends a single multiTree &lt;map&gt; entry to <paramref name="sb"/>.</summary>

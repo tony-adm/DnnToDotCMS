@@ -1102,4 +1102,57 @@ public class DnnXmlParserTests
             Directory.Delete(tempDir, recursive: true);
         }
     }
+
+    // ------------------------------------------------------------------
+    // ParsePortalPages tests — TabOrder and ParentId
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void ParsePortalPages_ReadsTabOrderAndParentId()
+    {
+        string tempDir = BuildExportDbFolder(db =>
+        {
+            var tabs = db.GetCollection("ExportTab");
+            tabs.Insert(new BsonDocument
+            {
+                ["TabName"]   = "Personal",
+                ["UniqueId"]  = new BsonValue(Guid.Parse("aaaa1111-0000-0000-0000-000000000000")),
+                ["IsDeleted"] = false,
+                ["TabPath"]   = "//Personal",
+                ["Level"]     = 0,
+                ["IsVisible"] = true,
+                ["TabOrder"]  = 5,
+            });
+            tabs.Insert(new BsonDocument
+            {
+                ["TabName"]   = "Checking",
+                ["UniqueId"]  = new BsonValue(Guid.Parse("bbbb2222-0000-0000-0000-000000000000")),
+                ["IsDeleted"] = false,
+                ["TabPath"]   = "//Personal//Checking",
+                ["Level"]     = 1,
+                ["IsVisible"] = true,
+                ["TabOrder"]  = 3,
+                ["ParentId"]  = 100,
+            });
+        });
+
+        try
+        {
+            IReadOnlyList<DnnPortalPage> pages = DnnXmlParser.ParsePortalPages(tempDir);
+
+            Assert.Equal(2, pages.Count);
+
+            var personal = pages.First(p => p.Name == "Personal");
+            Assert.Equal(5, personal.TabOrder);
+            Assert.Equal(-1, personal.ParentId); // No ParentId → defaults to -1.
+
+            var checking = pages.First(p => p.Name == "Checking");
+            Assert.Equal(3, checking.TabOrder);
+            Assert.Equal(100, checking.ParentId);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
 }

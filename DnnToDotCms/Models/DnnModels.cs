@@ -95,7 +95,19 @@ public sealed record DnnPortalPage(
     /// DNN skin source, e.g. <c>[G]Skins/Xcillion/Home.ascx</c>.
     /// Empty when the page inherits the portal default.
     /// </summary>
-    string SkinSrc);
+    string SkinSrc,
+    /// <summary>
+    /// DNN tab ordering within its parent.  Used to set the DotCMS
+    /// <c>sortOrder</c> field so pages appear in the correct sequence
+    /// in navigation menus.  Defaults to 0 when unavailable.
+    /// </summary>
+    int TabOrder = 0,
+    /// <summary>
+    /// DNN parent tab ID.  Used together with <see cref="TabPath"/> and
+    /// <see cref="Level"/> to build the DotCMS folder hierarchy for child
+    /// pages.  Defaults to -1 (no parent) for top-level pages.
+    /// </summary>
+    int ParentId = -1);
 
 /// <summary>
 /// Represents a DNN portal file extracted from the <c>ExportFile</c>
