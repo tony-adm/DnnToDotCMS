@@ -371,7 +371,6 @@ public static class BundleWriter
                 {
                     string partialPath = string.Join("/", parts[..depth]) + "/";
                     string dotcmsKey = "/" + partialPath;
-                    if (!dotcmsKey.EndsWith('/')) dotcmsKey += '/';
                     if (!unifiedFolderInodes.ContainsKey(dotcmsKey))
                         unifiedFolderInodes[dotcmsKey] = Guid.NewGuid().ToString();
                 }
@@ -580,7 +579,6 @@ public static class BundleWriter
                 {
                     string partialPath = string.Join("/", parts[..depth]) + "/";
                     string dotcmsKey = "/" + partialPath;
-                    if (!dotcmsKey.EndsWith('/')) dotcmsKey += '/';
                     // Reuse an existing folder inode from the unified
                     // registry (e.g. created by page-folder building)
                     // to avoid duplicate identifier entries.
