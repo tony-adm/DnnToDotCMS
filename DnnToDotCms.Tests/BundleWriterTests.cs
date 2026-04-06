@@ -352,6 +352,21 @@ public class BundleWriterTests
         Assert.Equal("PUBLISH", doc.RootElement.GetProperty("operation").GetString());
     }
 
+    [Fact]
+    public void ContentTypeJson_ContentType_HasBaseType()
+    {
+        // DotCMS requires a baseType field on every content type in a push-publish
+        // bundle.  Without it DotCMS skips the content type, causing a
+        // "content type does not exist" error when importing contentlets.
+        var (ms, names) = WriteBundleToMemory([MakeHtmlContentType()]);
+        using var doc = ParseFirstContentTypeJson(ms, names);
+
+        string baseType = doc.RootElement
+            .GetProperty("contentType").GetProperty("baseType").GetString()!;
+
+        Assert.Equal("CONTENT", baseType);
+    }
+
     // ------------------------------------------------------------------
     // ToImmutableClazz utility tests
     // ------------------------------------------------------------------
