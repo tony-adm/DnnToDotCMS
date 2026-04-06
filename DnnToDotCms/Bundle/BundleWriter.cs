@@ -1967,31 +1967,30 @@ public static class BundleWriter
     // reference the theme-specific logo path when a theme name is available.
     private static readonly (Regex Rx, string Replacement)[] SkinControlReplacements =
     [
-        // Functional controls replaced with minimal HTML comment placeholders.
         (new(@"<dnn:MENU\s[^>]*/?>",        RegexOptions.IgnoreCase | RegexOptions.Singleline),
-         "<!-- dnn:MENU – add navigation in DotCMS -->"),
+         @"<nav class=""dnn-nav""><!-- Navigation: configure in DotCMS --></nav>"),
         (new(@"<dnn:NAV\s[^>]*/?>",         RegexOptions.IgnoreCase | RegexOptions.Singleline),
-         "<!-- dnn:NAV – add navigation in DotCMS -->"),
+         @"<nav class=""dnn-nav""><!-- Navigation: configure in DotCMS --></nav>"),
         (new(@"<dnn:USER\s[^>]*/?>",        RegexOptions.IgnoreCase | RegexOptions.Singleline),
-         "<!-- dnn:USER -->"),
+         @"<span class=""dnn-user"">$!{user.firstName} $!{user.lastName}</span>"),
         (new(@"<dnn:LOGIN\s[^>]*/?>",       RegexOptions.IgnoreCase | RegexOptions.Singleline),
-         "<!-- dnn:LOGIN -->"),
+         @"<span class=""dnn-login"">#if($!{user} && $!{user.userId} != ""anonymous"") <a href=""/dotAdmin"">My Account</a> #else <a href=""/dotAdmin/login"">Login</a> #end</span>"),
         (new(@"<dnn:USERANDLOGIN\s[^>]*/?>", RegexOptions.IgnoreCase | RegexOptions.Singleline),
-         "<!-- dnn:USERANDLOGIN -->"),
+         @"<span class=""dnn-login"">#if($!{user} && $!{user.userId} != ""anonymous"") <a href=""/dotAdmin"">$!{user.firstName}</a> | <a href=""/api/v1/logout"">Logout</a> #else <a href=""/dotAdmin/login"">Login</a> #end</span>"),
         (new(@"<dnn:SEARCH\s[^>]*/?>",      RegexOptions.IgnoreCase | RegexOptions.Singleline),
-         "<!-- dnn:SEARCH – add search form in DotCMS -->"),
+         @"<form class=""dnn-search"" action=""/search"" method=""get""><input type=""text"" name=""q"" placeholder=""Search..."" aria-label=""Search"" /><button type=""submit"">Search</button></form>"),
         (new(@"<dnn:COPYRIGHT\s[^>]*/?>",   RegexOptions.IgnoreCase | RegexOptions.Singleline),
-         "<!-- dnn:COPYRIGHT -->"),
+         "<span class=\"copyright\">Copyright</span>"),
         (new(@"<dnn:BREADCRUMB\s[^>]*/?>",  RegexOptions.IgnoreCase | RegexOptions.Singleline),
-         "<!-- dnn:BREADCRUMB – add breadcrumb in DotCMS -->"),
+         @"<nav class=""dnn-breadcrumb"" aria-label=""Breadcrumb""><!-- Breadcrumb: configure in DotCMS --></nav>"),
         (new(@"<dnn:CURRENTDATE\s[^>]*/?>", RegexOptions.IgnoreCase | RegexOptions.Singleline),
-         "<!-- dnn:CURRENTDATE -->"),
+         @"<span class=""dnn-currentdate"">$date.format('MMMM d, yyyy', $date.date)</span>"),
         (new(@"<dnn:LANGUAGE\s[^>]*/?>",    RegexOptions.IgnoreCase | RegexOptions.Singleline),
-         "<!-- dnn:LANGUAGE -->"),
+         @"<span class=""dnn-language"">$!{language.languageCode}</span>"),
         (new(@"<dnn:TERMS\s[^>]*/?>",       RegexOptions.IgnoreCase | RegexOptions.Singleline),
-         "<!-- dnn:TERMS -->"),
+         "<a href=\"/terms-of-use\">Terms of Use</a>"),
         (new(@"<dnn:PRIVACY\s[^>]*/?>",     RegexOptions.IgnoreCase | RegexOptions.Singleline),
-         "<!-- dnn:PRIVACY -->"),
+         "<a href=\"/privacy\">Privacy</a>"),
         (new(@"<dnn:LINKS\s[^>]*/?>",       RegexOptions.IgnoreCase | RegexOptions.Singleline),
          string.Empty),
         (new(@"<dnn:TEXT\s[^>]*/?>",         RegexOptions.IgnoreCase | RegexOptions.Singleline),
@@ -2374,12 +2373,13 @@ public static class BundleWriter
             }
         }
 
-        // Return collected CSS <link> tags in the header field so they
-        // appear inside <head>, matching how DNN's client-resource framework
-        // registered stylesheets.
-        string headerOut = cssTags.Count > 0 ? string.Join("\n", cssTags) : string.Empty;
+        // Prepend collected CSS <link> tags to the body so they appear
+        // before the template content.  The header field is left empty
+        // because DotCMS push-publish does not reliably render it.
+        if (cssTags.Count > 0)
+            html = string.Join("\n", cssTags) + "\n" + html;
 
-        return (html, headerOut, paneUuidMap);
+        return (html, string.Empty, paneUuidMap);
     }
 
     // ------------------------------------------------------------------

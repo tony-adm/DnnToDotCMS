@@ -831,10 +831,10 @@ public class DnnXmlParserTests
     }
 
     [Fact]
-    public void ParseHtmlContents_PlaceholderUsesCustomModuleFriendlyName()
+    public void ParseHtmlContents_CustomModuleWithoutContentIsSkipped()
     {
-        // When ExportModule has no FriendlyName, the placeholder falls
-        // back to "Custom Module".
+        // Custom modules without extractable content are silently skipped
+        // to avoid polluting pages with placeholder text.
         string tempDir = BuildExportDbFolder(db =>
         {
             var tabs = db.GetCollection("ExportTab");
@@ -861,9 +861,7 @@ public class DnnXmlParserTests
             IReadOnlyList<DnnHtmlContent> result =
                 DnnXmlParser.ParseHtmlContents(tempDir);
 
-            Assert.Single(result);
-            Assert.Contains("Custom Module", result[0].HtmlBody);
-            Assert.Contains("My Widget", result[0].HtmlBody);
+            Assert.Empty(result);
         }
         finally
         {
@@ -923,18 +921,16 @@ public class DnnXmlParserTests
             IReadOnlyList<DnnHtmlContent> result =
                 DnnXmlParser.ParseHtmlContents(tempDir);
 
-            Assert.Equal(2, result.Count);
+            Assert.Single(result);
 
             // The HTML module should have actual content.
             DnnHtmlContent htmlItem = result.First(r => r.Title == "Welcome Text");
             Assert.Equal("<p>Hello!</p>", htmlItem.HtmlBody);
             Assert.Equal("ContentPane", htmlItem.PaneName);
 
-            // The custom module should have a comment placeholder.
-            DnnHtmlContent placeholder = result.First(r => r.Title == "Image Carousel");
-            Assert.Contains("ImageCarousel", placeholder.HtmlBody);
-            Assert.StartsWith("<!--", placeholder.HtmlBody.Trim());
-            Assert.Equal("BannerPane", placeholder.PaneName);
+            // The custom module (ImageCarousel) should be skipped entirely
+            // because it has no extractable content.
+            Assert.DoesNotContain(result, r => r.Title == "Image Carousel");
         }
         finally
         {
@@ -1008,10 +1004,10 @@ public class DnnXmlParserTests
     }
 
     [Fact]
-    public void ParseHtmlContents_PlaceholderPreservesContainerSrcAndIconFile()
+    public void ParseHtmlContents_CustomModuleSkippedDoesNotAffectOtherFields()
     {
-        // Verify that ContainerSrc and IconFile from ExportTabModule are
-        // carried through to the placeholder DnnHtmlContent entry.
+        // Custom modules without extractable content are skipped entirely,
+        // so even modules with ContainerSrc/IconFile produce no entry.
         string tempDir = BuildExportDbFolder(db =>
         {
             var tabs = db.GetCollection("ExportTab");
@@ -1045,11 +1041,7 @@ public class DnnXmlParserTests
             IReadOnlyList<DnnHtmlContent> result =
                 DnnXmlParser.ParseHtmlContents(tempDir);
 
-            Assert.Single(result);
-            DnnHtmlContent hc = result[0];
-            Assert.Equal("[L]Containers/FBOT/gallery.ascx", hc.ContainerSrc);
-            Assert.Equal("Images/gallery-icon.png", hc.IconFile);
-            Assert.Equal("TopPane", hc.PaneName);
+            Assert.Empty(result);
         }
         finally
         {

@@ -416,11 +416,11 @@ public static class DnnXmlParser
             }
             else
             {
-                // Generic placeholder for other custom modules so that content
-                // editors know what needs to be recreated in DotCMS.
-                string escapedType  = System.Security.SecurityElement.Escape(moduleType) ?? moduleType;
-                string escapedTitle = System.Security.SecurityElement.Escape(displayTitle) ?? displayTitle;
-                body = $"<!-- DNN module: {escapedType} – {escapedTitle} (recreate in DotCMS) -->";
+                // Custom modules with no extractable content (FAQ, ImageCarousel,
+                // etc.) are silently skipped.  Creating visible placeholder content
+                // would pollute the migrated pages with static text that editors
+                // would have to delete before adding the real DotCMS content.
+                continue;
             }
 
             foreach (var (tabUniqueId, paneName, containerSrc, iconFile) in tabPanes)
