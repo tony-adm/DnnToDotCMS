@@ -4702,4 +4702,289 @@ public class BundleWriterTests
         return zipPath;
     }
 
+    // ------------------------------------------------------------------
+    // Tests for duplicate folder / identifier deduplication
+    // ------------------------------------------------------------------
+
+    private static (MemoryStream stream, List<string> entryNames) WriteBundleWithPagesAndFiles(
+        IReadOnlyList<DnnPortalPage> pages,
+        IReadOnlyList<DnnPortalFile> files,
+        IReadOnlyList<DnnHtmlContent>? htmlContents = null,
+        string siteName = "Test Site",
+        string? themesZipPath = null)
+    {
+        var ms = new MemoryStream();
+        BundleWriter.Write([MakeHtmlContentType()], ms, themesZipPath, siteName,
+            htmlContents, pages, files);
+        ms.Position = 0;
+
+        var names = new List<string>();
+        using var gz  = new GZipStream(ms, CompressionMode.Decompress, leaveOpen: true);
+        using var tar = new TarReader(gz);
+
+        TarEntry? entry;
+        while ((entry = tar.GetNextEntry(copyData: true)) is not null)
+            names.Add(entry.Name);
+
+        ms.Position = 0;
+        return (ms, names);
+    }
+
+    [Fact]
+    public void Write_WithHomePageName_PageXmlUsesIndexUrl()
+    {
+        // Home pages should use "index" as the URL slug.
+        var pages = new[]
+        {
+            new DnnPortalPage("home-1", "Home", "Home Page", "", "//Home", 0, true, ""),
+        };
+        var contents = new[]
+        {
+            new DnnHtmlContent("Welcome", "<h1>Hello</h1>", TabUniqueId: "home-1"),
+        };
+
+        string zipPath = BuildThemesZip();
+        try
+        {
+            var (ms, names) = WriteBundleWithPagesAndContents(pages, contents, themesZipPath: zipPath);
+
+            string? pageXml = null;
+            foreach (string name in names.Where(n =>
+                n.Contains("/1/") && n.EndsWith(".content.xml") && !n.Contains("host.xml")))
+            {
+                string candidate = ReadTarEntry(ms, name)!;
+                if (candidate.Contains("<assetSubType>htmlpageasset</assetSubType>"))
+                {
+                    pageXml = candidate;
+                    break;
+                }
+            }
+
+            Assert.NotNull(pageXml);
+            Assert.Contains("<assetName>index</assetName>", pageXml);
+            Assert.Contains("<string>index</string>", pageXml);
+        }
+        finally { File.Delete(zipPath); }
+    }
+
+    [Fact]
+    public void Write_WithNonHomePageName_PageXmlUsesSlug()
+    {
+        // Non-home pages should use their normal slugified URL.
+        var pages = new[]
+        {
+            new DnnPortalPage("about-1", "About", "About Us", "", "//About", 0, true, ""),
+        };
+        var contents = new[]
+        {
+            new DnnHtmlContent("About", "<p>About</p>", TabUniqueId: "about-1"),
+        };
+
+        string zipPath = BuildThemesZip();
+        try
+        {
+            var (ms, names) = WriteBundleWithPagesAndContents(pages, contents, themesZipPath: zipPath);
+
+            string? pageXml = null;
+            foreach (string name in names.Where(n =>
+                n.Contains("/1/") && n.EndsWith(".content.xml") && !n.Contains("host.xml")))
+            {
+                string candidate = ReadTarEntry(ms, name)!;
+                if (candidate.Contains("<assetSubType>htmlpageasset</assetSubType>"))
+                {
+                    pageXml = candidate;
+                    break;
+                }
+            }
+
+            Assert.NotNull(pageXml);
+            Assert.Contains("<assetName>about</assetName>", pageXml);
+        }
+        finally { File.Delete(zipPath); }
+    }
+
+    [Fact]
+    public void Write_WithPageFolderAndFileFolder_ProducesOnlyOneFolderXml()
+    {
+        // When a page hierarchy creates folder "personal" and portal files
+        // also use folder "personal/", only one folder XML entry should be
+        // written to avoid duplicate identifier constraint violations.
+        var pages = new[]
+        {
+            new DnnPortalPage("parent-1", "Personal", "Personal", "", "//Personal",  0, true, ""),
+            new DnnPortalPage("child-1",  "Checking", "Checking", "", "//Personal//Checking", 1, true, ""),
+        };
+        var files = new[]
+        {
+            new DnnPortalFile(
+                "ff000000-0000-0000-0000-000000000001",
+                "ff000000-0000-0000-0000-000000000002",
+                "doc.pdf", "personal/", "application/pdf",
+                [0x25, 0x50, 0x44]),
+        };
+
+        var (ms, names) = WriteBundleWithPagesAndFiles(pages, files);
+
+        // Count folder XML entries whose content names the "personal" folder.
+        var folderEntries = names.Where(n => n.EndsWith(".folder.xml")).ToList();
+        int personalFolderCount = 0;
+        foreach (string entry in folderEntries)
+        {
+            string xml = ReadTarEntry(ms, entry)!;
+            if (xml.Contains("<name>personal</name>") || xml.Contains("<name>Personal</name>"))
+                personalFolderCount++;
+        }
+
+        Assert.Equal(1, personalFolderCount);
+    }
+
+    [Fact]
+    public void Write_WithPageFolderAndFileFolder_FileAssetReferencesSharedFolderInode()
+    {
+        // When a page hierarchy creates folder "personal" and portal files
+        // also use folder "personal/", the file asset should reference
+        // the same folder inode as the page folder.
+        var pages = new[]
+        {
+            new DnnPortalPage("parent-1", "Personal", "Personal", "", "//Personal",  0, true, ""),
+            new DnnPortalPage("child-1",  "Checking", "Checking", "", "//Personal//Checking", 1, true, ""),
+        };
+        var files = new[]
+        {
+            new DnnPortalFile(
+                "ff000000-0000-0000-0000-000000000001",
+                "ff000000-0000-0000-0000-000000000002",
+                "doc.pdf", "personal/", "application/pdf",
+                [0x25, 0x50, 0x44]),
+        };
+
+        var (ms, names) = WriteBundleWithPagesAndFiles(pages, files);
+
+        // Find the folder inode from the folder XML.
+        string? folderInode = null;
+        foreach (string entry in names.Where(n => n.EndsWith(".folder.xml")))
+        {
+            string xml = ReadTarEntry(ms, entry)!;
+            if (xml.Contains("<name>personal</name>") || xml.Contains("<name>Personal</name>"))
+            {
+                // Extract inode: <inode>...</inode>
+                int start = xml.IndexOf("<inode>") + "<inode>".Length;
+                int end   = xml.IndexOf("</inode>", start);
+                folderInode = xml[start..end];
+                break;
+            }
+        }
+        Assert.NotNull(folderInode);
+
+        // Find the file asset XML and verify it uses the same folder inode.
+        string? fileXml = null;
+        foreach (string name in names.Where(n =>
+            n.Contains("/1/") && n.EndsWith(".content.xml") && !n.Contains("host.xml")))
+        {
+            string candidate = ReadTarEntry(ms, name)!;
+            if (candidate.Contains("<assetSubType>FileAsset</assetSubType>")
+                && candidate.Contains("doc.pdf"))
+            {
+                fileXml = candidate;
+                break;
+            }
+        }
+        Assert.NotNull(fileXml);
+        Assert.Contains($"<string>{folderInode}</string>", fileXml);
+    }
+
+    [Fact]
+    public void Write_WithParentPageConflictingWithChildFolder_ParentMovedInsideFolder()
+    {
+        // When a top-level page "Services" has child pages, the page's URL
+        // "services" would collide with the folder "services/" created for
+        // children. The parent page should be moved inside the folder as
+        // "index" to avoid the identifier constraint violation.
+        var pages = new[]
+        {
+            new DnnPortalPage("svc-1",   "Services", "Services", "", "//Services",           0, true, ""),
+            new DnnPortalPage("price-1", "Pricing",  "Pricing",  "", "//Services//Pricing",  1, true, ""),
+        };
+        var contents = new[]
+        {
+            new DnnHtmlContent("Services", "<p>Services</p>", TabUniqueId: "svc-1"),
+            new DnnHtmlContent("Pricing",  "<p>Pricing</p>",  TabUniqueId: "price-1"),
+        };
+
+        string zipPath = BuildThemesZip();
+        try
+        {
+            var (ms, names) = WriteBundleWithPagesAndContents(pages, contents, themesZipPath: zipPath);
+
+            // Find the "Services" parent page XML.
+            string? servicesPageXml = null;
+            foreach (string name in names.Where(n =>
+                n.Contains("/1/") && n.EndsWith(".content.xml") && !n.Contains("host.xml")))
+            {
+                string candidate = ReadTarEntry(ms, name)!;
+                if (candidate.Contains("<assetSubType>htmlpageasset</assetSubType>")
+                    && candidate.Contains("<string>Services</string>"))
+                {
+                    servicesPageXml = candidate;
+                    break;
+                }
+            }
+
+            Assert.NotNull(servicesPageXml);
+            // The parent page should be at parentPath="/services/" with
+            // assetName "index" (not at "/" with assetName "services").
+            Assert.Contains("<assetName>index</assetName>", servicesPageXml);
+            Assert.Contains("<parentPath>/services/</parentPath>", servicesPageXml);
+        }
+        finally { File.Delete(zipPath); }
+    }
+
+    [Fact]
+    public void Write_WithTopLevelPageAndFileFolderSameName_PageMovedInsideFolder()
+    {
+        // When a top-level page "images" would collide with a portal-file
+        // folder "images/", the page should be moved inside the folder
+        // as "index".
+        var pages = new[]
+        {
+            new DnnPortalPage("img-1", "images", "Images", "", "//images", 0, true, ""),
+        };
+        var files = new[]
+        {
+            new DnnPortalFile(
+                "ff000000-0000-0000-0000-000000000010",
+                "ff000000-0000-0000-0000-000000000011",
+                "photo.jpg", "images/", "image/jpeg",
+                [0xFF, 0xD8]),
+        };
+        var contents = new[]
+        {
+            new DnnHtmlContent("Gallery", "<p>Gallery</p>", TabUniqueId: "img-1"),
+        };
+
+        string zipPath = BuildThemesZip();
+        try
+        {
+            var (ms, names) = WriteBundleWithPagesAndFiles(pages, files, contents, themesZipPath: zipPath);
+
+            // Find the "images" page XML.
+            string? pageXml = null;
+            foreach (string name in names.Where(n =>
+                n.Contains("/1/") && n.EndsWith(".content.xml") && !n.Contains("host.xml")))
+            {
+                string candidate = ReadTarEntry(ms, name)!;
+                if (candidate.Contains("<assetSubType>htmlpageasset</assetSubType>"))
+                {
+                    pageXml = candidate;
+                    break;
+                }
+            }
+
+            Assert.NotNull(pageXml);
+            Assert.Contains("<assetName>index</assetName>", pageXml);
+            Assert.Contains("<parentPath>/images/</parentPath>", pageXml);
+        }
+        finally { File.Delete(zipPath); }
+    }
+
 }

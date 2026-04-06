@@ -357,6 +357,27 @@ public static class BundleWriter
         // (parentPath, assetName, hostId) tuple.
         var writtenFolderPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+        // Pre-register portal-file folder paths in the unified registry
+        // so that page processing can detect collisions with file folders
+        // (e.g. a top-level page "images" colliding with folder "images/").
+        if (portalFiles is not null)
+        {
+            foreach (DnnPortalFile pf in portalFiles)
+            {
+                if (string.IsNullOrEmpty(pf.FolderPath)) continue;
+                string trimmed = pf.FolderPath.TrimEnd('/');
+                string[] parts = trimmed.Split('/');
+                for (int depth = 1; depth <= parts.Length; depth++)
+                {
+                    string partialPath = string.Join("/", parts[..depth]) + "/";
+                    string dotcmsKey = "/" + partialPath;
+                    if (!dotcmsKey.EndsWith('/')) dotcmsKey += '/';
+                    if (!unifiedFolderInodes.ContainsKey(dotcmsKey))
+                        unifiedFolderInodes[dotcmsKey] = Guid.NewGuid().ToString();
+                }
+            }
+        }
+
         if (pages is not null && pages.Count > 0)
         {
             // Build a lookup from skin name → template ID for matching DNN pages
