@@ -469,7 +469,8 @@ public static class DnnXmlParser
 
             string uniqueId = uidVal.AsGuid.ToString();
             string name     = nameVal.AsString  ?? string.Empty;
-            string title    = titleVal?.AsString ?? name;
+            string? rawTitle = titleVal?.AsString;
+            string title    = string.IsNullOrWhiteSpace(rawTitle) ? name : rawTitle;
             string desc     = descVal?.AsString  ?? string.Empty;
             string tabPath  = pathVal?.AsString  ?? string.Empty;
             int level       = levelVal?.AsInt32  ?? 0;

@@ -734,6 +734,7 @@ public static class BundleWriter
             Clazz           = ctClazz,
             Name            = ct.Name.Trim(),
             Id              = id,
+            Inode           = id,
             Description     = string.IsNullOrWhiteSpace(ct.Description)
                                   ? null
                                   : Truncate(ct.Description, MaxVarcharLength),

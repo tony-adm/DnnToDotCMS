@@ -1289,4 +1289,64 @@ public class DnnXmlParserTests
             Directory.Delete(tempDir, recursive: true);
         }
     }
+
+    [Fact]
+    public void ParsePortalPages_FallsBackToTabName_WhenTitleIsEmpty()
+    {
+        // DNN pages often have an empty Title string.  The parser should
+        // fall back to TabName so DotCMS pages get a non-empty title
+        // (DotCMS ContentHandler may reject pages with empty titles).
+        string tempDir = BuildExportDbFolder(db =>
+        {
+            var tabs = db.GetCollection("ExportTab");
+            tabs.Insert(new BsonDocument
+            {
+                ["TabName"]   = "Checking Accounts",
+                ["UniqueId"]  = new BsonValue(Guid.Parse("cccc3333-0000-0000-0000-000000000000")),
+                ["IsDeleted"] = false,
+                ["Title"]     = "",          // empty title
+                ["TabPath"]   = "//Checking Accounts",
+                ["Level"]     = 0,
+                ["IsVisible"] = true,
+            });
+            tabs.Insert(new BsonDocument
+            {
+                ["TabName"]   = "Savings Accounts",
+                ["UniqueId"]  = new BsonValue(Guid.Parse("dddd4444-0000-0000-0000-000000000000")),
+                ["IsDeleted"] = false,
+                // Title key completely absent
+                ["TabPath"]   = "//Savings Accounts",
+                ["Level"]     = 0,
+                ["IsVisible"] = true,
+            });
+            tabs.Insert(new BsonDocument
+            {
+                ["TabName"]   = "Careers",
+                ["UniqueId"]  = new BsonValue(Guid.Parse("eeee5555-0000-0000-0000-000000000000")),
+                ["IsDeleted"] = false,
+                ["Title"]     = "Careers Page",  // explicit title
+                ["TabPath"]   = "//Careers",
+                ["Level"]     = 0,
+                ["IsVisible"] = true,
+            });
+        });
+
+        try
+        {
+            IReadOnlyList<DnnPortalPage> pages = DnnXmlParser.ParsePortalPages(tempDir);
+
+            var checking = pages.First(p => p.Name == "Checking Accounts");
+            Assert.Equal("Checking Accounts", checking.Title); // falls back to Name
+
+            var savings = pages.First(p => p.Name == "Savings Accounts");
+            Assert.Equal("Savings Accounts", savings.Title); // falls back to Name
+
+            var careers = pages.First(p => p.Name == "Careers");
+            Assert.Equal("Careers Page", careers.Title); // keeps explicit title
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
 }

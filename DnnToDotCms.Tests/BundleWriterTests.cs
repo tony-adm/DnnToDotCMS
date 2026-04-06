@@ -250,6 +250,22 @@ public class BundleWriterTests
     }
 
     [Fact]
+    public void ContentTypeJson_ContentType_HasInodeMatchingId()
+    {
+        // DotCMS ContentTypeHandler skips content types with empty inode,
+        // so inode must be present and match the id to ensure import.
+        var (ms, names) = WriteBundleToMemory([MakeHtmlContentType()]);
+        using var doc = ParseFirstContentTypeJson(ms, names);
+
+        JsonElement ct = doc.RootElement.GetProperty("contentType");
+        string id    = ct.GetProperty("id").GetString()!;
+        string inode = ct.GetProperty("inode").GetString()!;
+
+        Assert.False(string.IsNullOrEmpty(inode));
+        Assert.Equal(id, inode);
+    }
+
+    [Fact]
     public void ContentTypeJson_ContentType_HasSystemHostAndFolder()
     {
         var (ms, names) = WriteBundleToMemory([MakeHtmlContentType()]);
