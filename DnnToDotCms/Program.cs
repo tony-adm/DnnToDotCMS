@@ -205,9 +205,10 @@ try
         ? $" {htmlContents.Count} HTML content item(s) included."
         : string.Empty;
 
-    // Count only the Level-0 non-Admin pages that are actually written to the bundle.
+    // Count all non-Admin pages that are actually written to the bundle.
     int importedPageCount = portalPages.Count(p =>
-        p.Level == 0 && !p.Name.Equals("Admin", StringComparison.OrdinalIgnoreCase));
+        !p.Name.Equals("Admin", StringComparison.OrdinalIgnoreCase) &&
+        !p.TabPath.Contains("//Admin//", StringComparison.OrdinalIgnoreCase));
     string pageNote = importedPageCount > 0
         ? $" {importedPageCount} page(s) included."
         : string.Empty;

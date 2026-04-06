@@ -2444,7 +2444,7 @@ public class BundleWriterTests
     }
 
     [Fact]
-    public void Write_WithPages_SubPagesAreExcluded()
+    public void Write_WithPages_SubPagesAreIncludedWithFolder()
     {
         var pages = new[]
         {
@@ -2454,10 +2454,11 @@ public class BundleWriterTests
 
         var (_, names) = WriteBundleWithPages(pages);
 
-        // Only the Level-0 Home page should produce a content.xml entry.
+        // Both the Level-0 Home page and the Level-1 My Profile page should
+        // produce content.xml entries (child pages are now included).
         int pageCount = names.Count(n => n.Contains("/1/") && n.EndsWith(".content.xml")
             && !n.Contains("host.xml") && !n.Contains("htmlContent"));
-        Assert.Equal(1, pageCount);
+        Assert.Equal(2, pageCount);
     }
 
     [Fact]
@@ -4385,6 +4386,320 @@ public class BundleWriterTests
             Assert.Contains("<string>7</string>", afterSecond);
         }
         finally { File.Delete(zipPath); }
+    }
+
+    // ------------------------------------------------------------------
+    // showOnMenu / navigation tests
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Write_WithVisiblePage_PageXmlHasShowOnMenuTrue()
+    {
+        string tabId = "visible-page-test";
+        var pages = new[]
+        {
+            new DnnPortalPage(tabId, "About", "About Us", "", "//About", 0, true, ""),
+        };
+        var contents = new[]
+        {
+            new DnnHtmlContent("About", "<p>About</p>", TabUniqueId: tabId),
+        };
+
+        string zipPath = BuildThemesZip();
+        try
+        {
+            var (ms, names) = WriteBundleWithPagesAndContents(pages, contents,
+                themesZipPath: zipPath);
+
+            string? pageXml = null;
+            foreach (string name in names.Where(n =>
+                n.Contains("/1/") && n.EndsWith(".content.xml") && !n.Contains("host.xml")))
+            {
+                string candidate = ReadTarEntry(ms, name)!;
+                if (candidate.Contains("<assetSubType>htmlpageasset</assetSubType>"))
+                {
+                    pageXml = candidate;
+                    break;
+                }
+            }
+
+            Assert.NotNull(pageXml);
+            Assert.Contains("<string>showOnMenu</string>", pageXml);
+            Assert.Contains("<boolean>true</boolean>", pageXml);
+        }
+        finally { File.Delete(zipPath); }
+    }
+
+    [Fact]
+    public void Write_WithHiddenPage_PageXmlHasShowOnMenuFalse()
+    {
+        string tabId = "hidden-page-test";
+        var pages = new[]
+        {
+            new DnnPortalPage(tabId, "Search", "Search Results", "", "//Search", 0, false, ""),
+        };
+        var contents = new[]
+        {
+            new DnnHtmlContent("Search", "<p>Search</p>", TabUniqueId: tabId),
+        };
+
+        string zipPath = BuildThemesZip();
+        try
+        {
+            var (ms, names) = WriteBundleWithPagesAndContents(pages, contents,
+                themesZipPath: zipPath);
+
+            string? pageXml = null;
+            foreach (string name in names.Where(n =>
+                n.Contains("/1/") && n.EndsWith(".content.xml") && !n.Contains("host.xml")))
+            {
+                string candidate = ReadTarEntry(ms, name)!;
+                if (candidate.Contains("<assetSubType>htmlpageasset</assetSubType>"))
+                {
+                    pageXml = candidate;
+                    break;
+                }
+            }
+
+            Assert.NotNull(pageXml);
+            Assert.Contains("<string>showOnMenu</string>", pageXml);
+            Assert.Contains("<boolean>false</boolean>", pageXml);
+        }
+        finally { File.Delete(zipPath); }
+    }
+
+    [Fact]
+    public void Write_WithTabOrder_PageXmlHasSortOrder()
+    {
+        string tabId = "sort-order-test";
+        var pages = new[]
+        {
+            new DnnPortalPage(tabId, "About", "About Us", "", "//About", 0, true, "", TabOrder: 5),
+        };
+        var contents = new[]
+        {
+            new DnnHtmlContent("About", "<p>About</p>", TabUniqueId: tabId),
+        };
+
+        string zipPath = BuildThemesZip();
+        try
+        {
+            var (ms, names) = WriteBundleWithPagesAndContents(pages, contents,
+                themesZipPath: zipPath);
+
+            string? pageXml = null;
+            foreach (string name in names.Where(n =>
+                n.Contains("/1/") && n.EndsWith(".content.xml") && !n.Contains("host.xml")))
+            {
+                string candidate = ReadTarEntry(ms, name)!;
+                if (candidate.Contains("<assetSubType>htmlpageasset</assetSubType>"))
+                {
+                    pageXml = candidate;
+                    break;
+                }
+            }
+
+            Assert.NotNull(pageXml);
+            Assert.Contains("<long>5</long>", pageXml);
+        }
+        finally { File.Delete(zipPath); }
+    }
+
+    // ------------------------------------------------------------------
+    // Child page / folder hierarchy tests
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Write_WithChildPage_CreatesParentFolder()
+    {
+        var pages = new[]
+        {
+            new DnnPortalPage("aaa", "Personal", "Personal", "", "//Personal",  0, true, ""),
+            new DnnPortalPage("bbb", "Checking", "Checking", "", "//Personal//Checking", 1, true, ""),
+        };
+        var contents = new[]
+        {
+            new DnnHtmlContent("Personal", "<p>Personal</p>", TabUniqueId: "aaa"),
+            new DnnHtmlContent("Checking", "<p>Checking</p>", TabUniqueId: "bbb"),
+        };
+
+        string zipPath = BuildThemesZip();
+        try
+        {
+            var (_, names) = WriteBundleWithPagesAndContents(pages, contents,
+                themesZipPath: zipPath);
+
+            // A .folder.xml entry should be created for the "personal" folder.
+            Assert.Contains(names, n => n.EndsWith(".folder.xml") && n.Contains("ROOT/"));
+        }
+        finally { File.Delete(zipPath); }
+    }
+
+    [Fact]
+    public void Write_WithChildPage_PageXmlHasCorrectParentPath()
+    {
+        var pages = new[]
+        {
+            new DnnPortalPage("aaa", "Personal", "Personal", "", "//Personal",  0, true, ""),
+            new DnnPortalPage("bbb", "Checking", "Checking", "", "//Personal//Checking", 1, true, ""),
+        };
+        var contents = new[]
+        {
+            new DnnHtmlContent("Personal", "<p>Personal</p>", TabUniqueId: "aaa"),
+            new DnnHtmlContent("Checking", "<p>Checking</p>", TabUniqueId: "bbb"),
+        };
+
+        string zipPath = BuildThemesZip();
+        try
+        {
+            var (ms, names) = WriteBundleWithPagesAndContents(pages, contents,
+                themesZipPath: zipPath);
+
+            // Find the child page XML.
+            string? childPageXml = null;
+            foreach (string name in names.Where(n =>
+                n.Contains("/1/") && n.EndsWith(".content.xml") && !n.Contains("host.xml")))
+            {
+                string candidate = ReadTarEntry(ms, name)!;
+                if (candidate.Contains("<assetSubType>htmlpageasset</assetSubType>")
+                    && candidate.Contains("<string>checking</string>"))
+                {
+                    childPageXml = candidate;
+                    break;
+                }
+            }
+
+            Assert.NotNull(childPageXml);
+            // The child page should have parentPath="/personal/".
+            Assert.Contains("<parentPath>/personal/</parentPath>", childPageXml);
+        }
+        finally { File.Delete(zipPath); }
+    }
+
+    [Fact]
+    public void Write_AdminChildPages_AreExcluded()
+    {
+        var pages = new[]
+        {
+            new DnnPortalPage("aaa", "Home",  "Home",  "", "//Home",  0, true, ""),
+            new DnnPortalPage("bbb", "Admin", "Admin", "", "//Admin", 0, false, ""),
+            new DnnPortalPage("ccc", "Users", "Users", "", "//Admin//Users", 1, false, ""),
+        };
+
+        var (_, names) = WriteBundleWithPages(pages);
+
+        // Only the Home page should produce a content.xml entry — Admin and
+        // its children should be excluded.
+        int pageCount = names.Count(n => n.Contains("/1/") && n.EndsWith(".content.xml")
+            && !n.Contains("host.xml") && !n.Contains("htmlContent"));
+        Assert.Equal(1, pageCount);
+    }
+
+    // ------------------------------------------------------------------
+    // Per-pane container multiTree tests
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Write_WithPerPaneContainer_MultiTreeUsesCorrectContainerId()
+    {
+        // When content items use a non-default container (e.g. hpcard.ascx),
+        // the multiTree entries must reference the matching container ID, not
+        // the default container.
+        string tabId = "per-pane-ctr-test";
+        var pages = new[]
+        {
+            new DnnPortalPage(tabId, "Home", "Home", "", "//Home", 0, true, ""),
+        };
+
+        // Build a themes zip with TWO containers: standard and hpcard.
+        string containerAscx1 = """
+            <%@ Control Inherits="DotNetNuke.UI.Containers.Container" %>
+            <div id="ContentPane" runat="server"></div>
+            """;
+        string containerAscx2 = """
+            <%@ Control Inherits="DotNetNuke.UI.Containers.Container" %>
+            <div class="card"><div id="ContentPane" runat="server"></div></div>
+            """;
+        string skinAscx = """
+            <%@ Control Inherits="DotNetNuke.UI.Skins.Skin" %>
+            <div id="ContentPane" runat="server"></div>
+            <div id="CTA1" runat="server"></div>
+            """;
+
+        string zipPath = BuildThemesZipWithMultipleContainers(
+            skinAscx, containerAscx1, "standard", containerAscx2, "hpcard");
+        try
+        {
+            // Content in CTA1 pane uses the hpcard container.
+            var contents = new[]
+            {
+                new DnnHtmlContent("Welcome", "<h1>Hello</h1>",
+                    TabUniqueId: tabId, PaneName: "ContentPane"),
+                new DnnHtmlContent("Card",    "<p>Card content</p>",
+                    TabUniqueId: tabId, PaneName: "CTA1",
+                    ContainerSrc: "[L]Containers/TestTheme/hpcard.ascx"),
+            };
+
+            var (ms, names) = WriteBundleWithPagesAndContents(pages, contents,
+                themesZipPath: zipPath);
+
+            // Find the page XML.
+            string? pageXml = null;
+            foreach (string name in names.Where(n =>
+                n.Contains("/1/") && n.EndsWith(".content.xml") && !n.Contains("host.xml")))
+            {
+                string candidate = ReadTarEntry(ms, name)!;
+                if (candidate.Contains("<assetSubType>htmlpageasset</assetSubType>"))
+                {
+                    pageXml = candidate;
+                    break;
+                }
+            }
+
+            Assert.NotNull(pageXml);
+
+            // The multiTree should contain two entries with different container IDs.
+            // Count distinct parent2 values (container IDs) in multiTree entries.
+            var parent2Values = new List<string>();
+            string search = "<string>parent2</string>";
+            int idx = 0;
+            while ((idx = pageXml!.IndexOf(search, idx, StringComparison.Ordinal)) >= 0)
+            {
+                int valStart = pageXml.IndexOf("<string>", idx + search.Length, StringComparison.Ordinal);
+                int valEnd   = pageXml.IndexOf("</string>", valStart + 8, StringComparison.Ordinal);
+                if (valStart >= 0 && valEnd > valStart)
+                    parent2Values.Add(pageXml[(valStart + 8)..valEnd]);
+                idx = valEnd > 0 ? valEnd : idx + 1;
+            }
+
+            Assert.Equal(2, parent2Values.Count);
+            // The two multiTree entries should reference different containers.
+            Assert.NotEqual(parent2Values[0], parent2Values[1]);
+        }
+        finally { File.Delete(zipPath); }
+    }
+
+    private static string BuildThemesZipWithMultipleContainers(
+        string skinAscx, string containerAscx1, string containerName1,
+        string containerAscx2, string containerName2)
+    {
+        string zipPath = Path.GetTempFileName();
+        File.Delete(zipPath); // ZipFile.Open with Create requires the file to not exist.
+        using (var zip = ZipFile.Open(zipPath, ZipArchiveMode.Create))
+        {
+            var skinEntry = zip.CreateEntry("_default/Skins/TestTheme/Home.ascx");
+            using (var sw = new StreamWriter(skinEntry.Open()))
+                sw.Write(skinAscx);
+
+            var ctrEntry1 = zip.CreateEntry($"_default/Containers/TestTheme/{containerName1}.ascx");
+            using (var sw = new StreamWriter(ctrEntry1.Open()))
+                sw.Write(containerAscx1);
+
+            var ctrEntry2 = zip.CreateEntry($"_default/Containers/TestTheme/{containerName2}.ascx");
+            using (var sw = new StreamWriter(ctrEntry2.Open()))
+                sw.Write(containerAscx2);
+        }
+        return zipPath;
     }
 
 }

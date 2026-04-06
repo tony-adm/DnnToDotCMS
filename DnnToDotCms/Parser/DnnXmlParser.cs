@@ -466,6 +466,8 @@ public static class DnnXmlParser
             doc.TryGetValue("Level",       out BsonValue levelVal);
             doc.TryGetValue("IsVisible",   out BsonValue visibleVal);
             doc.TryGetValue("SkinSrc",     out BsonValue skinVal);
+            doc.TryGetValue("TabOrder",    out BsonValue tabOrderVal);
+            doc.TryGetValue("ParentId",    out BsonValue parentIdVal);
 
             string uniqueId = uidVal.AsGuid.ToString();
             string name     = nameVal.AsString  ?? string.Empty;
@@ -475,9 +477,11 @@ public static class DnnXmlParser
             int level       = levelVal?.AsInt32  ?? 0;
             bool isVisible  = visibleVal?.AsBoolean ?? true;
             string skinSrc  = skinVal?.AsString  ?? string.Empty;
+            int tabOrder    = tabOrderVal?.AsInt32 ?? 0;
+            int parentId    = parentIdVal?.AsInt32 ?? -1;
 
             results.Add(new DnnPortalPage(uniqueId, name, title, desc,
-                tabPath, level, isVisible, skinSrc));
+                tabPath, level, isVisible, skinSrc, tabOrder, parentId));
         }
 
         return results;
