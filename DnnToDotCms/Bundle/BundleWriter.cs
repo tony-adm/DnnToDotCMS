@@ -1967,30 +1967,31 @@ public static class BundleWriter
     // reference the theme-specific logo path when a theme name is available.
     private static readonly (Regex Rx, string Replacement)[] SkinControlReplacements =
     [
+        // Functional controls replaced with minimal Velocity equivalents.
         (new(@"<dnn:MENU\s[^>]*/?>",        RegexOptions.IgnoreCase | RegexOptions.Singleline),
-         @"<nav class=""dnn-nav""><!-- Navigation: configure in DotCMS --></nav>"),
+         "<!-- dnn:MENU – add navigation in DotCMS -->"),
         (new(@"<dnn:NAV\s[^>]*/?>",         RegexOptions.IgnoreCase | RegexOptions.Singleline),
-         @"<nav class=""dnn-nav""><!-- Navigation: configure in DotCMS --></nav>"),
+         "<!-- dnn:NAV – add navigation in DotCMS -->"),
         (new(@"<dnn:USER\s[^>]*/?>",        RegexOptions.IgnoreCase | RegexOptions.Singleline),
-         @"<span class=""dnn-user"">$!{user.firstName} $!{user.lastName}</span>"),
+         "<!-- dnn:USER -->"),
         (new(@"<dnn:LOGIN\s[^>]*/?>",       RegexOptions.IgnoreCase | RegexOptions.Singleline),
-         @"<span class=""dnn-login"">#if($!{user} && $!{user.userId} != ""anonymous"") <a href=""/dotAdmin"">My Account</a> #else <a href=""/dotAdmin/login"">Login</a> #end</span>"),
+         "<!-- dnn:LOGIN -->"),
         (new(@"<dnn:USERANDLOGIN\s[^>]*/?>", RegexOptions.IgnoreCase | RegexOptions.Singleline),
-         @"<span class=""dnn-login"">#if($!{user} && $!{user.userId} != ""anonymous"") <a href=""/dotAdmin"">$!{user.firstName}</a> | <a href=""/api/v1/logout"">Logout</a> #else <a href=""/dotAdmin/login"">Login</a> #end</span>"),
+         "<!-- dnn:USERANDLOGIN -->"),
         (new(@"<dnn:SEARCH\s[^>]*/?>",      RegexOptions.IgnoreCase | RegexOptions.Singleline),
-         @"<form class=""dnn-search"" action=""/search"" method=""get""><input type=""text"" name=""q"" placeholder=""Search..."" aria-label=""Search"" /><button type=""submit"">Search</button></form>"),
+         "<!-- dnn:SEARCH – add search form in DotCMS -->"),
         (new(@"<dnn:COPYRIGHT\s[^>]*/?>",   RegexOptions.IgnoreCase | RegexOptions.Singleline),
-         "<span class=\"copyright\">Copyright</span>"),
+         "<!-- dnn:COPYRIGHT -->"),
         (new(@"<dnn:BREADCRUMB\s[^>]*/?>",  RegexOptions.IgnoreCase | RegexOptions.Singleline),
-         @"<nav class=""dnn-breadcrumb"" aria-label=""Breadcrumb""><!-- Breadcrumb: configure in DotCMS --></nav>"),
+         "<!-- dnn:BREADCRUMB – add breadcrumb in DotCMS -->"),
         (new(@"<dnn:CURRENTDATE\s[^>]*/?>", RegexOptions.IgnoreCase | RegexOptions.Singleline),
-         @"<span class=""dnn-currentdate"">$date.format('MMMM d, yyyy', $date.date)</span>"),
+         "<!-- dnn:CURRENTDATE -->"),
         (new(@"<dnn:LANGUAGE\s[^>]*/?>",    RegexOptions.IgnoreCase | RegexOptions.Singleline),
-         @"<span class=""dnn-language"">$!{language.languageCode}</span>"),
+         "<!-- dnn:LANGUAGE -->"),
         (new(@"<dnn:TERMS\s[^>]*/?>",       RegexOptions.IgnoreCase | RegexOptions.Singleline),
-         "<a href=\"/terms-of-use\">Terms of Use</a>"),
+         "<!-- dnn:TERMS -->"),
         (new(@"<dnn:PRIVACY\s[^>]*/?>",     RegexOptions.IgnoreCase | RegexOptions.Singleline),
-         "<a href=\"/privacy\">Privacy</a>"),
+         "<!-- dnn:PRIVACY -->"),
         (new(@"<dnn:LINKS\s[^>]*/?>",       RegexOptions.IgnoreCase | RegexOptions.Singleline),
          string.Empty),
         (new(@"<dnn:TEXT\s[^>]*/?>",         RegexOptions.IgnoreCase | RegexOptions.Singleline),
@@ -2373,13 +2374,12 @@ public static class BundleWriter
             }
         }
 
-        // Prepend collected CSS <link> tags to the body so they appear
-        // before the template content.  The header field is left empty
-        // because DotCMS push-publish does not reliably render it.
-        if (cssTags.Count > 0)
-            html = string.Join("\n", cssTags) + "\n" + html;
+        // Return collected CSS <link> tags in the header field so they
+        // appear inside <head>, matching how DNN's client-resource framework
+        // registered stylesheets.
+        string headerOut = cssTags.Count > 0 ? string.Join("\n", cssTags) : string.Empty;
 
-        return (html, string.Empty, paneUuidMap);
+        return (html, headerOut, paneUuidMap);
     }
 
     // ------------------------------------------------------------------

@@ -930,10 +930,10 @@ public class DnnXmlParserTests
             Assert.Equal("<p>Hello!</p>", htmlItem.HtmlBody);
             Assert.Equal("ContentPane", htmlItem.PaneName);
 
-            // The custom module should have a placeholder.
+            // The custom module should have a comment placeholder.
             DnnHtmlContent placeholder = result.First(r => r.Title == "Image Carousel");
-            Assert.Contains("dnn-module-placeholder", placeholder.HtmlBody);
             Assert.Contains("ImageCarousel", placeholder.HtmlBody);
+            Assert.StartsWith("<!--", placeholder.HtmlBody.Trim());
             Assert.Equal("BannerPane", placeholder.PaneName);
         }
         finally

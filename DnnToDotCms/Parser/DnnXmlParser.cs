@@ -420,13 +420,7 @@ public static class DnnXmlParser
                 // editors know what needs to be recreated in DotCMS.
                 string escapedType  = System.Security.SecurityElement.Escape(moduleType) ?? moduleType;
                 string escapedTitle = System.Security.SecurityElement.Escape(displayTitle) ?? displayTitle;
-                body =
-                    $"""
-                    <div class="dnn-module-placeholder" data-module-type="{escapedType}">
-                      <p><strong>{escapedType}</strong>: {escapedTitle}</p>
-                      <p><em>This content was managed by a custom DNN module and needs to be recreated in DotCMS.</em></p>
-                    </div>
-                    """;
+                body = $"<!-- DNN module: {escapedType} – {escapedTitle} (recreate in DotCMS) -->";
             }
 
             foreach (var (tabUniqueId, paneName, containerSrc, iconFile) in tabPanes)
