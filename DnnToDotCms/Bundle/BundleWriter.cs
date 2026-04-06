@@ -915,53 +915,36 @@ public static class BundleWriter
     // ------------------------------------------------------------------
 
     /// <summary>
-    /// One empty <c>ConcurrentHashMap.Segment</c> for the Java 7 serialization
-    /// format used inside a DotCMS <c>HostWrapper</c> XML.
-    /// <para>
-    /// <b>Why this exact structure?</b>
-    /// DotCMS uses XStream to serialize/deserialize push-publish bundles.
-    /// A DotCMS <c>Host</c> object extends <c>Contentlet</c> whose field map
-    /// is a <c>Contentlet.ContentletHashMap</c> — a subclass of
-    /// <c>ConcurrentHashMap</c>.  XStream falls back to Java's own serialization
-    /// mechanism for this class (hence <c>serialization="custom"</c>).
-    /// In Java 7, <c>ConcurrentHashMap.writeObject</c> first calls
-    /// <c>defaultWriteObject</c>, which writes the non-transient fields
-    /// (<c>segments</c>, <c>segmentShift</c>, <c>segmentMask</c>), then writes
-    /// all live entries as alternating key/value objects, and finally writes
-    /// two <c>null</c> sentinels.  XStream wraps the <c>defaultWriteObject</c>
-    /// output in a <c>&lt;default&gt;</c> block and the explicit writes come
-    /// directly after it inside the enclosing <c>&lt;concurrent-hash-map&gt;</c>
-    /// element.  Do <b>not</b> simplify or reorder this structure — DotCMS's
-    /// XStream deserializer will fail silently and the host will not be created.
-    /// </para>
+    /// Wraps a key-value pair as an XStream map <c>&lt;entry&gt;</c> element.
+    /// DotCMS (Java 11+) uses XStream's <c>MapConverter</c> for
+    /// <c>ConcurrentHashMap</c>, which serialises each entry as
+    /// <c>&lt;entry&gt;&lt;string&gt;key&lt;/string&gt;&lt;…&gt;value&lt;/…&gt;&lt;/entry&gt;</c>.
+    /// The old Java 7/8 <c>serialization="custom"</c> format with segments is
+    /// <b>not</b> deserializable on Java 11+ and causes an
+    /// <c>IndexOutOfBoundsException</c> inside XStream's <c>MapConverter</c>.
     /// </summary>
-    private const string EmptyConcurrentHashMapSegment = """
-              <java.util.concurrent.ConcurrentHashMap_-Segment>
-                <sync class="java.util.concurrent.locks.ReentrantLock$NonfairSync" serialization="custom">
-                  <java.util.concurrent.locks.AbstractQueuedSynchronizer>
-                    <default>
-                      <state>0</state>
-                    </default>
-                  </java.util.concurrent.locks.AbstractQueuedSynchronizer>
-                  <java.util.concurrent.locks.ReentrantLock_-Sync>
-                    <default/>
-                  </java.util.concurrent.locks.ReentrantLock_-Sync>
-                </sync>
-                <loadFactor>0.75</loadFactor>
-              </java.util.concurrent.ConcurrentHashMap_-Segment>
-        """;
+    private static string E(string key, string valueElement)
+        => $"<entry><string>{key}</string>{valueElement}</entry>";
+
+    private static string EStr(string key, string value)
+        => E(key, $"<string>{value}</string>");
+
+    private static string ELong(string key, long value)
+        => E(key, $"<long>{value}</long>");
+
+    private static string EBool(string key, bool value)
+        => E(key, $"<boolean>{(value ? "true" : "false")}</boolean>");
+
+    private static string ETimestamp(string key, string ts)
+        => E(key, $"<sql-timestamp>{ts}</sql-timestamp>");
+
+    private static string EFile(string key, string path)
+        => E(key, $"<file>{path}</file>");
 
     private static string BuildHostXml(string hostId, string hostInode, string hostname)
     {
         string now         = DateTime.UtcNow.ToString(XmlTimestampFormat);
         string xmlHostname = System.Security.SecurityElement.Escape(hostname) ?? string.Empty;
-
-        // Java 7 ConcurrentHashMap uses 16 segments by default (concurrencyLevel=16,
-        // which gives 2^4 = 16 segments).  segmentShift=28 and segmentMask=15
-        // correspond to this configuration.  All 16 segments are empty because the
-        // actual map entries are written after the <default> block (see
-        // EmptyConcurrentHashMapSegment documentation above).
-        string segments = string.Concat(Enumerable.Repeat(EmptyConcurrentHashMapSegment, 16));
 
         return $"""
             <com.dotcms.publisher.pusher.wrapper.HostWrapper>
@@ -978,60 +961,25 @@ public static class BundleWriter
                 <publishDate class="sql-timestamp">{now}</publishDate>
               </info>
               <host>
-                <map class="com.dotmarketing.portlets.contentlet.model.Contentlet$ContentletHashMap" serialization="custom">
-                  <unserializable-parents/>
-                  <concurrent-hash-map>
-                    <default>
-                      <segments>
-            {segments}
-                      </segments>
-                      <segmentShift>28</segmentShift>
-                      <segmentMask>15</segmentMask>
-                    </default>
-                    <string>type</string>
-                    <string>host</string>
-                    <string>inode</string>
-                    <string>{hostInode}</string>
-                    <string>hostname</string>
-                    <string>{xmlHostname}</string>
-                    <string>hostName</string>
-                    <string>{xmlHostname}</string>
-                    <string>__DOTNAME__</string>
-                    <string>{xmlHostname}</string>
-                    <string>host</string>
-                    <string>SYSTEM_HOST</string>
-                    <string>stInode</string>
-                    <string>{HostContentTypeInode}</string>
-                    <string>owner</string>
-                    <string>dotcms.org.1</string>
-                    <string>identifier</string>
-                    <string>{hostId}</string>
-                    <string>languageId</string>
-                    <long>1</long>
-                    <string>runDashboard</string>
-                    <boolean>false</boolean>
-                    <string>isSystemHost</string>
-                    <boolean>false</boolean>
-                    <string>isDefault</string>
-                    <boolean>false</boolean>
-                    <string>folder</string>
-                    <string>SYSTEM_FOLDER</string>
-                    <string>tagStorage</string>
-                    <string>SYSTEM_HOST</string>
-                    <string>sortOrder</string>
-                    <long>0</long>
-                    <string>modUser</string>
-                    <string>dotcms.org.1</string>
-                    <string>open</string>
-                    <boolean>true</boolean>
-                    <null/>
-                    <null/>
-                  </concurrent-hash-map>
-                  <com.dotmarketing.portlets.contentlet.model.Contentlet_-ContentletHashMap>
-                    <default>
-                      <outer-class reference="../../../.."/>
-                    </default>
-                  </com.dotmarketing.portlets.contentlet.model.Contentlet_-ContentletHashMap>
+                <map class="com.dotmarketing.portlets.contentlet.model.Contentlet$ContentletHashMap">
+                  {EStr("type", "host")}
+                  {EStr("inode", hostInode)}
+                  {EStr("hostname", xmlHostname)}
+                  {EStr("hostName", xmlHostname)}
+                  {EStr("__DOTNAME__", xmlHostname)}
+                  {EStr("host", "SYSTEM_HOST")}
+                  {EStr("stInode", HostContentTypeInode)}
+                  {EStr("owner", "dotcms.org.1")}
+                  {EStr("identifier", hostId)}
+                  {ELong("languageId", 1)}
+                  {EBool("runDashboard", false)}
+                  {EBool("isSystemHost", false)}
+                  {EBool("isDefault", false)}
+                  {EStr("folder", "SYSTEM_FOLDER")}
+                  {EStr("tagStorage", "SYSTEM_HOST")}
+                  {ELong("sortOrder", 0)}
+                  {EStr("modUser", "dotcms.org.1")}
+                  {EBool("open", true)}
                 </map>
                 <lowIndexPriority>false</lowIndexPriority>
                 <variantId>DEFAULT</variantId>
@@ -1085,9 +1033,6 @@ public static class BundleWriter
         string xmlBody    = System.Security.SecurityElement.Escape(htmlBody) ?? string.Empty;
         string xmlImage   = System.Security.SecurityElement.Escape(imageUrl) ?? string.Empty;
 
-        // Java 7 ConcurrentHashMap with 16 empty segments (same pattern as HostWrapper).
-        string segments = string.Concat(Enumerable.Repeat(EmptyConcurrentHashMapSegment, 16));
-
         return $"""
             <com.dotcms.publisher.pusher.wrapper.PushContentWrapper>
               <info>
@@ -1102,59 +1047,20 @@ public static class BundleWriter
                 <publishDate class="sql-timestamp">{now}</publishDate>
               </info>
               <content>
-                <map class="com.dotmarketing.portlets.contentlet.model.Contentlet$ContentletHashMap" serialization="custom">
-                  <unserializable-parents/>
-                  <concurrent-hash-map>
-                    <default>
-                      <segments>
-            {segments}
-                      </segments>
-                      <segmentShift>28</segmentShift>
-                      <segmentMask>15</segmentMask>
-                    </default>
-                    <string>modDate</string>
-                    <sql-timestamp>{now}</sql-timestamp>
-                    <string>inode</string>
-                    <string>{inode}</string>
-                    <string>disabledWYSIWYG</string>
-                    <com.google.common.collect.RegularImmutableList resolves-to="com.google.common.collect.ImmutableList$SerializedForm">
-                      <elements/>
-                    </com.google.common.collect.RegularImmutableList>
-                    <string>host</string>
-                    <string>{hostId}</string>
-                    <string>stInode</string>
-                    <string>{contentTypeId}</string>
-                    <string>title</string>
-                    <string>{xmlTitle}</string>
-                    <string>body</string>
-                    <string>{xmlBody}</string>
-                    <string>image</string>
-                    <string>{xmlImage}</string>
-                    <string>owner</string>
-                    <string>dotcms.org.1</string>
-                    <string>identifier</string>
-                    <string>{identifier}</string>
-                    <string>nullProperties</string>
-                    <java.util.concurrent.ConcurrentHashMap_-KeySetView>
-                      <map/>
-                      <value class="boolean">true</value>
-                    </java.util.concurrent.ConcurrentHashMap_-KeySetView>
-                    <string>languageId</string>
-                    <long>1</long>
-                    <string>folder</string>
-                    <string>SYSTEM_FOLDER</string>
-                    <string>sortOrder</string>
-                    <long>0</long>
-                    <string>modUser</string>
-                    <string>dotcms.org.1</string>
-                    <null/>
-                    <null/>
-                  </concurrent-hash-map>
-                  <com.dotmarketing.portlets.contentlet.model.Contentlet_-ContentletHashMap>
-                    <default>
-                      <outer-class reference="../../../.."/>
-                    </default>
-                  </com.dotmarketing.portlets.contentlet.model.Contentlet_-ContentletHashMap>
+                <map class="com.dotmarketing.portlets.contentlet.model.Contentlet$ContentletHashMap">
+                  {ETimestamp("modDate", now)}
+                  {EStr("inode", inode)}
+                  {EStr("host", hostId)}
+                  {EStr("stInode", contentTypeId)}
+                  {EStr("title", xmlTitle)}
+                  {EStr("body", xmlBody)}
+                  {EStr("image", xmlImage)}
+                  {EStr("owner", "dotcms.org.1")}
+                  {EStr("identifier", identifier)}
+                  {ELong("languageId", 1)}
+                  {EStr("folder", "SYSTEM_FOLDER")}
+                  {ELong("sortOrder", 0)}
+                  {EStr("modUser", "dotcms.org.1")}
                 </map>
                 <lowIndexPriority>false</lowIndexPriority>
                 <variantId>DEFAULT</variantId>
@@ -1277,8 +1183,6 @@ public static class BundleWriter
         string xmlParentPath = System.Security.SecurityElement.Escape(parentPath) ?? "/";
         string xmlFolderInode = System.Security.SecurityElement.Escape(folderInode) ?? "SYSTEM_FOLDER";
 
-        string segments = string.Concat(Enumerable.Repeat(EmptyConcurrentHashMapSegment, 16));
-
         // Build multiTree entries linking this page to its contentlets via the container.
         string multiTreeContent = BuildMultiTreeXml(identifier, containerId,
             contentItems ?? [], paneUuidMap, paneContainerIds);
@@ -1302,65 +1206,23 @@ public static class BundleWriter
                 <publishDate class="sql-timestamp">{now}</publishDate>
               </info>
               <content>
-                <map class="com.dotmarketing.portlets.contentlet.model.Contentlet$ContentletHashMap" serialization="custom">
-                  <unserializable-parents/>
-                  <concurrent-hash-map>
-                    <default>
-                      <segments>
-            {segments}
-                      </segments>
-                      <segmentShift>28</segmentShift>
-                      <segmentMask>15</segmentMask>
-                    </default>
-                    <string>modDate</string>
-                    <sql-timestamp>{now}</sql-timestamp>
-                    <string>cachettl</string>
-                    <string>0</string>
-                    <string>inode</string>
-                    <string>{inode}</string>
-                    <string>disabledWYSIWYG</string>
-                    <com.google.common.collect.RegularImmutableList resolves-to="com.google.common.collect.ImmutableList$SerializedForm">
-                      <elements/>
-                    </com.google.common.collect.RegularImmutableList>
-                    <string>host</string>
-                    <string>{hostId}</string>
-                    <string>stInode</string>
-                    <string>{HtmlPageAssetContentTypeId}</string>
-                    <string>title</string>
-                    <string>{xmlTitle}</string>
-                    <string>friendlyName</string>
-                    <string>{xmlTitle}</string>
-                    <string>showOnMenu</string>
-                    <boolean>{showOnMenuStr}</boolean>
-                    <string>template</string>
-                    <string>{templateId}</string>
-                    <string>url</string>
-                    <string>{xmlUrl}</string>
-                    <string>owner</string>
-                    <string>dotcms.org.1</string>
-                    <string>identifier</string>
-                    <string>{identifier}</string>
-                    <string>nullProperties</string>
-                    <java.util.concurrent.ConcurrentHashMap_-KeySetView>
-                      <map/>
-                      <value class="boolean">true</value>
-                    </java.util.concurrent.ConcurrentHashMap_-KeySetView>
-                    <string>languageId</string>
-                    <long>1</long>
-                    <string>folder</string>
-                    <string>{xmlFolderInode}</string>
-                    <string>sortOrder</string>
-                    <long>{sortOrder}</long>
-                    <string>modUser</string>
-                    <string>dotcms.org.1</string>
-                    <null/>
-                    <null/>
-                  </concurrent-hash-map>
-                  <com.dotmarketing.portlets.contentlet.model.Contentlet_-ContentletHashMap>
-                    <default>
-                      <outer-class reference="../../../.."/>
-                    </default>
-                  </com.dotmarketing.portlets.contentlet.model.Contentlet_-ContentletHashMap>
+                <map class="com.dotmarketing.portlets.contentlet.model.Contentlet$ContentletHashMap">
+                  {ETimestamp("modDate", now)}
+                  {EStr("cachettl", "0")}
+                  {EStr("inode", inode)}
+                  {EStr("host", hostId)}
+                  {EStr("stInode", HtmlPageAssetContentTypeId)}
+                  {EStr("title", xmlTitle)}
+                  {EStr("friendlyName", xmlTitle)}
+                  {E("showOnMenu", $"<boolean>{showOnMenuStr}</boolean>")}
+                  {EStr("template", templateId)}
+                  {EStr("url", xmlUrl)}
+                  {EStr("owner", "dotcms.org.1")}
+                  {EStr("identifier", identifier)}
+                  {ELong("languageId", 1)}
+                  {EStr("folder", xmlFolderInode)}
+                  {ELong("sortOrder", sortOrder)}
+                  {EStr("modUser", "dotcms.org.1")}
                 </map>
                 <lowIndexPriority>false</lowIndexPriority>
                 <variantId>DEFAULT</variantId>
@@ -1571,8 +1433,6 @@ public static class BundleWriter
         if (!parentPath.EndsWith('/'))
             parentPath += '/';
 
-        string segments = string.Concat(Enumerable.Repeat(EmptyConcurrentHashMapSegment, 16));
-
         return $"""
             <com.dotcms.publisher.pusher.wrapper.PushContentWrapper>
               <info>
@@ -1587,59 +1447,20 @@ public static class BundleWriter
                 <publishDate class="sql-timestamp">{now}</publishDate>
               </info>
               <content>
-                <map class="com.dotmarketing.portlets.contentlet.model.Contentlet$ContentletHashMap" serialization="custom">
-                  <unserializable-parents/>
-                  <concurrent-hash-map>
-                    <default>
-                      <segments>
-            {segments}
-                      </segments>
-                      <segmentShift>28</segmentShift>
-                      <segmentMask>15</segmentMask>
-                    </default>
-                    <string>modDate</string>
-                    <sql-timestamp>{now}</sql-timestamp>
-                    <string>fileName</string>
-                    <string>{xmlFileName}</string>
-                    <string>title</string>
-                    <string>{xmlFileName}</string>
-                    <string>inode</string>
-                    <string>{inode}</string>
-                    <string>disabledWYSIWYG</string>
-                    <com.google.common.collect.RegularImmutableList resolves-to="com.google.common.collect.ImmutableList$SerializedForm">
-                      <elements/>
-                    </com.google.common.collect.RegularImmutableList>
-                    <string>host</string>
-                    <string>{hostId}</string>
-                    <string>stInode</string>
-                    <string>{FileAssetContentTypeId}</string>
-                    <string>owner</string>
-                    <string>dotcms.org.1</string>
-                    <string>identifier</string>
-                    <string>{identifier}</string>
-                    <string>nullProperties</string>
-                    <java.util.concurrent.ConcurrentHashMap_-KeySetView>
-                      <map/>
-                      <value class="boolean">true</value>
-                     </java.util.concurrent.ConcurrentHashMap_-KeySetView>
-                    <string>languageId</string>
-                    <long>1</long>
-                    <string>fileAsset</string>
-                    <file>{storagePath}</file>
-                    <string>folder</string>
-                    <string>{folderInode}</string>
-                    <string>sortOrder</string>
-                    <long>0</long>
-                    <string>modUser</string>
-                    <string>dotcms.org.1</string>
-                    <null/>
-                    <null/>
-                  </concurrent-hash-map>
-                  <com.dotmarketing.portlets.contentlet.model.Contentlet_-ContentletHashMap>
-                    <default>
-                      <outer-class reference="../../../.."/>
-                    </default>
-                  </com.dotmarketing.portlets.contentlet.model.Contentlet_-ContentletHashMap>
+                <map class="com.dotmarketing.portlets.contentlet.model.Contentlet$ContentletHashMap">
+                  {ETimestamp("modDate", now)}
+                  {EStr("fileName", xmlFileName)}
+                  {EStr("title", xmlFileName)}
+                  {EStr("inode", inode)}
+                  {EStr("host", hostId)}
+                  {EStr("stInode", FileAssetContentTypeId)}
+                  {EStr("owner", "dotcms.org.1")}
+                  {EStr("identifier", identifier)}
+                  {ELong("languageId", 1)}
+                  {EFile("fileAsset", storagePath)}
+                  {EStr("folder", folderInode)}
+                  {ELong("sortOrder", 0)}
+                  {EStr("modUser", "dotcms.org.1")}
                 </map>
                 <lowIndexPriority>false</lowIndexPriority>
                 <variantId>DEFAULT</variantId>
@@ -1705,7 +1526,6 @@ public static class BundleWriter
         string hostInode)
     {
         string now      = DateTime.UtcNow.ToString(XmlTimestampFormat);
-        string segments = string.Concat(Enumerable.Repeat(EmptyConcurrentHashMapSegment, 16));
 
         return $"""
             <com.dotcms.publisher.pusher.wrapper.FolderWrapper>
@@ -1736,28 +1556,9 @@ public static class BundleWriter
                 <path>{folderPath}</path>
               </folderId>
               <host>
-                <map class="com.dotmarketing.portlets.contentlet.model.Contentlet$ContentletHashMap" serialization="custom">
-                  <unserializable-parents/>
-                  <concurrent-hash-map>
-                    <default>
-                      <segments>
-            {segments}
-                      </segments>
-                      <segmentShift>28</segmentShift>
-                      <segmentMask>15</segmentMask>
-                    </default>
-                    <string>type</string>
-                    <string>host</string>
-                    <string>identifier</string>
-                    <string>{hostId}</string>
-                    <null/>
-                    <null/>
-                  </concurrent-hash-map>
-                  <com.dotmarketing.portlets.contentlet.model.Contentlet_-ContentletHashMap>
-                    <default>
-                      <outer-class reference="../../../.."/>
-                    </default>
-                  </com.dotmarketing.portlets.contentlet.model.Contentlet_-ContentletHashMap>
+                <map class="com.dotmarketing.portlets.contentlet.model.Contentlet$ContentletHashMap">
+                  {EStr("type", "host")}
+                  {EStr("identifier", hostId)}
                 </map>
                 <lowIndexPriority>false</lowIndexPriority>
                 <variantId>DEFAULT</variantId>
