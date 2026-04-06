@@ -1155,4 +1155,146 @@ public class DnnXmlParserTests
             Directory.Delete(tempDir, recursive: true);
         }
     }
+
+    // ------------------------------------------------------------------
+    // ParsePortalPages tests — DefaultPortalSkin inheritance
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void ParsePortalPages_AppliesDefaultPortalSkin_WhenPageSkinSrcIsEmpty()
+    {
+        string tempDir = BuildExportDbFolder(db =>
+        {
+            var settings = db.GetCollection("ExportPortalSetting");
+            settings.Insert(new BsonDocument
+            {
+                ["SettingName"]  = "DefaultPortalSkin",
+                ["SettingValue"] = "[L]skins/fbot/inner.ascx",
+            });
+
+            var tabs = db.GetCollection("ExportTab");
+            tabs.Insert(new BsonDocument
+            {
+                ["TabName"]   = "Home",
+                ["UniqueId"]  = new BsonValue(Guid.Parse("aaaa1111-0000-0000-0000-000000000001")),
+                ["IsDeleted"] = false,
+                ["TabPath"]   = "//Home",
+                ["Level"]     = 0,
+                ["IsVisible"] = true,
+                ["SkinSrc"]   = "[L]skins/fbot/home.ascx",
+            });
+            tabs.Insert(new BsonDocument
+            {
+                ["TabName"]   = "About Us",
+                ["UniqueId"]  = new BsonValue(Guid.Parse("aaaa1111-0000-0000-0000-000000000002")),
+                ["IsDeleted"] = false,
+                ["TabPath"]   = "//AboutUs",
+                ["Level"]     = 0,
+                ["IsVisible"] = true,
+                // SkinSrc intentionally omitted — inherits portal default.
+            });
+            tabs.Insert(new BsonDocument
+            {
+                ["TabName"]   = "Our Story",
+                ["UniqueId"]  = new BsonValue(Guid.Parse("aaaa1111-0000-0000-0000-000000000003")),
+                ["IsDeleted"] = false,
+                ["TabPath"]   = "//AboutUs//OurStory",
+                ["Level"]     = 1,
+                ["IsVisible"] = true,
+                ["SkinSrc"]   = "",  // Explicit empty string — inherits portal default.
+            });
+        });
+
+        try
+        {
+            IReadOnlyList<DnnPortalPage> pages = DnnXmlParser.ParsePortalPages(tempDir);
+
+            Assert.Equal(3, pages.Count);
+
+            // Home keeps its explicit skin.
+            var home = pages.First(p => p.Name == "Home");
+            Assert.Equal("[L]skins/fbot/home.ascx", home.SkinSrc);
+
+            // About Us had no SkinSrc → receives the portal default.
+            var about = pages.First(p => p.Name == "About Us");
+            Assert.Equal("[L]skins/fbot/inner.ascx", about.SkinSrc);
+
+            // Our Story had empty SkinSrc → receives the portal default.
+            var story = pages.First(p => p.Name == "Our Story");
+            Assert.Equal("[L]skins/fbot/inner.ascx", story.SkinSrc);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ParsePortalPages_LeavesEmptySkinSrc_WhenNoDefaultPortalSkinSetting()
+    {
+        string tempDir = BuildExportDbFolder(db =>
+        {
+            // No ExportPortalSetting collection populated at all.
+            var tabs = db.GetCollection("ExportTab");
+            tabs.Insert(new BsonDocument
+            {
+                ["TabName"]   = "About",
+                ["UniqueId"]  = new BsonValue(Guid.Parse("cccc3333-0000-0000-0000-000000000001")),
+                ["IsDeleted"] = false,
+                ["TabPath"]   = "//About",
+                ["Level"]     = 0,
+                ["IsVisible"] = true,
+                // No SkinSrc
+            });
+        });
+
+        try
+        {
+            IReadOnlyList<DnnPortalPage> pages = DnnXmlParser.ParsePortalPages(tempDir);
+            Assert.Single(pages);
+            Assert.Equal(string.Empty, pages[0].SkinSrc);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ParsePortalPages_DoesNotOverrideExplicitSkinSrc_WithDefault()
+    {
+        string tempDir = BuildExportDbFolder(db =>
+        {
+            var settings = db.GetCollection("ExportPortalSetting");
+            settings.Insert(new BsonDocument
+            {
+                ["SettingName"]  = "DefaultPortalSkin",
+                ["SettingValue"] = "[G]Skins/Xcillion/Inner.ascx",
+            });
+
+            var tabs = db.GetCollection("ExportTab");
+            tabs.Insert(new BsonDocument
+            {
+                ["TabName"]   = "Activity Feed",
+                ["UniqueId"]  = new BsonValue(Guid.Parse("dddd4444-0000-0000-0000-000000000001")),
+                ["IsDeleted"] = false,
+                ["TabPath"]   = "//ActivityFeed",
+                ["Level"]     = 0,
+                ["IsVisible"] = true,
+                ["SkinSrc"]   = "[G]Skins/Cavalier/3-Col-Social.ascx",
+            });
+        });
+
+        try
+        {
+            IReadOnlyList<DnnPortalPage> pages = DnnXmlParser.ParsePortalPages(tempDir);
+            Assert.Single(pages);
+            // Explicit skin is preserved, not overridden by the default.
+            Assert.Equal("[G]Skins/Cavalier/3-Col-Social.ascx", pages[0].SkinSrc);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
 }
