@@ -344,6 +344,19 @@ public static class BundleWriter
         }
 
         // --- portal pages (from DNN tabs) ------------------------------------
+
+        // Unified folder inode registry keyed by DotCMS folder path
+        // (case-insensitive).  Shared across page folders, portal-file
+        // folders, and theme folders to prevent duplicate identifier
+        // entries that would violate the
+        // identifier_parent_path_asset_name_host_inode_key constraint.
+        var unifiedFolderInodes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        // Track DotCMS folder paths for which folder XML has already
+        // been written so we never emit two entries with the same
+        // (parentPath, assetName, hostId) tuple.
+        var writtenFolderPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         if (pages is not null && pages.Count > 0)
         {
             // Build a lookup from skin name → template ID for matching DNN pages
@@ -388,7 +401,13 @@ public static class BundleWriter
                 {
                     string folderSlug = string.Join("/",
                         pathSegments[..depth].Select(s => PageNameToUrl(s)));
-                    pageFolderInodes.TryAdd(folderSlug, Guid.NewGuid().ToString());
+                    string dotcmsKey = "/" + folderSlug + "/";
+                    if (!unifiedFolderInodes.TryGetValue(dotcmsKey, out string? existingInode))
+                    {
+                        existingInode = Guid.NewGuid().ToString();
+                        unifiedFolderInodes[dotcmsKey] = existingInode;
+                    }
+                    pageFolderInodes.TryAdd(folderSlug, existingInode);
                 }
             }
 
@@ -413,6 +432,7 @@ public static class BundleWriter
                         : "ROOT/" + pageFolderParent.Trim('/');
                     WriteTextEntry(tar, $"{entryDir}/{folderInode}.folder.xml", folderXml);
                     manifestEntries.Add(("folder", folderInode, folderInode, dotcmsPath, contentWorkDir, "/"));
+                    writtenFolderPaths.Add(dotcmsPath);
                 }
             }
 
@@ -425,7 +445,9 @@ public static class BundleWriter
 
                 string identifier = Guid.NewGuid().ToString();
                 string inode      = Guid.NewGuid().ToString();
-                string url        = PageNameToUrl(page.Name);
+                string url        = page.Name.Equals("Home", StringComparison.OrdinalIgnoreCase)
+                    ? "index"
+                    : PageNameToUrl(page.Name);
                 string templateId = ResolveTemplateId(page.SkinSrc, skinToTemplateId);
 
                 // Resolve the HTML contentlet identifiers belonging to this page.
@@ -449,6 +471,18 @@ public static class BundleWriter
                             pageFolderInode = fi;
                         pageParentPath = "/" + folderSlug + "/";
                     }
+                }
+
+                // When a top-level page's URL would collide with an existing
+                // folder (from child pages or portal files), move the page
+                // inside the folder as "index" to avoid a duplicate
+                // identifier_parent_path_asset_name_host_inode_key violation.
+                if (page.Level == 0
+                    && unifiedFolderInodes.TryGetValue("/" + url + "/", out string? conflictFolderInode))
+                {
+                    pageFolderInode = conflictFolderInode;
+                    pageParentPath  = "/" + url + "/";
+                    url             = "index";
                 }
 
                 string pageXml = BuildPageXml(
@@ -493,7 +527,8 @@ public static class BundleWriter
                 WriteThemeFileAssets(
                     tar, themesZipPath, contentHostId,
                     siteId, siteInode, contentWorkDir, manifestEntries,
-                    templateDefs, portalFiles, consumedPortalFileIds);
+                    templateDefs, portalFiles, consumedPortalFileIds,
+                    unifiedFolderInodes, writtenFolderPaths);
             }
             catch (Exception ex) when (ex is InvalidDataException or IOException)
             {
@@ -523,7 +558,17 @@ public static class BundleWriter
                 for (int depth = 1; depth <= parts.Length; depth++)
                 {
                     string partialPath = string.Join("/", parts[..depth]) + "/";
-                    folderInodes.TryAdd(partialPath, Guid.NewGuid().ToString());
+                    string dotcmsKey = "/" + partialPath;
+                    if (!dotcmsKey.EndsWith('/')) dotcmsKey += '/';
+                    // Reuse an existing folder inode from the unified
+                    // registry (e.g. created by page-folder building)
+                    // to avoid duplicate identifier entries.
+                    if (!unifiedFolderInodes.TryGetValue(dotcmsKey, out string? existingInode))
+                    {
+                        existingInode = Guid.NewGuid().ToString();
+                        unifiedFolderInodes[dotcmsKey] = existingInode;
+                    }
+                    folderInodes.TryAdd(partialPath, existingInode);
                 }
             }
 
@@ -536,6 +581,12 @@ public static class BundleWriter
                     string folderName   = dnnFolderPath.TrimEnd('/').Split('/').Last();
                     string dotcmsPath   = "/" + dnnFolderPath.TrimStart('/');
                     if (!dotcmsPath.EndsWith('/')) dotcmsPath += '/';
+
+                    // Skip folders already written (e.g. by page-folder
+                    // building) to avoid duplicate identifier entries.
+                    if (!writtenFolderPaths.Add(dotcmsPath))
+                        continue;
+
                     // Compute the real parent path so DotCMS's
                     // identifier_parent_path_check constraint is satisfied.
                     string trimmedDir   = dnnFolderPath.TrimEnd('/');
@@ -2342,7 +2393,9 @@ public static class BundleWriter
         List<(string type, string id, string inode, string name, string site, string folder)> manifestEntries,
         IReadOnlyList<(string id, string inode, string name, string html, string header, string themeName, IReadOnlyDictionary<string, int> paneUuidMap)>? templateDefs = null,
         IReadOnlyList<DnnPortalFile>? portalFiles = null,
-        ISet<string>? consumedPortalFileIds = null)
+        ISet<string>? consumedPortalFileIds = null,
+        Dictionary<string, string>? unifiedFolderInodes = null,
+        HashSet<string>? writtenFolderPaths = null)
     {
         using var zip = System.IO.Compression.ZipFile.OpenRead(themesZipPath);
 
@@ -2500,7 +2553,23 @@ public static class BundleWriter
             for (int depth = 1; depth <= parts.Length; depth++)
             {
                 string partialPath = string.Join("/", parts[..depth]);
-                folderInodes.TryAdd(partialPath, Guid.NewGuid().ToString());
+                string dotcmsKey = "/" + partialPath + "/";
+                // Reuse an existing folder inode from the unified
+                // registry to avoid duplicate identifier entries.
+                if (unifiedFolderInodes is not null
+                    && unifiedFolderInodes.TryGetValue(dotcmsKey, out string? existingInode))
+                {
+                    folderInodes.TryAdd(partialPath, existingInode);
+                }
+                else
+                {
+                    if (!folderInodes.ContainsKey(partialPath))
+                    {
+                        string newInode = Guid.NewGuid().ToString();
+                        folderInodes[partialPath] = newInode;
+                        unifiedFolderInodes?.TryAdd(dotcmsKey, newInode);
+                    }
+                }
             }
         }
 
@@ -2515,6 +2584,11 @@ public static class BundleWriter
                 string parentPath = lastSlash >= 0
                     ? "/" + dirPath[..lastSlash] + "/"
                     : "/";
+
+                // Skip folders already written by other folder-building
+                // phases to avoid duplicate identifier entries.
+                if (writtenFolderPaths is not null && !writtenFolderPaths.Add(dotcmsPath))
+                    continue;
 
                 string folderXml = BuildFolderXml(
                     folderInode, folderName, dotcmsPath, parentPath, siteId, siteInode);
