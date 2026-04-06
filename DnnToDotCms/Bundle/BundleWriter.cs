@@ -371,6 +371,9 @@ public static class BundleWriter
             var pageFolderInodes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (DnnPortalPage page in pages)
             {
+                // Level-0 (top-level) pages use SYSTEM_FOLDER and parentPath="/"
+                // so they don't need explicit folder entries.  Only child pages
+                // (Level >= 1) require folder creation.
                 if (page.Level < 1) continue;
                 if (page.Name.Equals("Admin", StringComparison.OrdinalIgnoreCase)) continue;
 
@@ -1271,6 +1274,8 @@ public static class BundleWriter
         string now      = DateTime.UtcNow.ToString(XmlTimestampFormat);
         string xmlTitle = System.Security.SecurityElement.Escape(Truncate(title, MaxVarcharLength)) ?? string.Empty;
         string xmlUrl   = System.Security.SecurityElement.Escape(url) ?? string.Empty;
+        string xmlParentPath = System.Security.SecurityElement.Escape(parentPath) ?? "/";
+        string xmlFolderInode = System.Security.SecurityElement.Escape(folderInode) ?? "SYSTEM_FOLDER";
 
         string segments = string.Concat(Enumerable.Repeat(EmptyConcurrentHashMapSegment, 16));
 
@@ -1343,7 +1348,7 @@ public static class BundleWriter
                     <string>languageId</string>
                     <long>1</long>
                     <string>folder</string>
-                    <string>{folderInode}</string>
+                    <string>{xmlFolderInode}</string>
                     <string>sortOrder</string>
                     <long>{sortOrder}</long>
                     <string>modUser</string>
@@ -1364,7 +1369,7 @@ public static class BundleWriter
                 <id>{identifier}</id>
                 <assetName>{xmlUrl}</assetName>
                 <assetType>contentlet</assetType>
-                <parentPath>{parentPath}</parentPath>
+                <parentPath>{xmlParentPath}</parentPath>
                 <hostId>{hostId}</hostId>
                 <owner>dotcms.org.1</owner>
                 <createDate class="sql-timestamp">{now}</createDate>
