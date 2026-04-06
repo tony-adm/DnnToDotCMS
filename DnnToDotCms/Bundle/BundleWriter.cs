@@ -1967,7 +1967,7 @@ public static class BundleWriter
     // reference the theme-specific logo path when a theme name is available.
     private static readonly (Regex Rx, string Replacement)[] SkinControlReplacements =
     [
-        // Functional controls replaced with minimal Velocity equivalents.
+        // Functional controls replaced with minimal HTML comment placeholders.
         (new(@"<dnn:MENU\s[^>]*/?>",        RegexOptions.IgnoreCase | RegexOptions.Singleline),
          "<!-- dnn:MENU – add navigation in DotCMS -->"),
         (new(@"<dnn:NAV\s[^>]*/?>",         RegexOptions.IgnoreCase | RegexOptions.Singleline),
