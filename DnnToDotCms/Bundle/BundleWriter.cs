@@ -1112,10 +1112,8 @@ public static class BundleWriter
                 <webasset>{identifier}</webasset>
                 <languageId>1</languageId>
               </task>
-              <history class="com.google.common.collect.RegularImmutableList" resolves-to="com.google.common.collect.ImmutableList$SerializedForm">
-                <elements/>
-              </history>
-              <comments class="com.google.common.collect.RegularImmutableList" reference="../history"/>
+              <history class="java.util.ArrayList"/>
+              <comments class="java.util.ArrayList"/>
             </com.dotcms.publisher.pusher.wrapper.PushContentWorkflowWrapper>
             """;
     }
