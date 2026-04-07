@@ -534,7 +534,7 @@ public static class BundleWriter
                 }
 
                 string pageXml = BuildPageXml(
-                    identifier, inode, page.Title, url,
+                    identifier, inode, page.Name, url,
                     contentHostId, templateId,
                     defaultContainerId, pageContentItems ?? [], paneUuidMap,
                     paneContainerIds, page.IsVisible, page.TabOrder,
@@ -544,14 +544,14 @@ public static class BundleWriter
                     $"live/{contentWorkDir}/1/{identifier}.content.xml",
                     pageXml);
 
-                string workflowXml = BuildContentWorkflowXml(identifier, page.Title);
+                string workflowXml = BuildContentWorkflowXml(identifier, page.Name);
                 WriteTextEntry(
                     tar,
                     $"live/{contentWorkDir}/1/{identifier}.contentworkflow.xml",
                     workflowXml);
 
                 manifestEntries.Add(("contentlet", identifier, inode,
-                    Truncate(page.Title, MaxVarcharLength), contentWorkDir, "/"));
+                    Truncate(page.Name, MaxVarcharLength), contentWorkDir, "/"));
             }
         }
 
@@ -2014,11 +2014,37 @@ public static class BundleWriter
     // ASCX → HTML conversion helpers
     // ------------------------------------------------------------------
 
-    // Velocity snippet that renders a top-level navigation menu using
-    // the DotCMS $navtool API.  Used for <dnn:MENU> and <dnn:NAV>.
-    private const string NavToolVelocitySnippet =
-        """
-        <ul class="dnn-nav">
+    // Regex helpers for extracting DNN control attributes from MENU/NAV tags.
+    private static readonly Regex DnnIdAttrRegex =
+        new(@"\bid\s*=\s*""([^""]+)""", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex DnnCssClassAttrRegex =
+        new(@"\bCssClass\s*=\s*""([^""]+)""", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    // Regex patterns for <dnn:MENU> and <dnn:NAV> controls.
+    // These are handled separately (like LOGO) so we can preserve id/CssClass attributes.
+    private static readonly Regex DnnMenuRegex =
+        new(@"<dnn:MENU\s[^>]*/?>", RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
+    private static readonly Regex DnnNavRegex =
+        new(@"<dnn:NAV\s[^>]*/?>", RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+    /// <summary>
+    /// Builds a Velocity snippet that renders a top-level navigation menu using
+    /// the DotCMS <c>$navtool</c> API, preserving original <c>id</c> and
+    /// <c>CssClass</c> attributes from the DNN control tag.
+    /// </summary>
+    internal static string BuildNavSnippet(string dnnTag)
+    {
+        var idMatch    = DnnIdAttrRegex.Match(dnnTag);
+        var classMatch = DnnCssClassAttrRegex.Match(dnnTag);
+
+        var attrs = new System.Text.StringBuilder();
+        if (idMatch.Success)
+            attrs.Append($@" id=""{idMatch.Groups[1].Value}""");
+        if (classMatch.Success)
+            attrs.Append($@" class=""{classMatch.Groups[1].Value}""");
+
+        return $"""
+        <ul{attrs}>
         #set($navItems = $navtool.getNav("/"))
         #foreach($navItem in $navItems)
           #if($navItem.showOnMenu)
@@ -2031,6 +2057,7 @@ public static class BundleWriter
         #end
         </ul>
         """;
+    }
 
     // Velocity snippet that renders a breadcrumb trail using $crumbTool.
     private const string BreadcrumbVelocitySnippet =
@@ -2050,14 +2077,10 @@ public static class BundleWriter
 
     // Pre-compiled skin-control replacement pairs: (regex, replacement).
     // Each entry handles one well-known <dnn:TAGNAME .../> control.
-    // Note: <dnn:LOGO> is handled separately in ConvertAscxToTemplateHtml so it can
-    // reference the theme-specific logo path when a theme name is available.
+    // Note: <dnn:LOGO>, <dnn:MENU>, and <dnn:NAV> are handled separately in
+    // ConvertAscxToTemplateHtml so they can extract per-instance attributes.
     private static readonly (Regex Rx, string Replacement)[] SkinControlReplacements =
     [
-        (new(@"<dnn:MENU\s[^>]*/?>",        RegexOptions.IgnoreCase | RegexOptions.Singleline),
-         NavToolVelocitySnippet),
-        (new(@"<dnn:NAV\s[^>]*/?>",         RegexOptions.IgnoreCase | RegexOptions.Singleline),
-         NavToolVelocitySnippet),
         (new(@"<dnn:USER\s[^>]*/?>",        RegexOptions.IgnoreCase | RegexOptions.Singleline),
          @"<span class=""dnn-user"">$!{user.firstName} $!{user.lastName}</span>"),
         (new(@"<dnn:LOGIN\s[^>]*/?>",       RegexOptions.IgnoreCase | RegexOptions.Singleline),
@@ -2315,6 +2338,12 @@ public static class BundleWriter
             ? "/logo.png"
             : $"/application/themes/{themeName}/Images/logo.png";
         html = DnnLogoRegex.Replace(html, $@"<img src=""{logoSrc}"" alt=""Logo"" />");
+
+        // Replace <dnn:MENU> and <dnn:NAV> controls with Velocity $navtool
+        // snippets, preserving the original id and CssClass attributes so that
+        // existing CSS styling continues to work.
+        html = DnnMenuRegex.Replace(html, m => BuildNavSnippet(m.Value));
+        html = DnnNavRegex.Replace(html, m => BuildNavSnippet(m.Value));
 
         // Replace well-known DNN skin controls with HTML/comment equivalents.
         foreach (var (rx, replacement) in SkinControlReplacements)
