@@ -1891,6 +1891,11 @@ public static class BundleWriter
                 // Resolve <%@ Register TagPrefix="..." Src="..." %> user
                 // controls by inlining their source ASCX content.
                 ascx = ResolveRegisteredControls(ascx, skinDir, zip);
+
+                // Expand <dnn:MENU> CssClass attributes with classes from
+                // the DDRMenu template (e.g. BootStrapNav/BootStrapNav.txt)
+                // so that BuildNavSnippet preserves them on the <ul>.
+                ascx = ExpandMenuTemplateClasses(ascx, skinDir, zip);
             }
 
             var (html, header, paneUuidMap) = ConvertAscxToTemplateHtml(ascx, firstContainerId, themeName, name, availableThemeFiles);
@@ -2029,6 +2034,22 @@ public static class BundleWriter
     private static readonly Regex DnnNavRegex =
         new(@"<dnn:NAV\s[^>]*/?>", RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
 
+    // Regex to extract the MenuStyle attribute from a <dnn:MENU> or <dnn:NAV> tag.
+    private static readonly Regex MenuStyleAttrRegex =
+        new(@"\bMenuStyle\s*=\s*""([^""]+)""", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    // Regex to extract the class attribute value from the root <ul> in a DDRMenu template.
+    private static readonly Regex UlClassAttrRegex =
+        new(@"<ul\b[^>]*\bclass\s*=\s*""([^""]+)""", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    // Matches DDRMenu template tokens such as [=CssClass], [=ID], [?HASCHILDREN], etc.
+    private static readonly Regex DdrTokenRegex =
+        new(@"\[\??\!?=?\/?[A-Za-z]+\]", RegexOptions.Compiled);
+
+    // Matches two or more consecutive whitespace characters (for normalisation).
+    private static readonly Regex MultiSpaceRegex =
+        new(@"\s{2,}", RegexOptions.Compiled);
+
     /// <summary>
     /// Builds a Velocity snippet that renders a top-level navigation menu using
     /// the DotCMS <c>$navtool</c> API, preserving original <c>id</c> and
@@ -2081,6 +2102,83 @@ public static class BundleWriter
         #end
         </ul>
         """;
+    }
+
+    /// <summary>
+    /// Reads a DDRMenu template file from the skin zip archive.
+    /// DDRMenu templates are stored in a sub-directory named after the menu
+    /// style (e.g. <c>BootStrapNav/BootStrapNav.txt</c>).  Token-based
+    /// (<c>.txt</c>) and Razor (<c>.cshtml</c>) templates are both checked.
+    /// </summary>
+    /// <returns>The template content, or <c>null</c> if not found.</returns>
+    private static string? ReadDdrMenuTemplate(string skinDir, string menuStyle, ZipArchive zip)
+    {
+        string basePath = $"{skinDir}/{menuStyle}/{menuStyle}";
+        foreach (string ext in new[] { ".txt", ".cshtml" })
+        {
+            string path = basePath + ext;
+            var entry = zip.Entries.FirstOrDefault(e =>
+                e.FullName.Replace('\\', '/').Equals(path, StringComparison.OrdinalIgnoreCase));
+            if (entry != null)
+            {
+                using var reader = new StreamReader(entry.Open(), Encoding.UTF8);
+                return reader.ReadToEnd();
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Pre-processes a DNN skin ASCX string by expanding the <c>CssClass</c>
+    /// attribute on <c>&lt;dnn:MENU&gt;</c> tags to include literal CSS classes
+    /// defined in the corresponding DDRMenu template file.
+    /// </summary>
+    /// <remarks>
+    /// DNN's DDRMenu module renders menus using template files (e.g.
+    /// <c>BootStrapNav/BootStrapNav.txt</c>) that define additional CSS
+    /// classes on the root <c>&lt;ul&gt;</c> element beyond those specified
+    /// in the control's <c>CssClass</c> attribute.  This method reads the
+    /// template, extracts the literal (non-token) classes, and merges them
+    /// into the <c>CssClass</c> attribute so that downstream processing
+    /// (<see cref="BuildNavSnippet"/>) preserves all classes.
+    /// </remarks>
+    internal static string ExpandMenuTemplateClasses(string ascx, string skinDir, ZipArchive zip)
+    {
+        return DnnMenuRegex.Replace(ascx, m =>
+        {
+            string tag = m.Value;
+            var styleMatch = MenuStyleAttrRegex.Match(tag);
+            if (!styleMatch.Success) return tag;
+
+            string menuStyle = styleMatch.Groups[1].Value;
+
+            string? templateContent = ReadDdrMenuTemplate(skinDir, menuStyle, zip);
+            if (templateContent == null) return tag;
+
+            // Extract the class attribute from the first <ul> in the template.
+            var ulMatch = UlClassAttrRegex.Match(templateContent);
+            if (!ulMatch.Success) return tag;
+
+            string rawClasses = ulMatch.Groups[1].Value;
+            // Strip DDRMenu tokens (e.g. [=CssClass]) to keep only literal classes.
+            string templateClasses = DdrTokenRegex.Replace(rawClasses, "");
+            templateClasses = MultiSpaceRegex.Replace(templateClasses, " ").Trim();
+            if (string.IsNullOrWhiteSpace(templateClasses)) return tag;
+
+            // Merge template classes with the existing CssClass attribute.
+            var cssMatch = DnnCssClassAttrRegex.Match(tag);
+            if (cssMatch.Success)
+            {
+                string existing = cssMatch.Groups[1].Value;
+                string merged = $"{templateClasses} {existing}";
+                return tag.Remove(cssMatch.Index, cssMatch.Length)
+                          .Insert(cssMatch.Index, $@"CssClass=""{merged}""");
+            }
+
+            // No CssClass attribute → inject one with the template classes.
+            int insertPos = tag.EndsWith("/>") ? tag.Length - 2 : tag.Length - 1;
+            return tag.Insert(insertPos, $@" CssClass=""{templateClasses}""");
+        });
     }
 
     // Velocity snippet that renders a breadcrumb trail using $crumbTool.
