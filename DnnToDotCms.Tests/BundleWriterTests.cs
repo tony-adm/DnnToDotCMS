@@ -721,7 +721,38 @@ public class BundleWriterTests
         var (body, _, _) = BundleWriter.ConvertAscxToTemplateHtml(ascx);
 
         Assert.Contains("dnn-nav", body);
+        Assert.Contains("$navtool.getNav", body);
+        Assert.Contains("#foreach", body);
+        Assert.Contains("$navItem.showOnMenu", body);
         Assert.DoesNotContain("dnn:MENU", body);
+    }
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_ReplacesNavControl()
+    {
+        const string ascx = """
+            <div><dnn:NAV runat="server" /></div>
+            """;
+
+        var (body, _, _) = BundleWriter.ConvertAscxToTemplateHtml(ascx);
+
+        Assert.Contains("$navtool.getNav", body);
+        Assert.DoesNotContain("dnn:NAV", body);
+    }
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_ReplacesBreadcrumbControl()
+    {
+        const string ascx = """
+            <div><dnn:BREADCRUMB runat="server" /></div>
+            """;
+
+        var (body, _, _) = BundleWriter.ConvertAscxToTemplateHtml(ascx);
+
+        Assert.Contains("dnn-breadcrumb", body);
+        Assert.Contains("$crumbTool.getCrumbs", body);
+        Assert.Contains("#foreach", body);
+        Assert.DoesNotContain("dnn:BREADCRUMB", body);
     }
 
     [Fact]
