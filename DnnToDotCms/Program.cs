@@ -183,6 +183,12 @@ try
         ? DnnXmlParser.ParsePortalFiles(exportDir)
         : [];
 
+    // Read the default portal skin so interior pages (with empty SkinSrc)
+    // get the correct template instead of falling back to the first one.
+    string? defaultSkinSrc = exportDir is not null
+        ? DnnXmlParser.ParseDefaultSkinSrc(exportDir)
+        : null;
+
     // Delete any existing output file before writing so a failed run never
     // leaves a stale bundle from a previous successful run in place.
     if (File.Exists(outputPath))
@@ -191,7 +197,7 @@ try
     // Write the DotCMS site bundle.
     using (var outStream = File.Create(outputPath))
         BundleWriter.Write(contentTypes, outStream, themesZip, portalName, htmlContents,
-            portalPages, portalFiles);
+            portalPages, portalFiles, defaultSkinSrc);
 
     string themeNote = themesZip is not null
         ? " Containers, templates, and static theme assets included from export_themes.zip."
@@ -312,7 +318,8 @@ static async Task<int> RunCrawlModeAsync(string url, int maxPages, string output
 
         using (var outStream = File.Create(outputPath))
             BundleWriter.Write(contentTypes, outStream, themesZipPath: null, siteName,
-                htmlContents, portalPages, portalFiles, containerDefs, templateDefs);
+                htmlContents, portalPages, portalFiles, defaultSkinSrc: null,
+                prebuiltContainers: containerDefs, prebuiltTemplates: templateDefs);
 
         Console.WriteLine(
             $"Bundle written to: {outputPath}" +
