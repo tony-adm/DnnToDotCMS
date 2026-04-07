@@ -795,6 +795,39 @@ public class BundleWriterTests
     }
 
     [Fact]
+    public void ConvertAscxToTemplateHtml_NavSnippetIncludesBootstrapNavClasses()
+    {
+        const string ascx = """
+            <dnn:MENU runat="server" id="topNav" CssClass="navbar-nav" />
+            """;
+
+        var (body, _, _) = BundleWriter.ConvertAscxToTemplateHtml(ascx);
+
+        // Verify Bootstrap nav classes are present on nav items.
+        Assert.Contains("nav-item", body);
+        Assert.Contains("nav-link", body);
+        Assert.Contains("text-expanded", body);
+    }
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_NavSnippetIncludesDropdownSupport()
+    {
+        const string ascx = """
+            <dnn:MENU runat="server" id="topNav" CssClass="navbar-nav" />
+            """;
+
+        var (body, _, _) = BundleWriter.ConvertAscxToTemplateHtml(ascx);
+
+        // Verify dropdown classes/structure are present for child nav items.
+        Assert.Contains("dropdown", body);
+        Assert.Contains("dropdown-toggle", body);
+        Assert.Contains("dropdown-menu", body);
+        Assert.Contains("$navItem.children", body);
+        Assert.Contains("$childItem", body);
+        Assert.Contains("caret", body);
+    }
+
+    [Fact]
     public void ConvertAscxToTemplateHtml_ReplacesBreadcrumbControl()
     {
         const string ascx = """
