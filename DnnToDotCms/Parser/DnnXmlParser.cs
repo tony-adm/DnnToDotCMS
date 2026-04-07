@@ -146,6 +146,62 @@ public static class DnnXmlParser
         }
     }
 
+    private static T? WithLiteDbScalar<T>(
+        string exportFolderOrJson,
+        Func<LiteDatabase, T?> action) where T : class
+    {
+        string folderPath  = ResolveFolderPath(exportFolderOrJson);
+        string dbZipPath   = Path.Combine(folderPath, "export_db.zip");
+        if (!File.Exists(dbZipPath))
+            return default;
+
+        string tempDb = Path.GetTempFileName();
+        try
+        {
+            using (var zipStream = File.OpenRead(dbZipPath))
+            using (var zip = new ZipArchive(zipStream, ZipArchiveMode.Read))
+            {
+                ZipArchiveEntry? dbEntry = zip.GetEntry("export.dnndb");
+                if (dbEntry is null)
+                    return default;
+
+                using var outStream = File.Create(tempDb);
+                using var inStream  = dbEntry.Open();
+                inStream.CopyTo(outStream);
+            }
+
+            using var db = new LiteDatabase($"Filename={tempDb};ReadOnly=true");
+            return action(db);
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException
+                                      or LiteException or InvalidOperationException)
+        {
+            Console.Error.WriteLine(
+                $"Warning: Could not read data from '{dbZipPath}': {ex.Message}");
+            return default;
+        }
+        finally
+        {
+            try { File.Delete(tempDb); } catch (IOException) { /* best-effort cleanup */ }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Public API — portal settings
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Reads the <c>DefaultPortalSkin</c> setting from the
+    /// <c>ExportPortalSetting</c> collection in <c>export_db.zip</c>.
+    /// Returns <see langword="null"/> when the database is unavailable or
+    /// the setting is not present.
+    /// </summary>
+    /// <param name="exportFolderOrJson">
+    /// Either the DNN export folder path or the full path to <c>export.json</c>.
+    /// </param>
+    public static string? ParseDefaultSkinSrc(string exportFolderOrJson)
+        => WithLiteDbScalar(exportFolderOrJson, ExtractDefaultSkinSrc);
+
     // ------------------------------------------------------------------
     // Public API — portal pages
     // ------------------------------------------------------------------
@@ -485,6 +541,29 @@ public static class DnnXmlParser
         }
 
         return results;
+    }
+
+    // ------------------------------------------------------------------
+    // LiteDB portal settings extraction
+    // ------------------------------------------------------------------
+
+    private static string? ExtractDefaultSkinSrc(LiteDatabase db)
+    {
+        ILiteCollection<BsonDocument> settings = db.GetCollection("ExportPortalSetting");
+        foreach (BsonDocument doc in settings.FindAll())
+        {
+            if (!doc.TryGetValue("SettingName", out BsonValue nameVal)) continue;
+            if (!string.Equals(nameVal.AsString, "DefaultPortalSkin", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            if (doc.TryGetValue("SettingValue", out BsonValue val))
+            {
+                string value = val.AsString ?? string.Empty;
+                if (!string.IsNullOrWhiteSpace(value))
+                    return value;
+            }
+        }
+        return null;
     }
 
     // ------------------------------------------------------------------

@@ -91,6 +91,13 @@ public static class BundleWriter
     /// database.  When provided, each file is written as a published DotCMS
     /// <c>FileAsset</c> contentlet.
     /// </param>
+    /// <param name="defaultSkinSrc">
+    /// Optional DNN <c>DefaultPortalSkin</c> setting (e.g.
+    /// <c>[L]skins/fbot/inner.ascx</c>).  Pages with an empty
+    /// <c>SkinSrc</c> will use this value to resolve their template,
+    /// ensuring interior pages get the correct layout instead of falling
+    /// back to the first available template.
+    /// </param>
     public static void Write(
         IReadOnlyList<DotCmsContentType> contentTypes,
         Stream output,
@@ -99,6 +106,7 @@ public static class BundleWriter
         IReadOnlyList<DnnHtmlContent>? htmlContents = null,
         IReadOnlyList<DnnPortalPage>? pages = null,
         IReadOnlyList<DnnPortalFile>? portalFiles = null,
+        string? defaultSkinSrc = null,
         IReadOnlyList<(string id, string inode, string name, string html, string themeName)>? prebuiltContainers = null,
         IReadOnlyList<(string id, string inode, string name, string html, string header, string themeName, IReadOnlyDictionary<string, int> paneUuidMap)>? prebuiltTemplates = null)
     {
@@ -468,7 +476,7 @@ public static class BundleWriter
                 string url        = page.Name.Equals("Home", StringComparison.OrdinalIgnoreCase)
                     ? "index"
                     : PageNameToUrl(page.Name);
-                string templateId = ResolveTemplateId(page.SkinSrc, skinToTemplateId);
+                string templateId = ResolveTemplateId(page.SkinSrc, skinToTemplateId, defaultSkinSrc);
 
                 // Resolve the HTML contentlet identifiers belonging to this page.
                 tabContentMap.TryGetValue(page.UniqueId, out var pageContentItems);
@@ -1672,34 +1680,59 @@ public static class BundleWriter
     /// The method first tries a theme-qualified lookup
     /// (<c>ThemeName/SkinName</c>) to disambiguate skins with identical file
     /// names across different themes, then falls back to a bare skin-name
-    /// lookup, and finally to the first available template.
+    /// lookup.  When <paramref name="skinSrc"/> is empty, the
+    /// <paramref name="defaultSkinSrc"/> is tried before falling back to the
+    /// first available template.
     /// </summary>
     private static string ResolveTemplateId(
         string skinSrc,
-        Dictionary<string, string> skinToTemplateId)
+        Dictionary<string, string> skinToTemplateId,
+        string? defaultSkinSrc = null)
     {
         if (!string.IsNullOrWhiteSpace(skinSrc))
         {
-            // Extract both theme folder and skin file name from paths like
-            // "[G]Skins/FidelityBankTexas/Home.ascx" or
-            // "[L]Skins/Cavalier/Inner.ascx".
-            string skinName = Path.GetFileNameWithoutExtension(skinSrc);
-            string? themeName = ExtractThemeNameFromSkinSrc(skinSrc);
-
-            // Prefer the theme-qualified key so that two themes with
-            // identically named skins resolve to the correct template.
-            if (themeName is not null
-                && skinToTemplateId.TryGetValue($"{themeName}/{skinName}", out string? qualifiedId))
-                return qualifiedId;
-
-            // Fall back to bare skin name (works when there is no collision).
-            if (skinToTemplateId.TryGetValue(skinName, out string? id))
-                return id;
+            string? result = TryResolveSkinSrc(skinSrc, skinToTemplateId);
+            if (result is not null) return result;
         }
+
+        // Page has no explicit skin — try the portal default.
+        if (!string.IsNullOrWhiteSpace(defaultSkinSrc))
+        {
+            string? result = TryResolveSkinSrc(defaultSkinSrc, skinToTemplateId);
+            if (result is not null) return result;
+        }
+
         // Fall back to the first available template.
         foreach (string id in skinToTemplateId.Values)
             return id;
         return string.Empty;
+    }
+
+    /// <summary>
+    /// Attempts to resolve a skin source path to a template ID.
+    /// Returns <see langword="null"/> when no match is found.
+    /// </summary>
+    private static string? TryResolveSkinSrc(
+        string skinSrc,
+        Dictionary<string, string> skinToTemplateId)
+    {
+        // Extract both theme folder and skin file name from paths like
+        // "[G]Skins/FidelityBankTexas/Home.ascx" or
+        // "[L]Skins/Cavalier/Inner.ascx".
+        string skinName = Path.GetFileNameWithoutExtension(skinSrc);
+        string? themeName = ExtractThemeNameFromSkinSrc(skinSrc);
+
+        // Prefer the theme-qualified key so that two themes with
+        // identically named skins resolve to the correct template.
+        if (themeName is not null
+            && skinToTemplateId.TryGetValue($"{themeName}/{skinName}", out string? qualifiedId))
+            return qualifiedId;
+
+        // Fall back to bare skin name (works when there is no collision).
+        if (skinToTemplateId.TryGetValue(skinName, out string? id))
+            return id;
+
+        return null;
     }
 
     /// <summary>

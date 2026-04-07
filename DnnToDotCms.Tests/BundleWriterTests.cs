@@ -4987,4 +4987,184 @@ public class BundleWriterTests
         finally { File.Delete(zipPath); }
     }
 
+    // ------------------------------------------------------------------
+    // DefaultSkinSrc / ResolveTemplateId tests
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Write_WithDefaultSkinSrc_EmptySkinSrcPageUsesInnerTemplate()
+    {
+        // When a page has no SkinSrc but a DefaultPortalSkin is provided,
+        // the page must use the Inner template, not the Home template.
+        string tabId = "inner-page-test";
+        var pages = new[]
+        {
+            new DnnPortalPage(tabId, "Our Story", "Our Story", "", "//OurStory", 0, true, ""),
+        };
+        var contents = new[]
+        {
+            new DnnHtmlContent("About Us", "<h1>About Us</h1>", TabUniqueId: tabId, PaneName: "ContentPane"),
+        };
+
+        string zipPath = BuildThemesZipWithTwoSkins();
+        try
+        {
+            var ms = new MemoryStream();
+            BundleWriter.Write([MakeHtmlContentType()], ms, zipPath, "Test Site",
+                contents, pages, defaultSkinSrc: "[L]Skins/TestTheme/Inner.ascx");
+            ms.Position = 0;
+
+            // Read all template XMLs to find the Inner template's identifier.
+            var templateIds = new Dictionary<string, string>();
+            var names = new List<string>();
+            using (var gz  = new GZipStream(ms, CompressionMode.Decompress, leaveOpen: true))
+            using (var tar = new TarReader(gz))
+            {
+                TarEntry? entry;
+                while ((entry = tar.GetNextEntry(copyData: true)) is not null)
+                {
+                    names.Add(entry.Name);
+                    if (entry.Name.EndsWith(".template.template.xml") && entry.DataStream is not null)
+                    {
+                        using var sr = new StreamReader(entry.DataStream, leaveOpen: true);
+                        string xml = sr.ReadToEnd();
+                        // Extract the template name and identifier from the XML.
+                        var nameMatch = System.Text.RegularExpressions.Regex.Match(xml, @"<title>(.*?)</title>");
+                        var idMatch = System.Text.RegularExpressions.Regex.Match(xml, @"<identifier>(.*?)</identifier>");
+                        if (nameMatch.Success && idMatch.Success)
+                            templateIds[nameMatch.Groups[1].Value] = idMatch.Groups[1].Value;
+                    }
+                }
+            }
+
+            Assert.True(templateIds.ContainsKey("Inner"), "Inner template should exist in bundle");
+            Assert.True(templateIds.ContainsKey("Home"), "Home template should exist in bundle");
+            string innerTemplateId = templateIds["Inner"];
+
+            // Read the page XML and verify it references the Inner template.
+            string? pageXml = null;
+            foreach (string name in names.Where(n =>
+                n.Contains("/1/") && n.EndsWith(".content.xml") && !n.Contains("host.xml")))
+            {
+                string candidate = ReadTarEntry(ms, name)!;
+                if (candidate.Contains("<assetSubType>htmlpageasset</assetSubType>"))
+                {
+                    pageXml = candidate;
+                    break;
+                }
+            }
+
+            Assert.NotNull(pageXml);
+            Assert.Contains(innerTemplateId, pageXml);
+        }
+        finally { File.Delete(zipPath); }
+    }
+
+    [Fact]
+    public void Write_WithDefaultSkinSrc_ExplicitSkinSrcOverridesDefault()
+    {
+        // When a page has an explicit SkinSrc, it should use that template,
+        // not the DefaultPortalSkin.
+        string tabId = "explicit-skin-test";
+        var pages = new[]
+        {
+            new DnnPortalPage(tabId, "Home", "Home", "", "//Home", 0, true,
+                "[L]Skins/TestTheme/Home.ascx"),
+        };
+        var contents = new[]
+        {
+            new DnnHtmlContent("Welcome", "<h1>Hello</h1>", TabUniqueId: tabId, PaneName: "ContentPane"),
+        };
+
+        string zipPath = BuildThemesZipWithTwoSkins();
+        try
+        {
+            var ms = new MemoryStream();
+            BundleWriter.Write([MakeHtmlContentType()], ms, zipPath, "Test Site",
+                contents, pages, defaultSkinSrc: "[L]Skins/TestTheme/Inner.ascx");
+            ms.Position = 0;
+
+            // Read template XMLs.
+            var templateIds = new Dictionary<string, string>();
+            var names = new List<string>();
+            using (var gz  = new GZipStream(ms, CompressionMode.Decompress, leaveOpen: true))
+            using (var tar = new TarReader(gz))
+            {
+                TarEntry? entry;
+                while ((entry = tar.GetNextEntry(copyData: true)) is not null)
+                {
+                    names.Add(entry.Name);
+                    if (entry.Name.EndsWith(".template.template.xml") && entry.DataStream is not null)
+                    {
+                        using var sr = new StreamReader(entry.DataStream, leaveOpen: true);
+                        string xml = sr.ReadToEnd();
+                        var nameMatch = System.Text.RegularExpressions.Regex.Match(xml, @"<title>(.*?)</title>");
+                        var idMatch = System.Text.RegularExpressions.Regex.Match(xml, @"<identifier>(.*?)</identifier>");
+                        if (nameMatch.Success && idMatch.Success)
+                            templateIds[nameMatch.Groups[1].Value] = idMatch.Groups[1].Value;
+                    }
+                }
+            }
+
+            Assert.True(templateIds.ContainsKey("Home"), "Home template should exist in bundle");
+            string homeTemplateId = templateIds["Home"];
+
+            // Read the page XML and verify it references the Home template.
+            string? pageXml = null;
+            foreach (string name in names.Where(n =>
+                n.Contains("/1/") && n.EndsWith(".content.xml") && !n.Contains("host.xml")))
+            {
+                string candidate = ReadTarEntry(ms, name)!;
+                if (candidate.Contains("<assetSubType>htmlpageasset</assetSubType>"))
+                {
+                    pageXml = candidate;
+                    break;
+                }
+            }
+
+            Assert.NotNull(pageXml);
+            Assert.Contains(homeTemplateId, pageXml);
+        }
+        finally { File.Delete(zipPath); }
+    }
+
+    /// <summary>
+    /// Builds a themes zip with two skins (Home.ascx and Inner.ascx) and a
+    /// single container, for testing DefaultPortalSkin template resolution.
+    /// </summary>
+    private static string BuildThemesZipWithTwoSkins()
+    {
+        string containerAscx = """
+            <%@ Control Inherits="DotNetNuke.UI.Containers.Container" %>
+            <div id="ContentPane" runat="server"></div>
+            """;
+        string homeSkinAscx = """
+            <%@ Control Inherits="DotNetNuke.UI.Skins.Skin" %>
+            <div id="ContentPane" runat="server"></div>
+            <div id="SideBar" runat="server"></div>
+            """;
+        string innerSkinAscx = """
+            <%@ Control Inherits="DotNetNuke.UI.Skins.Skin" %>
+            <div id="ContentPane" class="col-md-9" runat="server"></div>
+            <div id="SidePane" class="col-md-3" runat="server"></div>
+            """;
+
+        string path = Path.GetTempFileName() + ".zip";
+        using (var zip = ZipFile.Open(path, ZipArchiveMode.Create))
+        {
+            var entry1 = zip.CreateEntry("_default/Containers/TestTheme/standard.ascx");
+            using (var w = new StreamWriter(entry1.Open())) w.Write(containerAscx);
+
+            var entry2 = zip.CreateEntry("_default/Skins/TestTheme/Home.ascx");
+            using (var w = new StreamWriter(entry2.Open())) w.Write(homeSkinAscx);
+
+            var entry3 = zip.CreateEntry("_default/Skins/TestTheme/Inner.ascx");
+            using (var w = new StreamWriter(entry3.Open())) w.Write(innerSkinAscx);
+
+            var entry4 = zip.CreateEntry("_default/Skins/TestTheme/skin.css");
+            using (var w = new StreamWriter(entry4.Open())) w.Write("body{}");
+        }
+        return path;
+    }
+
 }
