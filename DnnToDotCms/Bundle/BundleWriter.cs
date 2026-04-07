@@ -745,6 +745,7 @@ public static class BundleWriter
             Icon            = ct.Icon,
             Host            = hostId,
             SiteName        = siteName,
+            BaseType        = "CONTENT",
         };
 
         var bundleFields = BuildBundleFields(ct.Fields, id);

@@ -182,6 +182,9 @@ public sealed class DotCmsBundleContentType
 
     [JsonPropertyName("folderPath")]
     public string FolderPath { get; set; } = "/";
+
+    [JsonPropertyName("baseType")]
+    public string BaseType { get; set; } = "CONTENT";
 }
 
 /// <summary>Field definition inside a DotCMS push-publish bundle entry.</summary>
