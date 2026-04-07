@@ -1608,7 +1608,7 @@ public static class BundleWriter
     {
         string now      = DateTime.UtcNow.ToString(XmlTimestampFormat);
         string showOnMenuStr = showOnMenu ? "true" : "false";
-        string folderTitle = System.Security.SecurityElement.Escape(title ?? folderName) ?? folderName;
+        string folderTitle = System.Security.SecurityElement.Escape(title ?? folderName)!;
 
         return $"""
             <com.dotcms.publisher.pusher.wrapper.FolderWrapper>
@@ -2117,6 +2117,9 @@ public static class BundleWriter
         """;
     }
 
+    // DDRMenu template file extensions to check (token-based and Razor).
+    private static readonly string[] DdrMenuTemplateExtensions = [".txt", ".cshtml"];
+
     /// <summary>
     /// Reads a DDRMenu template file from the skin zip archive.
     /// DDRMenu templates are stored in a sub-directory named after the menu
@@ -2127,7 +2130,7 @@ public static class BundleWriter
     private static string? ReadDdrMenuTemplate(string skinDir, string menuStyle, ZipArchive zip)
     {
         string basePath = $"{skinDir}/{menuStyle}/{menuStyle}";
-        foreach (string ext in new[] { ".txt", ".cshtml" })
+        foreach (string ext in DdrMenuTemplateExtensions)
         {
             string path = basePath + ext;
             var entry = zip.Entries.FirstOrDefault(e =>
