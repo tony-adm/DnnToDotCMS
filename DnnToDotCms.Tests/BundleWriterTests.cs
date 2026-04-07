@@ -720,7 +720,6 @@ public class BundleWriterTests
 
         var (body, _, _) = BundleWriter.ConvertAscxToTemplateHtml(ascx);
 
-        Assert.Contains("dnn-nav", body);
         Assert.Contains("$navtool.getNav", body);
         Assert.Contains("#foreach", body);
         Assert.Contains("$navItem.showOnMenu", body);
@@ -738,6 +737,61 @@ public class BundleWriterTests
 
         Assert.Contains("$navtool.getNav", body);
         Assert.DoesNotContain("dnn:NAV", body);
+    }
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_MenuPreservesIdAttribute()
+    {
+        const string ascx = """
+            <nav><dnn:MENU runat="server" id="dnnMENU" /></nav>
+            """;
+
+        var (body, _, _) = BundleWriter.ConvertAscxToTemplateHtml(ascx);
+
+        Assert.Contains(@"id=""dnnMENU""", body);
+        Assert.Contains("$navtool.getNav", body);
+        Assert.DoesNotContain("dnn:MENU", body);
+    }
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_MenuPreservesCssClassAttribute()
+    {
+        const string ascx = """
+            <dnn:MENU runat="server" id="topNav" CssClass="navbar-nav" />
+            """;
+
+        var (body, _, _) = BundleWriter.ConvertAscxToTemplateHtml(ascx);
+
+        Assert.Contains(@"id=""topNav""", body);
+        Assert.Contains(@"class=""navbar-nav""", body);
+        Assert.Contains("$navtool.getNav", body);
+    }
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_NavPreservesIdAttribute()
+    {
+        const string ascx = """
+            <dnn:NAV runat="server" id="dnnNAV" CssClass="side-nav" />
+            """;
+
+        var (body, _, _) = BundleWriter.ConvertAscxToTemplateHtml(ascx);
+
+        Assert.Contains(@"id=""dnnNAV""", body);
+        Assert.Contains(@"class=""side-nav""", body);
+    }
+
+    [Fact]
+    public void ConvertAscxToTemplateHtml_MenuWithNoIdOrClassProducesPlainUl()
+    {
+        const string ascx = """
+            <dnn:MENU runat="server" MenuStyle="Suckerfish" />
+            """;
+
+        var (body, _, _) = BundleWriter.ConvertAscxToTemplateHtml(ascx);
+
+        // No id or CssClass → plain <ul> without attributes.
+        Assert.Contains("<ul>", body);
+        Assert.DoesNotContain(@"id=""", body);
     }
 
     [Fact]
@@ -2454,7 +2508,26 @@ public class BundleWriterTests
             && !n.Contains("host.xml"));
         string xml = ReadTarEntry(ms, entryName)!;
 
-        Assert.Contains("My Home Page", xml);
+        // Page title in DotCMS uses the DNN Name (TabName), not Title.
+        Assert.Contains("Home", xml);
+    }
+
+    [Fact]
+    public void Write_WithPages_PageTitleUsesNameNotTitle()
+    {
+        var pages = new[]
+        {
+            new DnnPortalPage("bbb", "About Us", "About Us – Our Company", "", "//About Us", 0, true, ""),
+        };
+
+        var (ms, names) = WriteBundleWithPages(pages);
+        string entryName = names.First(n => n.Contains("/1/") && n.EndsWith(".content.xml")
+            && !n.Contains("host.xml"));
+        string xml = ReadTarEntry(ms, entryName)!;
+
+        // DotCMS page title should be the DNN Name (with spaces), not the Title.
+        Assert.Contains("About Us", xml);
+        Assert.DoesNotContain("Our Company", xml);
     }
 
     [Fact]
