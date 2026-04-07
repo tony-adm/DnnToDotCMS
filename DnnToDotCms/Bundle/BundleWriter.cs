@@ -2032,6 +2032,11 @@ public static class BundleWriter
     /// the DotCMS <c>$navtool</c> API, preserving original <c>id</c> and
     /// <c>CssClass</c> attributes from the DNN control tag.
     /// </summary>
+    /// <param name="dnnTag">
+    /// The raw <c>&lt;dnn:MENU …/&gt;</c> or <c>&lt;dnn:NAV …/&gt;</c> tag
+    /// string.  The <c>id</c> and <c>CssClass</c> attributes, if present,
+    /// are extracted and applied to the generated <c>&lt;ul&gt;</c> element.
+    /// </param>
     internal static string BuildNavSnippet(string dnnTag)
     {
         var idMatch    = DnnIdAttrRegex.Match(dnnTag);
