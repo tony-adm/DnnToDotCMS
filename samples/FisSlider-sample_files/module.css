@@ -1,0 +1,404 @@
+.Mvc-FisSliderModule-Container .slideshow,
+.Mvc-FisSliderModule-Container .slide-container,
+.Mvc-FisSliderModule-Container .slide-item,
+.Mvc-FisSliderModule-Container .slide-content {
+    overflow: hidden;
+}
+
+.Mvc-FisSliderModule-Container .slideshow {
+    margin: 0;
+    padding: 0;
+}
+
+.Mvc-FisSliderModule-Container .slide-container {
+    background-color: transparent;
+    position: relative;
+    overflow: hidden;
+    margin: 0 auto;
+}
+
+.Mvc-FisSliderModule-Container .slide-arrows:hover .prev,
+.Mvc-FisSliderModule-Container .slide-arrows:hover .next {
+    opacity: 1 !important
+}
+
+.Mvc-FisSliderModule-Container .slide-arrows .prev:focus,
+.Mvc-FisSliderModule-Container .slide-arrows .next:focus {
+    opacity: 1 !important
+}
+
+.Mvc-FisSliderModule-Container .slide-item {
+    background-position: 50% 50% !important;
+    background-repeat: no-repeat !important;
+    display: block;
+    min-height: 1px;
+    position: relative;
+    vertical-align: middle !important;
+}
+
+
+
+.Mvc-FisSliderModule-Container .prev,
+.Mvc-FisSliderModule-Container .next {
+    color: #fff;
+    font-size: 25px;
+    font-size: 3em;
+    font-size: 3rem;
+    margin-top: -22px;
+    padding: 16px;
+    position: absolute;
+    top: 50%;
+    -webkit-transition: .10s all ease-in-out;
+    -ms-transition: .10s all ease-in-out;
+    -o-transition: .10s all ease-in-out;
+    transition: .10s all ease-in-out;
+    width: auto;
+    opacity: 0;
+}
+
+.Mvc-FisSliderModule-Container .next {
+    right: 0;
+}
+
+.Mvc-FisSliderModule-Container .prev {
+    left: 0;
+}
+
+.Mvc-FisSliderModule-Container .slide-number-text {
+    color: #f2f2f2;
+    opacity: .25;
+    padding: 8px 12px;
+    position: absolute;
+    top: 8px;
+    text-align: center;
+    width: 100%;
+}
+
+.Mvc-FisSliderModule-Container .dot {
+    opacity: .25;
+    -webkit-transition: .10s all ease-in-out;
+    -ms-transition: .10s all ease-in-out;
+    -o-transition: .10s all ease-in-out;
+    transition: .10s all ease-in-out;
+}
+
+.Mvc-FisSliderModule-Container .slide-nav {
+    margin: 0 !important;
+    position: absolute;
+    bottom: 8px;
+    text-align: center;
+    width: 100%;
+}
+
+.Mvc-FisSliderModule-Container .slide-nav li {
+    display: inline-block;
+}
+
+.Mvc-FisSliderModule-Container .slide-nav button, 
+.Mvc-FisSliderModule-Container .slide-nav .btn {
+    padding: 5px;
+}
+
+.Mvc-FisSliderModule-Container .dot.active,
+.Mvc-FisSliderModule-Container .dot:hover {
+    opacity: 1;
+}
+
+.Mvc-FisSliderModule-Container .slide-content {
+    vertical-align: middle;
+}
+
+.Mvc-FisSliderModule-Container .slide-item {
+    height: 100%;
+}
+
+
+.Mvc-FisSliderModule-Container .slide-content {
+    height: 100%;
+    position: relative;
+}
+
+.Mvc-FisSliderModule-Container .slide-desc .btn.margin-t {
+    margin: 115px 0 0 0;
+}
+
+.Mvc-FisSliderModule-Container .slide-desc p,
+.Mvc-FisSliderModule-Container .slide-title h1 {
+    margin: 0;
+}
+
+.Mvc-FisSliderModule-Container .slideshow .slide-link {
+    padding: 6px 12px;
+    border-radius: 4px;
+    outline: 0;
+    border: none;
+}
+
+.Mvc-FisSliderModule-Container .slideshowContent {
+    position: relative;
+}
+
+.Mvc-FisSliderModule-Container .slideshowContent .slide-container {
+    height: 100%;
+}
+
+
+.Mvc-FisSliderModule-Container span.edit-link {
+    margin-right: 10px;
+}
+
+
+
+.Mvc-FisSliderModule-Container .play-button-container {
+    position: absolute;
+    bottom: 3em;
+    padding-left: 3em;
+}
+
+.Mvc-FisSliderModule-Container .slide-link-container a {
+    font-size: 17px;
+    margin-left: 3em;
+}
+
+
+.Mvc-FisSliderModule-Container .slide-left {
+    -webkit-animation-name: slide-left;
+    -webkit-animation-duration: .75s;
+    -ms-animation-name: slide-left;
+    -ms-animation-duration: .75s;
+    -o-animation-name: slide-left;
+    -o-animation-name: .75s;
+    animation-name: slide-left;
+    animation-duration: .75s;
+    -webkit-transition: all ease-in-out;
+    -ms-transition: all ease-in-out;
+    -o-transition: all ease-in-out;
+    transition: all ease-in-out;
+}
+
+@-webkit-keyframes slide-left {
+    from {
+        left: 50%;
+        opacity: .33;
+    }
+
+    to {
+        left: 0;
+        opacity: 1;
+    }
+}
+
+@-ms-keyframes slide-left {
+    from {
+        left: 50%;
+        opacity: .33;
+    }
+
+    to {
+        left: 0;
+        opacity: 1;
+    }
+}
+
+@-o-keyframes slide-left {
+    from {
+        left: 50%;
+        opacity: .33;
+    }
+
+    to {
+        left: 0;
+        opacity: 1;
+    }
+}
+
+@keyframes slide-left {
+    from {
+        left: 50%;
+        opacity: .33;
+    }
+
+    to {
+        left: 0;
+        opacity: 1;
+    }
+}
+
+.Mvc-FisSliderModule-Container .slide-right {
+    -webkit-animation-name: slide-right;
+    -webkit-animation-duration: .75s;
+    -ms-animation-name: slide-right;
+    -ms-animation-duration: .75s;
+    -o-animation-name: slide-right;
+    -o-animation-name: .75s;
+    animation-name: slide-right;
+    animation-duration: .75s;
+    -webkit-transition: all ease-in-out;
+    -ms-transition: all ease-in-out;
+    -o-transition: all ease-in-out;
+    transition: all ease-in-out;
+}
+
+@-webkit-keyframes slide-right {
+    from {
+        right: 50%;
+        opacity: .33;
+    }
+
+    to {
+        right: 0;
+        opacity: 1;
+    }
+}
+
+@-ms-keyframes slide-right {
+    from {
+        right: 50%;
+        opacity: .33;
+    }
+
+    to {
+        right: 0;
+        opacity: 1;
+    }
+}
+
+@-o-keyframes slide-right {
+    from {
+        right: 50%;
+        opacity: .33;
+    }
+
+    to {
+        right: 0;
+        opacity: 1;
+    }
+}
+
+@keyframes slide-right {
+    from {
+        right: 50%;
+        opacity: .33;
+    }
+
+    to {
+        right: 0;
+        opacity: 1;
+    }
+}
+
+.Mvc-FisSliderModule-Container .fade {
+    -webkit-animation-name: fade;
+    -webkit-animation-duration: 1.5s;
+    -ms-animation-name: fade;
+    -ms-animation-duration: 1.5s;
+    -o-animation-name: fade;
+    -o-animation-name: 1.5s;
+    animation-name: fade;
+    animation-duration: 1.5s;
+    -webkit-transition: all ease-in-out;
+    -ms-transition: all ease-in-out;
+    -o-transition: all ease-in-out;
+    transition: all ease-in-out;
+}
+
+@-webkit-keyframes fade {
+    from {
+        opacity: .25;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+@@-ms-keyframes fade {
+    from {
+        opacity: .25;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+@-o-keyframes fade {
+    from {
+        opacity: .25;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes fade {
+    from {
+        opacity: .25;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+@media screen and (max-width: 800px) {
+    .Mvc-FisSliderModule-Container .slide-content {
+        padding-top: 10em;
+    }
+
+}
+
+@media screen and (max-width: 440px) {
+    .Mvc-FisSliderModule-Container .slide-content {
+        padding: 10em 2.3em 3em 2.3em !important;
+    }
+}
+
+.Mvc-FisSliderModule-Container .slide-admin-container {
+    position: absolute;
+    top: 20px;
+    width: 100%;
+}
+
+.Mvc-FisSliderModule-Container .slide-arrows button {
+    background-color: transparent;
+    border: none;
+}
+
+.Mvc-FisSliderModule-Container .slide-navStyle button:focus,
+.Mvc-FisSliderModule-Container .slide-navStyle span:focus {
+    outline: none;
+}
+
+.Mvc-FisSliderModule-Container button.dot {
+    background: transparent;
+    border: none;
+}
+
+.Mvc-FisSliderModule-Container .inactive-slide {
+    display: inline-block;
+    float: right;
+    margin-right: 8vw;
+}
+
+.Mvc-FisSliderModule-Container .inactive-slide p {
+    background-color: red;
+    text-shadow: none;
+    padding: 0 0.5vw;
+}
+
+
+
+
+
+
+
+
+/*.slide-desc p,
+.slide-title {
+    -webkit-text-shadow: -10px -10px 20px #fff,1px 0 20px #fff,10px 10px 20px #fff,-10px 10px 20px #fff,10px -10px 20px #fff;
+    -ms-text-shadow: -10px -10px 20px #fff,1px 0 20px #fff,10px 10px 20px #fff,-10px 10px 20px #fff,10px -10px 20px #fff;
+    -o-text-shadow: -10px -10px 20px #fff,1px 0 20px #fff,10px 10px 20px #fff,-10px 10px 20px #fff,10px -10px 20px #fff;
+    text-shadow: -10px -10px 20px #fff,1px 0 20px #fff,10px 10px 20px #fff,-10px 10px 20px #fff,10px -10px 20px #fff;
+}*/
