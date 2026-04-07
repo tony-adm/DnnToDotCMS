@@ -827,6 +827,156 @@ public class BundleWriterTests
         Assert.Contains("caret", body);
     }
 
+    // ------------------------------------------------------------------
+    // ExpandMenuTemplateClasses tests
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void ExpandMenuTemplateClasses_MergesTemplateClassesWithCssClass()
+    {
+        // Simulate a skin with <dnn:MENU MenuStyle="BootStrapNav" CssClass="w-100" />
+        // and a BootStrapNav template whose root <ul> has additional classes.
+        const string ascx =
+            """<dnn:MENU runat="server" id="dropdownMenu" MenuStyle="BootStrapNav" CssClass="w-100" />""";
+        const string template =
+            """<ul class="navbar-nav d-flex justify-content-between [=CssClass] px-2">[*>NODE]<li>[=TEXT]</li>[/NODE]</ul>""";
+
+        using var ms = new MemoryStream();
+        using (var zip = new ZipArchive(ms, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            var entry = zip.CreateEntry("_default/Skins/FBOT/BootStrapNav/BootStrapNav.txt");
+            using var writer = new StreamWriter(entry.Open());
+            writer.Write(template);
+        }
+        ms.Position = 0;
+        using var archive = new ZipArchive(ms, ZipArchiveMode.Read);
+
+        string result = BundleWriter.ExpandMenuTemplateClasses(ascx, "_default/Skins/FBOT", archive);
+
+        // Template literal classes should be prepended to existing CssClass.
+        Assert.Contains(@"CssClass=""navbar-nav d-flex justify-content-between px-2 w-100""", result);
+    }
+
+    [Fact]
+    public void ExpandMenuTemplateClasses_NoCssClass_InjectsTemplateClasses()
+    {
+        // MENU tag has MenuStyle but no CssClass at all.
+        const string ascx =
+            """<dnn:MENU runat="server" id="nav" MenuStyle="BootStrapNav" />""";
+        const string template =
+            """<ul class="navbar-nav d-flex [=CssClass]">[*>NODE][/NODE]</ul>""";
+
+        using var ms = new MemoryStream();
+        using (var zip = new ZipArchive(ms, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            var entry = zip.CreateEntry("Skins/Theme/BootStrapNav/BootStrapNav.txt");
+            using var writer = new StreamWriter(entry.Open());
+            writer.Write(template);
+        }
+        ms.Position = 0;
+        using var archive = new ZipArchive(ms, ZipArchiveMode.Read);
+
+        string result = BundleWriter.ExpandMenuTemplateClasses(ascx, "Skins/Theme", archive);
+
+        Assert.Contains(@"CssClass=""navbar-nav d-flex""", result);
+    }
+
+    [Fact]
+    public void ExpandMenuTemplateClasses_NoMenuStyle_PassesThrough()
+    {
+        // No MenuStyle attribute → tag should pass through unchanged.
+        const string ascx =
+            """<dnn:MENU runat="server" id="nav" CssClass="w-100" />""";
+
+        using var ms = new MemoryStream();
+        using (var zip = new ZipArchive(ms, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            // Empty archive — no template files.
+        }
+        ms.Position = 0;
+        using var archive = new ZipArchive(ms, ZipArchiveMode.Read);
+
+        string result = BundleWriter.ExpandMenuTemplateClasses(ascx, "Skins/Theme", archive);
+
+        Assert.Equal(ascx, result);
+    }
+
+    [Fact]
+    public void ExpandMenuTemplateClasses_TemplateMissing_PassesThrough()
+    {
+        // MenuStyle is set but no template file exists in the zip.
+        const string ascx =
+            """<dnn:MENU runat="server" MenuStyle="Missing" CssClass="w-100" />""";
+
+        using var ms = new MemoryStream();
+        using (var zip = new ZipArchive(ms, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            // Empty archive — no template files.
+        }
+        ms.Position = 0;
+        using var archive = new ZipArchive(ms, ZipArchiveMode.Read);
+
+        string result = BundleWriter.ExpandMenuTemplateClasses(ascx, "Skins/Theme", archive);
+
+        Assert.Equal(ascx, result);
+    }
+
+    [Fact]
+    public void ExpandMenuTemplateClasses_TemplateAllTokens_PassesThrough()
+    {
+        // Template root <ul> class is entirely tokens — no literal classes to add.
+        const string ascx =
+            """<dnn:MENU runat="server" MenuStyle="MyNav" CssClass="w-100" />""";
+        const string template =
+            """<ul class="[=CssClass]">[*>NODE][/NODE]</ul>""";
+
+        using var ms = new MemoryStream();
+        using (var zip = new ZipArchive(ms, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            var entry = zip.CreateEntry("Skins/T/MyNav/MyNav.txt");
+            using var writer = new StreamWriter(entry.Open());
+            writer.Write(template);
+        }
+        ms.Position = 0;
+        using var archive = new ZipArchive(ms, ZipArchiveMode.Read);
+
+        string result = BundleWriter.ExpandMenuTemplateClasses(ascx, "Skins/T", archive);
+
+        // Only the token was in the class — no literal classes to add.
+        Assert.Equal(ascx, result);
+    }
+
+    [Fact]
+    public void ExpandMenuTemplateClasses_EndToEnd_NavSnippetHasFullClasses()
+    {
+        // Verify the full pipeline: ExpandMenuTemplateClasses + ConvertAscxToTemplateHtml.
+        const string ascx =
+            """<dnn:MENU runat="server" id="dropdownMenu" MenuStyle="BootStrapNav" CssClass="w-100" />""";
+        const string template =
+            """<ul class="navbar-nav d-flex justify-content-between [=CssClass] px-2">[*>NODE]<li>[=TEXT]</li>[/NODE]</ul>""";
+
+        using var ms = new MemoryStream();
+        using (var zip = new ZipArchive(ms, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            var entry = zip.CreateEntry("_default/Skins/FBOT/BootStrapNav/BootStrapNav.txt");
+            using var writer = new StreamWriter(entry.Open());
+            writer.Write(template);
+        }
+        ms.Position = 0;
+        using var archive = new ZipArchive(ms, ZipArchiveMode.Read);
+
+        // Step 1: expand template classes into the CssClass attribute.
+        string expanded = BundleWriter.ExpandMenuTemplateClasses(ascx, "_default/Skins/FBOT", archive);
+
+        // Step 2: convert to template HTML (BuildNavSnippet will read the expanded CssClass).
+        var (body, _, _) = BundleWriter.ConvertAscxToTemplateHtml(expanded);
+
+        // The generated <ul> should have all classes from both template and CssClass.
+        Assert.Contains(@"class=""navbar-nav d-flex justify-content-between px-2 w-100""", body);
+        Assert.Contains(@"id=""dropdownMenu""", body);
+        Assert.Contains("$navtool.getNav", body);
+    }
+
     [Fact]
     public void ConvertAscxToTemplateHtml_ReplacesBreadcrumbControl()
     {
@@ -4668,6 +4818,40 @@ public class BundleWriterTests
 
             // A .folder.xml entry should be created for the "personal" folder.
             Assert.Contains(names, n => n.EndsWith(".folder.xml") && n.Contains("ROOT/"));
+        }
+        finally { File.Delete(zipPath); }
+    }
+
+    [Fact]
+    public void Write_WithChildPage_FolderTitlePreservesOriginalName()
+    {
+        // DNN page names like "About Us" contain spaces.  The folder slug is
+        // "about-us" (URL-safe), but the folder <title> must keep the original
+        // name so that DotCMS $navtool.title shows it with spaces.
+        var pages = new[]
+        {
+            new DnnPortalPage("aaa", "About Us", "About Us", "", "//About Us",  0, true, ""),
+            new DnnPortalPage("bbb", "Our Story", "Our Story", "", "//About Us//Our Story", 1, true, ""),
+        };
+        var contents = new[]
+        {
+            new DnnHtmlContent("About Us", "<p>About</p>", TabUniqueId: "aaa"),
+            new DnnHtmlContent("Our Story", "<p>Story</p>", TabUniqueId: "bbb"),
+        };
+
+        string zipPath = BuildThemesZip();
+        try
+        {
+            var (ms, names) = WriteBundleWithPagesAndContents(pages, contents,
+                themesZipPath: zipPath);
+
+            string folderEntry = names.First(n => n.EndsWith(".folder.xml") && n.Contains("ROOT/"));
+            string xml = ReadTarEntry(ms, folderEntry)!;
+
+            // Folder name (path segment) should be the slug.
+            Assert.Contains("<name>about-us</name>", xml);
+            // Folder title should preserve the original DNN page name with spaces.
+            Assert.Contains("<title>About Us</title>", xml);
         }
         finally { File.Delete(zipPath); }
     }
