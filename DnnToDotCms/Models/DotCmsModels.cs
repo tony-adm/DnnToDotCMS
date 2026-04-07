@@ -140,9 +140,6 @@ public sealed class DotCmsBundleContentType
     [JsonPropertyName("id")]
     public string Id { get; set; } = string.Empty;
 
-    [JsonPropertyName("inode")]
-    public string Inode { get; set; } = string.Empty;
-
     [JsonPropertyName("description")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Description { get; set; }
@@ -182,9 +179,6 @@ public sealed class DotCmsBundleContentType
 
     [JsonPropertyName("folderPath")]
     public string FolderPath { get; set; } = "/";
-
-    [JsonPropertyName("baseType")]
-    public string BaseType { get; set; } = "CONTENT";
 }
 
 /// <summary>Field definition inside a DotCMS push-publish bundle entry.</summary>
