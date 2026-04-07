@@ -123,14 +123,19 @@ public class BundleWriterTests
 
         var (_, names) = WriteBundleToMemory(contentTypes);
 
-        // Each content type is written twice to the tar (DotCMS push-publish requirement),
-        // so count unique file names.
-        int count = names
+        // Each content type is written twice to the tar (DotCMS push-publish requirement)
+        // in both working/ and live/ directories, so count unique file names per directory.
+        int workingCount = names
             .Where(n => n.StartsWith("working/System Host/") && n.EndsWith(".contentType.json"))
             .Distinct()
             .Count();
+        int liveCount = names
+            .Where(n => n.StartsWith("live/System Host/") && n.EndsWith(".contentType.json"))
+            .Distinct()
+            .Count();
 
-        Assert.Equal(2, count);
+        Assert.Equal(2, workingCount);
+        Assert.Equal(2, liveCount);
     }
 
     [Fact]
@@ -419,12 +424,17 @@ public class BundleWriterTests
 
             var (_, names) = WriteBundleToMemory([MakeHtmlContentType()]);
             Assert.Contains("manifest.csv", names);
-            // Each content type is written twice; count unique file names.
-            int ctCount = names
+            // Each content type is written twice in both directories; count unique file names.
+            int workingCtCount = names
                 .Where(n => n.StartsWith("working/System Host/") && n.EndsWith(".contentType.json"))
                 .Distinct()
                 .Count();
-            Assert.Equal(1, ctCount);
+            int liveCtCount = names
+                .Where(n => n.StartsWith("live/System Host/") && n.EndsWith(".contentType.json"))
+                .Distinct()
+                .Count();
+            Assert.Equal(1, workingCtCount);
+            Assert.Equal(1, liveCtCount);
         }
         finally
         {
@@ -1780,6 +1790,12 @@ public class BundleWriterTests
         Assert.DoesNotContain(names, n =>
             n.StartsWith("working/System Host/") &&
             n.EndsWith(".contentType.json"));
+        Assert.Contains(names, n =>
+            n.StartsWith("live/My-Website/") &&
+            n.EndsWith(".contentType.json"));
+        Assert.DoesNotContain(names, n =>
+            n.StartsWith("live/System Host/") &&
+            n.EndsWith(".contentType.json"));
     }
 
     [Fact]
@@ -1836,6 +1852,10 @@ public class BundleWriterTests
             n.EndsWith(".contentType.json"));
         Assert.DoesNotContain(names, n =>
             !n.StartsWith("working/System Host/") &&
+            !n.StartsWith("live/System Host/") &&
+            n.EndsWith(".contentType.json"));
+        Assert.Contains(names, n =>
+            n.StartsWith("live/System Host/") &&
             n.EndsWith(".contentType.json"));
     }
 
@@ -2345,13 +2365,16 @@ public class BundleWriterTests
     public void Write_ContentTypeJson_FileAppearsTwiceInTar()
     {
         // The DotCMS push-publish format requires each .contentType.json to be
-        // written twice to the tar archive.
+        // written twice to the tar archive, in both working/ and live/.
         var (_, names) = WriteBundleToMemory([MakeHtmlContentType()]);
 
-        int totalCount = names.Count(n =>
+        int workingCount = names.Count(n =>
             n.StartsWith("working/") && n.EndsWith(".contentType.json"));
+        int liveCount = names.Count(n =>
+            n.StartsWith("live/") && n.EndsWith(".contentType.json"));
 
-        Assert.Equal(2, totalCount); // one content type → two tar entries
+        Assert.Equal(2, workingCount); // one content type → two tar entries in working/
+        Assert.Equal(2, liveCount);    // one content type → two tar entries in live/
     }
 
     [Fact]
