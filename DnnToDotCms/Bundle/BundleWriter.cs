@@ -474,7 +474,7 @@ public static class BundleWriter
 
                     string folderXml = BuildFolderXml(
                         folderInode, folderName, dotcmsPath, pageFolderParent,
-                        siteId, siteInode);
+                        siteId, siteInode, showOnMenu: true);
                     string entryDir = pageFolderParent == "/"
                         ? "ROOT"
                         : "ROOT/" + pageFolderParent.Trim('/');
@@ -1591,9 +1591,11 @@ public static class BundleWriter
         string folderPath,
         string parentPath,
         string hostId,
-        string hostInode)
+        string hostInode,
+        bool showOnMenu = false)
     {
         string now      = DateTime.UtcNow.ToString(XmlTimestampFormat);
+        string showOnMenuStr = showOnMenu ? "true" : "false";
 
         return $"""
             <com.dotcms.publisher.pusher.wrapper.FolderWrapper>
@@ -1606,7 +1608,7 @@ public static class BundleWriter
                 <name>{folderName}</name>
                 <title>{folderName}</title>
                 <hostId>{hostId}</hostId>
-                <showOnMenu>false</showOnMenu>
+                <showOnMenu>{showOnMenuStr}</showOnMenu>
                 <sortOrder>0</sortOrder>
                 <filesMasks></filesMasks>
                 <defaultFileType>{FileAssetContentTypeId}</defaultFileType>
