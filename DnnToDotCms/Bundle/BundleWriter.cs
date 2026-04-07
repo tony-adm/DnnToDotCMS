@@ -248,6 +248,9 @@ public static class BundleWriter
         // can use the correct container for each pane slot.
         // Key: paneName (case-insensitive) → ContainerSrc (most common value).
         var paneContainerVotes = new Dictionary<string, Dictionary<string, int>>(StringComparer.OrdinalIgnoreCase);
+        // Total module count per pane (including those with empty ContainerSrc)
+        // so we can compare non-default votes against default-wanting modules.
+        var paneTotalCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
         if (htmlContents is not null && htmlContents.Count > 0
             && htmlContentTypeId is not null && htmlContentTypeVariable is not null)
@@ -296,28 +299,45 @@ public static class BundleWriter
                 }
 
                 // Track per-pane container votes for template resolution.
-                if (!string.IsNullOrEmpty(hc.PaneName) && !string.IsNullOrEmpty(hc.ContainerSrc))
+                if (!string.IsNullOrEmpty(hc.PaneName))
                 {
-                    if (!paneContainerVotes.TryGetValue(hc.PaneName, out var votes))
+                    paneTotalCounts.TryGetValue(hc.PaneName, out int total);
+                    paneTotalCounts[hc.PaneName] = total + 1;
+
+                    if (!string.IsNullOrEmpty(hc.ContainerSrc))
                     {
-                        votes = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-                        paneContainerVotes[hc.PaneName] = votes;
+                        if (!paneContainerVotes.TryGetValue(hc.PaneName, out var votes))
+                        {
+                            votes = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                            paneContainerVotes[hc.PaneName] = votes;
+                        }
+                        votes.TryGetValue(hc.ContainerSrc, out int count);
+                        votes[hc.ContainerSrc] = count + 1;
                     }
-                    votes.TryGetValue(hc.ContainerSrc, out int count);
-                    votes[hc.ContainerSrc] = count + 1;
                 }
             }
         }
 
         // Build per-pane container ID mapping from the collected votes.
-        // For each pane, pick the most common container source and resolve it
-        // to a DotCMS container identifier.
+        // Only override the default container when the non-default container
+        // is used by more than half of the modules in that pane.  A single
+        // page with a custom container (e.g. Zelle on BannerPaneInner) must
+        // not override the default for all other pages that use the standard
+        // container (or no explicit container at all).
         var paneContainerIds = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         {
             string defaultCtr = ResolveDefaultContainerId(containerDefs);
             foreach (var (paneName, votes) in paneContainerVotes)
             {
                 string topSrc = votes.OrderByDescending(kv => kv.Value).First().Key;
+                int topVoteCount = votes.OrderByDescending(kv => kv.Value).First().Value;
+                paneTotalCounts.TryGetValue(paneName, out int totalInPane);
+
+                // Only override when the top non-default container has a
+                // strict majority (more than half) of all modules in the pane.
+                if (totalInPane > 0 && topVoteCount * 2 <= totalInPane)
+                    continue;
+
                 string resolved = ResolveContainerIdFromSrc(topSrc, containerDefs, defaultCtr);
                 if (resolved != defaultCtr)
                     paneContainerIds[paneName] = resolved;
