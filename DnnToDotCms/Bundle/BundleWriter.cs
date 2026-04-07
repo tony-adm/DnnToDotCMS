@@ -210,6 +210,8 @@ public static class BundleWriter
             string doubledJson = json + json;
             WriteTextEntry(tar, $"working/{contentWorkDir}/{id}.contentType.json", doubledJson);
             WriteTextEntry(tar, $"working/{contentWorkDir}/{id}.contentType.json", doubledJson);
+            WriteTextEntry(tar, $"live/{contentWorkDir}/{id}.contentType.json", doubledJson);
+            WriteTextEntry(tar, $"live/{contentWorkDir}/{id}.contentType.json", doubledJson);
             manifestEntries.Add(("contenttype", id, "", ct.Name, contentWorkDir, "/"));
 
             if (ct.Variable == "htmlContent")
