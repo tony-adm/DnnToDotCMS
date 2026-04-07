@@ -2050,15 +2050,32 @@ public static class BundleWriter
         if (classMatch.Success)
             attrs.Append($@" class=""{classMatch.Groups[1].Value}""");
 
+        // Generate a two-level Bootstrap nav with dropdown support.
+        // Top-level items with children get the "dropdown" class and a
+        // nested <ul class="dropdown-menu">.  This matches the DNN
+        // BootStrapNav menu style used by the original site.
         return $"""
         <ul{attrs}>
         #set($navItems = $navtool.getNav("/"))
         #foreach($navItem in $navItems)
           #if($navItem.showOnMenu)
-            #if($navItem.active)
-              <li class="active"><a href="$navItem.href">$navItem.title</a></li>
+            #if($navItem.children && $navItem.children.size() > 0)
+              <li class="nav-item dropdown #if($navItem.active) active #end py-0 my-0">
+                <a href="#" class="nav-link text-expanded dropdown-toggle" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">$navItem.title<b class="caret"></b></a>
+                <ul class="dropdown-menu py-0 my-0">
+                #foreach($childItem in $navItem.children)
+                  #if($childItem.showOnMenu)
+                    <li class="nav-item #if($childItem.active) active #end py-0 my-0">
+                      <a href="$childItem.href" class="nav-link text-expanded">$childItem.title</a>
+                    </li>
+                  #end
+                #end
+                </ul>
+              </li>
             #else
-              <li><a href="$navItem.href">$navItem.title</a></li>
+              <li class="nav-item #if($navItem.active) active #end py-0 my-0">
+                <a href="$navItem.href" class="nav-link text-expanded">$navItem.title</a>
+              </li>
             #end
           #end
         #end

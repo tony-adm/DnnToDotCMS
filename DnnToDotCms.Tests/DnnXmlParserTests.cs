@@ -730,11 +730,12 @@ public class DnnXmlParserTests
             Assert.Single(result);
             DnnHtmlContent hc = result[0];
             Assert.Equal("Banner Slideshow", hc.Title);
-            // FisSlider must produce FisSlider-specific HTML, not a "recreate" notice.
-            Assert.Contains("Mvc-FisSliderModule-Container", hc.HtmlBody);
-            Assert.Contains("mvcContainer-", hc.HtmlBody);
+            // FisSlider must produce a Bootstrap carousel, not a "recreate" notice.
+            Assert.Contains("carousel", hc.HtmlBody);
+            Assert.Contains("dnn-slider-", hc.HtmlBody);
             // The empty shell has no slides, so there must be no slide-level elements.
             Assert.DoesNotContain("Slide Title", hc.HtmlBody);
+            Assert.DoesNotContain("btn btn-primary", hc.HtmlBody);
             Assert.DoesNotContain("recreated in DotCMS", hc.HtmlBody);
             Assert.DoesNotContain("dnn-module-placeholder", hc.HtmlBody);
             Assert.Equal("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", hc.TabUniqueId);
@@ -806,14 +807,13 @@ public class DnnXmlParserTests
             Assert.Single(result);
             DnnHtmlContent hc = result[0];
             Assert.Equal("Banner Slideshow", hc.Title);
-            Assert.Contains("Mvc-FisSliderModule-Container", hc.HtmlBody);
+            Assert.Contains("carousel", hc.HtmlBody);
             Assert.Contains("/FisSlider-Images/slide1.jpg", hc.HtmlBody);
             Assert.Contains("/FisSlider-Images/slide2.jpg", hc.HtmlBody);
-            // Each slide must include a caption with the image filename as title
-            // rendered inside the FisSlider slide-title structure.
-            Assert.Contains("slide-title", hc.HtmlBody);
-            Assert.Contains("slide1", hc.HtmlBody);
-            Assert.Contains("slide2", hc.HtmlBody);
+            // Each slide must include a caption with the image filename as title.
+            Assert.Contains("carousel-caption", hc.HtmlBody);
+            Assert.Contains("<h5>slide1</h5>", hc.HtmlBody);
+            Assert.Contains("<h5>slide2</h5>", hc.HtmlBody);
             // Each slide must include a placeholder "Learn More" link button so
             // content editors know to supply the actual slide destination URL.
             // FisSlider stores per-slide link URLs in a SQL table that is not
@@ -993,7 +993,7 @@ public class DnnXmlParserTests
             Assert.Equal(2, result.Count);
             Assert.All(result, r =>
             {
-                Assert.Contains("Mvc-FisSliderModule-Container", r.HtmlBody);
+                Assert.Contains("carousel", r.HtmlBody);
                 Assert.DoesNotContain("dnn-module-placeholder", r.HtmlBody);
             });
 

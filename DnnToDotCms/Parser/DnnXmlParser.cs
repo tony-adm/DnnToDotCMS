@@ -614,17 +614,16 @@ public static class DnnXmlParser
 
 
     /// <summary>
-    /// Builds FisSlider HTML markup for a FisSlider module instance, matching
-    /// the original DNN FisSlider structure with its specific CSS classes and
-    /// element IDs.  When <paramref name="scrapedSlides"/> is provided (from
-    /// a live site scrape via <c>--site-url</c>), the slider uses scraped
-    /// image URLs, link destinations, and captions.  Otherwise falls back to
-    /// export-only data: image filenames as captions and placeholder links.
+    /// Builds a Bootstrap 5 carousel (<c>div.carousel</c>) for a FisSlider
+    /// module instance.  When <paramref name="scrapedSlides"/> is provided
+    /// (from a live site scrape via <c>--site-url</c>), the carousel uses
+    /// scraped image URLs, link destinations, and captions.  Otherwise
+    /// falls back to export-only data: image filenames as captions and
+    /// placeholder links.
     /// </summary>
     /// <param name="title">
-    /// The DNN module title — used to derive a stable, unique numeric ID
-    /// for the slider so that prev/next controls and JavaScript bind to
-    /// the correct widget instance.
+    /// The DNN module title — used to derive a stable, unique HTML element ID
+    /// for the carousel so that prev/next controls bind to the correct widget.
     /// </param>
     /// <param name="imagePaths">
     /// Zero or more portal-relative image paths found in slider-named folders
@@ -643,14 +642,16 @@ public static class DnnXmlParser
         IReadOnlyList<string> imagePaths,
         IReadOnlyList<ScrapedSlide>? scrapedSlides = null)
     {
-        // Derive a stable numeric module ID from the title hash so that
-        // all FisSlider element IDs (mvcContainer-{id}, slideshow{id}, etc.)
-        // are unique and consistent across runs.
+        // Derive a safe HTML id attribute value from the module title.
+        // Include a short SHA-256 hash of the original title to prevent
+        // collisions between sliders whose titles share all alphanumeric chars
+        // (e.g. "Banner #1" and "Banner $1" would both normalise to "banner1").
+        string safeName = Regex.Replace(title, @"[^a-zA-Z0-9]", string.Empty).ToLowerInvariant();
+        if (string.IsNullOrEmpty(safeName)) safeName = "slider";
         byte[] hashBytes = System.Security.Cryptography.SHA256.HashData(
             System.Text.Encoding.UTF8.GetBytes(title));
-        // Use first 4 bytes as a positive int to mimic a DNN ModuleID.
-        uint rawId = BitConverter.ToUInt32(hashBytes, 0);
-        string moduleId = (rawId % 100000).ToString();
+        string shortHash = Convert.ToHexString(hashBytes)[..8].ToLowerInvariant();
+        string carouselId = $"dnn-slider-{safeName}-{shortHash}";
 
         // Use scraped slides when available; otherwise fall back to
         // export-only image paths with placeholder metadata.
@@ -658,26 +659,27 @@ public static class DnnXmlParser
         int slideCount = useScraped ? scrapedSlides!.Count : imagePaths.Count;
 
         var sb = new StringBuilder();
-
-        // Outer container matching FisSlider module wrapper.
-        sb.AppendLine($"""<div id="mvcContainer-{moduleId}" class="Mvc-FisSliderModule-Container">""");
-
-        sb.AppendLine($"""  <div id="Items-{moduleId}">""");
-        sb.AppendLine($"""    <section id="slideshow{moduleId}" class="slideshow" aria-roledescription="carousel" aria-label="FisSlider">""");
-        sb.AppendLine($"""      <div id="slideshowContent{moduleId}" class="slideshowContent">""");
-        sb.AppendLine($"""        <div id="slideContainer{moduleId}" class="slide-container" aria-live="off">""");
+        sb.AppendLine($"""<div id="{carouselId}" class="carousel slide" data-bs-ride="carousel">""");
 
         if (slideCount > 0)
         {
+            // Carousel indicators (navigation dots).
+            sb.AppendLine("""  <div class="carousel-indicators">""");
+            for (int i = 0; i < slideCount; i++)
+            {
+                string extraAttrs = i == 0 ? " class=\"active\" aria-current=\"true\"" : string.Empty;
+                sb.AppendLine($"""    <button type="button" data-bs-target="#{carouselId}" data-bs-slide-to="{i}"{extraAttrs} aria-label="Slide {i + 1}"></button>""");
+            }
+            sb.AppendLine("  </div>");
+
+            // Carousel slides.
+            sb.AppendLine("""  <div class="carousel-inner">""");
             for (int i = 0; i < slideCount; i++)
             {
                 string activeClass = i == 0 ? " active" : string.Empty;
-                string displayStyle = i == 0 ? "display: block;" : "display: none;";
-                string ariaHidden = i == 0 ? "false" : "true";
                 string src;
                 string altText;
                 string linkHref;
-                string? linkText;
                 string? captionHeading;
                 string? captionDescription;
 
@@ -689,9 +691,6 @@ public static class DnnXmlParser
                         ? System.Security.SecurityElement.Escape(slide.Caption)!
                         : $"Slide {i + 1}";
                     linkHref = slide.LinkUrl ?? "#";
-                    linkText = !string.IsNullOrWhiteSpace(slide.Description)
-                        ? System.Security.SecurityElement.Escape(slide.Description)
-                        : null;
                     captionHeading = slide.Caption;
                     captionDescription = slide.Description;
                 }
@@ -701,157 +700,53 @@ public static class DnnXmlParser
                     altText = Path.GetFileNameWithoutExtension(imagePaths[i]);
                     if (string.IsNullOrWhiteSpace(altText)) altText = $"Slide {i + 1}";
                     linkHref = "#";
-                    linkText = null;
                     captionHeading = altText;
                     captionDescription = null;
                 }
 
-                sb.AppendLine($"""          <div class="slide-item slide-item-{moduleId} slide-left{activeClass}" style="background: url('{src}'); {displayStyle}" role="group" aria-roledescription="slide" aria-label="{i + 1} of {slideCount}" aria-hidden="{ariaHidden}">""");
-                sb.AppendLine($"""            <div class="sr-only"><span aria-label="Slide description">{altText}</span></div>""");
-                sb.AppendLine("""            <div class="slide-text-container">""");
-
+                sb.AppendLine($"""    <div class="carousel-item{activeClass}">""");
+                sb.AppendLine($"""      <img src="{src}" class="d-block w-100" alt="{altText}">""");
+                sb.AppendLine("""      <div class="carousel-caption d-none d-md-block">""");
                 if (!string.IsNullOrWhiteSpace(captionHeading))
                 {
                     string escapedCaption = System.Security.SecurityElement.Escape(captionHeading)!;
-                    sb.AppendLine("""              <div class="slide-title">""");
-                    sb.AppendLine($"""                <p class="h1"><span class="s-title">{escapedCaption}</span></p>""");
-                    sb.AppendLine("              </div>");
+                    sb.AppendLine($"""        <h5>{escapedCaption}</h5>""");
                 }
-
-                sb.AppendLine("""              <div class="slide-desc">""");
                 if (!string.IsNullOrWhiteSpace(captionDescription))
                 {
                     string escapedDesc = System.Security.SecurityElement.Escape(captionDescription)!;
-                    sb.AppendLine($"""                <p>{escapedDesc}</p>""");
+                    sb.AppendLine($"""        <p>{escapedDesc}</p>""");
                 }
                 if (!useScraped || linkHref == "#")
                 {
-                    sb.AppendLine("""                <!-- TODO: replace '#' with the slide destination URL -->""");
+                    sb.AppendLine("""        <!-- TODO: replace '#' with the slide destination URL -->""");
                 }
-                string buttonLabel = !string.IsNullOrWhiteSpace(captionHeading)
-                    ? System.Security.SecurityElement.Escape(captionHeading)!
-                    : "Learn More";
-                string buttonText = !string.IsNullOrWhiteSpace(linkText) ? linkText : "Learn More";
-                sb.AppendLine($"""                <span class="linkButtonContainer"><a aria-label="{buttonLabel}" class="btn btn-primary slide-link" href="{linkHref}" target="_self">{buttonText}</a></span>""");
-                sb.AppendLine("              </div>");
-                sb.AppendLine("            </div>");
-                sb.AppendLine("          </div>");
+                sb.AppendLine($"""        <a href="{linkHref}" class="btn btn-primary">Learn More</a>""");
+                sb.AppendLine("      </div>");
+                sb.AppendLine("    </div>");
             }
+            sb.AppendLine("  </div>");
         }
         else
         {
-            // No images found — produce an empty slide shell.
-            sb.AppendLine($"""          <div class="slide-item slide-item-{moduleId} slide-left active" style="display: block;" role="group" aria-roledescription="slide" aria-label="1 of 1" aria-hidden="false">""");
-            sb.AppendLine("""            <div class="slide-text-container"></div>""");
-            sb.AppendLine("          </div>");
+            // No images found in the export — produce an empty carousel shell
+            // that content editors can populate directly inside DotCMS.
+            sb.AppendLine("""  <div class="carousel-inner">""");
+            sb.AppendLine("""    <div class="carousel-item active">""");
+            sb.AppendLine("    </div>");
+            sb.AppendLine("  </div>");
         }
 
-        sb.AppendLine("        </div>"); // slide-container
-
-        // Navigation arrows.
-        int effectiveCount = slideCount > 0 ? slideCount : 1;
-        if (effectiveCount > 1)
-        {
-            sb.AppendLine("""        <div class="slide-arrows slide-navStyle">""");
-            sb.AppendLine($"""          <button type="button" aria-controls="slideContainer{moduleId}" class="prev active" aria-label="Previous Slide" onclick="slideshow{moduleId}.changeSlides(-1)"><span class="fa fa-angle-left"></span></button>""");
-            sb.AppendLine($"""          <button type="button" aria-controls="slideContainer{moduleId}" class="next active" aria-label="Next Slide" onclick="slideshow{moduleId}.changeSlides(1)"><span class="fa fa-angle-right"></span></button>""");
-            sb.AppendLine("        </div>");
-
-            // Navigation dots.
-            sb.AppendLine("""        <ul class="slide-nav slide-navStyle">""");
-            for (int i = 0; i < slideCount; i++)
-            {
-                string dotActive = i == 0 ? " active" : string.Empty;
-                string ariaCurrent = i == 0 ? "true" : "false";
-                sb.AppendLine($"""          <li><button aria-controls="slideContainer{moduleId}" type="button" class="dot dot-{moduleId}{dotActive}" aria-label="Switch to Slide {i + 1}" onclick="slideshow{moduleId}.goToSlide({i + 1})" aria-current="{ariaCurrent}"><span class="fas fa-circle"></span></button></li>""");
-            }
-            sb.AppendLine("        </ul>");
-
-            // Play/pause button.
-            sb.AppendLine("""        <div class="play-button-container">""");
-            sb.AppendLine($"""          <button aria-controls="slideContainer{moduleId}" aria-label="Pause slider" id="slideshowPlayBtn{moduleId}" class="slide-link btn firstbtn"><i id="slideshowPlayStatus{moduleId}" class="fas fa-pause"></i></button>""");
-            sb.AppendLine("        </div>");
-        }
-
-        sb.AppendLine("      </div>"); // slideshowContent
-        sb.AppendLine("    </section>"); // slideshow
-
-        // Inline JavaScript for slide transitions (only when multiple slides).
-        if (effectiveCount > 1)
-        {
-            sb.AppendLine("    <script type=\"text/javascript\">");
-            sb.AppendLine($"      var slideshow{moduleId} = slideshow{moduleId} || {{}};");
-            sb.AppendLine($"      var slideshowTimeout{moduleId}, slideIndex{moduleId} = 1, autoSlide{moduleId} = true, mouseOverSlide{moduleId} = false;");
-            sb.AppendLine();
-            sb.AppendLine($"      slideshow{moduleId}.changeSlides = function(n) {{");
-            sb.AppendLine($"        slideshow{moduleId}.showSlides(slideIndex{moduleId} += n);");
-            sb.AppendLine("      };");
-            sb.AppendLine();
-            sb.AppendLine($"      slideshow{moduleId}.goToSlide = function(n) {{");
-            sb.AppendLine($"        slideshow{moduleId}.showSlides(slideIndex{moduleId} = n);");
-            sb.AppendLine("      };");
-            sb.AppendLine();
-            sb.AppendLine($"      slideshow{moduleId}.showSlides = function(n) {{");
-            sb.AppendLine($"        var slides = document.getElementsByClassName('slide-item-{moduleId}');");
-            sb.AppendLine($"        var dots = document.getElementsByClassName('dot-{moduleId}');");
-            sb.AppendLine($"        if (slideIndex{moduleId} > slides.length) slideIndex{moduleId} = 1;");
-            sb.AppendLine($"        if (n > slides.length) {{ slideIndex{moduleId} = 1; n = 1; }}");
-            sb.AppendLine($"        if (n < 1) slideIndex{moduleId} = slides.length;");
-            sb.AppendLine("        for (var i = 0; i < slides.length; i++) {");
-            sb.AppendLine("          slides[i].style.display = 'none';");
-            sb.AppendLine("          slides[i].setAttribute('aria-hidden', 'true');");
-            sb.AppendLine("        }");
-            sb.AppendLine("        for (var i = 0; i < dots.length; i++) {");
-            sb.AppendLine("          dots[i].className = dots[i].className.replace(' active', '');");
-            sb.AppendLine("          dots[i].setAttribute('aria-current', 'false');");
-            sb.AppendLine("        }");
-            sb.AppendLine($"        slides[slideIndex{moduleId} - 1].style.display = 'block';");
-            sb.AppendLine($"        slides[slideIndex{moduleId} - 1].setAttribute('aria-hidden', 'false');");
-            sb.AppendLine($"        dots[slideIndex{moduleId} - 1].className += ' active';");
-            sb.AppendLine($"        dots[slideIndex{moduleId} - 1].setAttribute('aria-current', 'true');");
-            sb.AppendLine("      };");
-            sb.AppendLine();
-            sb.AppendLine($"      slideshow{moduleId}.autoChangeSlides = function() {{");
-            sb.AppendLine($"        slideIndex{moduleId}++;");
-            sb.AppendLine($"        var slides = document.getElementsByClassName('slide-item-{moduleId}');");
-            sb.AppendLine($"        var dots = document.getElementsByClassName('dot-{moduleId}');");
-            sb.AppendLine("        for (var i = 0; i < slides.length; i++) {");
-            sb.AppendLine("          slides[i].style.display = 'none';");
-            sb.AppendLine("          slides[i].setAttribute('aria-hidden', 'true');");
-            sb.AppendLine("        }");
-            sb.AppendLine("        for (var i = 0; i < dots.length; i++) {");
-            sb.AppendLine("          dots[i].className = dots[i].className.replace(' active', '');");
-            sb.AppendLine("          dots[i].setAttribute('aria-current', 'false');");
-            sb.AppendLine("        }");
-            sb.AppendLine($"        if (slideIndex{moduleId} > slides.length) slideIndex{moduleId} = 1;");
-            sb.AppendLine($"        slides[slideIndex{moduleId} - 1].style.display = 'block';");
-            sb.AppendLine($"        slides[slideIndex{moduleId} - 1].setAttribute('aria-hidden', 'false');");
-            sb.AppendLine($"        dots[slideIndex{moduleId} - 1].className += ' active';");
-            sb.AppendLine($"        dots[slideIndex{moduleId} - 1].setAttribute('aria-current', 'true');");
-            sb.AppendLine($"        slideshowTimeout{moduleId} = setTimeout(slideshow{moduleId}.autoChangeSlides, 5000);");
-            sb.AppendLine("      };");
-            sb.AppendLine();
-            sb.AppendLine($"      slideshow{moduleId}.showSlides(slideIndex{moduleId});");
-            sb.AppendLine($"      slideIndex{moduleId} = 0;");
-            sb.AppendLine($"      slideshow{moduleId}.autoChangeSlides();");
-            sb.AppendLine();
-            sb.AppendLine($"      document.getElementById('slideshowPlayBtn{moduleId}').onclick = function(e) {{");
-            sb.AppendLine("        e.preventDefault();");
-            sb.AppendLine($"        var icon = document.getElementById('slideshowPlayStatus{moduleId}');");
-            sb.AppendLine("        if (icon.getAttribute('class') === 'fas fa-play') {");
-            sb.AppendLine("          icon.setAttribute('class', 'fas fa-pause');");
-            sb.AppendLine($"          clearInterval(slideshowTimeout{moduleId});");
-            sb.AppendLine($"          slideshow{moduleId}.autoChangeSlides();");
-            sb.AppendLine("        } else {");
-            sb.AppendLine("          icon.setAttribute('class', 'fas fa-play');");
-            sb.AppendLine($"          clearInterval(slideshowTimeout{moduleId});");
-            sb.AppendLine("        }");
-            sb.AppendLine("      };");
-            sb.AppendLine("    </script>");
-        }
-
-        sb.AppendLine("  </div>"); // Items-{moduleId}
-        sb.Append("</div>"); // mvcContainer
+        // Previous / next controls.
+        sb.AppendLine($"""  <button class="carousel-control-prev" type="button" data-bs-target="#{carouselId}" data-bs-slide="prev">""");
+        sb.AppendLine("""    <span class="carousel-control-prev-icon" aria-hidden="true"></span>""");
+        sb.AppendLine("""    <span class="visually-hidden">Previous</span>""");
+        sb.AppendLine("  </button>");
+        sb.AppendLine($"""  <button class="carousel-control-next" type="button" data-bs-target="#{carouselId}" data-bs-slide="next">""");
+        sb.AppendLine("""    <span class="carousel-control-next-icon" aria-hidden="true"></span>""");
+        sb.AppendLine("""    <span class="visually-hidden">Next</span>""");
+        sb.AppendLine("  </button>");
+        sb.Append("</div>");
 
         return sb.ToString();
     }
