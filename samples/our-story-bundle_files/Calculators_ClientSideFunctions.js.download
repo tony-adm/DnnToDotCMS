@@ -1,0 +1,148 @@
+﻿//Calculators.aspx
+
+function PercentDollar_TrimString(ctrlInput, ctrlInputType)
+{
+    var sInString = ctrlInput.value;
+    var sType = ctrlInputType.value;
+    sInString = sInString.replace( /[\s%\$]+/g, "" );/* strip space, %, $ */
+    if (sType == "Percent") {sInString = sInString + " %";}
+    if (sType == "Dollar") {sInString = "$" + sInString;}
+    ctrlInput.value = sInString;
+}
+
+function PercentDollar_SelectType(ctrlInput,ctrlInputType)
+{
+    var sInString = ctrlInput.value;
+    if (sInString.indexOf("%") >= 0) {ctrlInputType[0].checked=true;}
+    if (sInString.indexOf("$") >= 0) {ctrlInputType[1].checked=true;}
+}
+
+function toggleLayerVisibility(whichLayer)
+{
+   var layerStyle;
+	if (document.getElementById)
+	{
+		layerStyle = document.getElementById(whichLayer).style;
+	}
+	else if (document.all)
+	{
+		layerStyle = document.all[whichLayer].style;
+	}
+	else if (document.layers)
+	{
+		layerStyle = document.layers[whichLayer].style;
+		
+	}
+   layerStyle.display = ((layerStyle.display == "none") || (layerStyle.display == ""))  ? "block":"none";
+}
+
+function handlerFormSubmit(form)
+{
+  removePercentFromForm(form);
+  removeDollarFromForm(form);
+}
+
+function removePercentFromForm(form) {
+    for (var i = 0; i < form.elements.length; i++ ) {
+        if (form.elements[i].type == 'text') {
+            form.elements[i].value = form.elements[i].value.replace('%','');          
+        }    
+        if (form.elements[i].type == 'hidden') {
+            form.elements[i].value = form.elements[i].value.replace('%','');          
+        }     
+    }
+}
+
+function removeDollarFromForm(form) {
+    for (var i = 0; i < form.elements.length; i++ ) {
+        if (form.elements[i].type == 'text') {
+            form.elements[i].value = form.elements[i].value.replace('$','');          
+        }    
+        if (form.elements[i].type == 'hidden') {
+            form.elements[i].value = form.elements[i].value.replace('$','');          
+        }     
+    }
+}
+
+
+var CalculatorTips = "DIVCalculatorTips";
+var CalculatorDisclaimer = "DIVCalculatorDisclaimer";
+var CalculatorResultsDetail = "DIVCalculatorResultsDetail";
+var TVSURL = "https://www.timevalue.com/tcalc-financial-calculators";
+
+function remove_ElementByID(elementID)
+{
+    if (document.getElementById(elementID) != null)
+    {
+      try
+      {
+      myElement = document.getElementById(elementID);
+      myElement.parentNode.removeChild(myElement);
+      }
+      catch(err) {}
+    }
+}
+
+remove_ElementByID('tvcDeveloperNote');
+
+function remove_nonTVCElements(myForm)
+{
+    var inputArr = myForm.getElementsByTagName("input"); //child inputs of form
+    var calcInputArr = document.getElementById("calculator").getElementsByTagName("input");  //child inputs of div calculator
+	var inputArrLength = inputArr.length;
+	var calcInputArrLength = calcInputArr.length;
+	
+	var removesArr=new Array();
+	var k = 0;
+
+	for (var i = 0; i < inputArrLength; i++) //loop through form
+	{
+		var inArray=false;
+		for (var j = 0; j < calcInputArrLength; j++)
+		{
+			if (inputArr[i] == calcInputArr[j]) {inArray=true;}
+		}
+		if (inArray==false) 
+		{
+			removesArr[k] = inputArr[i]; 
+			k++;
+		}
+    }
+
+	for (var n = 0; n < k; n++)
+	{
+       removesArr[n].parentNode.removeChild(removesArr[n]);
+	}
+}
+
+/*
+function catchEnter(e)
+{
+	if (!e) e = window.event;  
+	var code = (e.keyCode) ? e.keyCode : e.which; 
+	if (code == 13 || code == 3)
+	{
+		document.getElementById("COMPUTE").click();
+		return false; 
+	}
+	else 
+	return true;
+}
+
+try { 
+    var ua = window.navigator.userAgent
+	var msie = ua.indexOf ( "MSIE " )
+    if ( msie > 0 )
+	{
+		window.onload = function() { document.onkeypress = catchEnter; }; 
+		document.onkeypress = catchEnter; 
+	}
+	else 
+    {
+		window.captureEvents(Event.KEYDOWN);
+		window.onload = function() { document.onkeydown = catchEnter; }; 
+		document.onkeydown = catchEnter; 
+	}	
+}
+catch(err){}
+*/

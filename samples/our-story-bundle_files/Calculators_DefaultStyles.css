@@ -1,0 +1,336 @@
+
+#heading_Input table tbody tr td
+{
+	padding-right: 5px;
+}
+div#DIVCalculatorTips
+{
+	margin: 0;
+	display: none;
+}
+div#DIVCalculatorDisclaimer
+{
+	margin: 0;
+	display: none;
+}
+div#DIVCalculatorResultsDetail
+{
+	margin: 0;
+	display: none;
+}
+#COMPUTE
+{
+	color: #444444;
+	font-family: 'verdana' , 'arial' , 'helvetica';
+	font-size: 10pt;
+	font-weight: bold;
+	text-decoration: none;
+	background-color: transparent;
+	background-image: url(/TimeValueCalculators/Images/new_compute.gif);
+	background-repeat: repeat-x;
+	width: 100px;
+	height: 25px;
+	display: block;
+	margin: 0;
+	padding: 2px;
+	border: 1px solid #D6C1A3;
+}
+.TextInput
+{
+	width: 6em;
+}
+form
+{
+		font-family: 'arial', 'verdana', 'helvetica';
+}
+
+/*ADA Styles*/
+
+p.tvcHidePClass {
+    display:none;
+}
+
+caption.tvcResultCaption {
+    text-align: left;    
+}
+
+input.tvcRadioClass {
+	display:inline-block;
+    margin-left: 10px;
+}
+
+label.tvcRadioLabelClass {
+	display:inline-block;
+}
+
+fieldset.tvcFieldsetForRadioClass {
+    margin:0px;
+    border:0px;
+    padding:0px;
+	display:inline-block;
+}
+
+.InputTable legend.tvcLegendForRadioClass  {
+    /*display:none; */
+    display:none;
+}
+
+.InputContainer legend.tvcLegendForRadioClass  {
+    /*display:none; */
+    display:none;
+}
+
+.InputTable label.tvcHideLabelClass {
+    /*display:none; */
+    display:none;
+}
+
+.tvcCenterClass {
+	text-align: center;
+}
+
+input.tvcPercentOrDollarInputClass {
+	display:inline-block;
+	width: 5.5em;
+	font-size: 9pt;
+}
+
+input.tvcMonthsOrYearsInputClass {
+	display:inline-block;
+	width: 5.5em;
+	font-size: 9pt;
+}
+
+input.tvcPaymentOrTermInputClass {
+	display:inline-block;
+	width: 5.5em;
+	font-size: 9pt;
+}
+
+.tvcRentClass {
+	width: 150px;
+}
+
+.tvcBuyClass {
+	width: 150px;
+}
+
+
+
+/*Containers and Tables*/
+.InputTable, .DetailTable
+{
+	border: none;
+	border-collapse: collapse;
+}
+
+.InputTable SPAN
+{
+   white-space:nowrap;   
+} 
+
+.DetailTable .GroupHeading
+{
+	border-bottom: solid 1px #cccccc;
+	text-align:center;
+}
+.SubDetailTable
+{
+	border: none;
+	border-collapse: collapse;
+	width: 100%;
+}
+.SubDetailTable th, .SubDetailTable td, .DetailTable th, .DetailTable td
+{
+	padding-right: 6px;
+	padding-left: 6px;
+}
+.NoWrap
+{
+	white-space: nowrap;
+}
+.Left
+{
+	text-align: left;
+}
+.Right
+{
+	text-align: right;
+}
+.Center
+{
+	text-align: center;
+}
+
+/*Collections*/
+/*.InputCollection SPAN
+{
+   white-space:nowrap   
+} */
+
+.InputCollection TABLE TR TD
+{
+	padding: 1px 2px 1px 2px;
+	font-size: 9pt;
+}
+.InputCollection INPUT.TextInput
+{
+	width: 5.5em;
+	font-size: 9pt;
+
+}
+.InputCollection INPUT.radio
+{
+	width: 1.5em;
+	font-size: 9pt;
+	white-space:nowrap;
+}
+.InputCollection SELECT
+{
+	font-size: 9pt;
+}
+.InputCollection TABLE
+{
+	border: none;
+	border-collapse: collapse;
+}
+.InputCollection #DebtsTable td /*PC12*/
+{
+	padding-right: 5px;
+}
+/*End Collections*/
+
+
+/*Errors*/
+p.tvcErrorInput {
+    color:red;
+    display:inline-block;
+}
+
+.ErrorSummary
+{
+	font-weight:bold;
+	color:Red;
+}
+.ErrorContainer
+{
+	font-weight:bold;
+	color:Red;
+}
+.ErrorTable
+{
+	border-color: Red;
+	border-style: solid;
+}
+.ErrorTable UL
+{
+	margin: 5;
+	margin-left: 25px;
+	padding: 0;
+	list-style-image: url(/TimeValueCalculators/Images/symbol_error.gif);
+}
+.ErrorTable LI
+{
+	padding-left: 10px;
+}
+/*End Errors*/
+
+
+
+/*Amortization Table*/
+.cAmortContainer
+{
+	padding-top: 10px;
+	padding-bottom: 10px;
+	border-collapse: collapse; /* This is the equivalent of cellspacing="0" */
+	border: none;
+}
+FIELDSET
+{
+	padding: 10px;
+}
+.cAmortTitleFont
+{
+	font-weight: bold;
+}
+.cTableWrapper
+{
+	border: none;
+	border-collapse: collapse;
+}
+.cAmortTable
+{
+	border: none;
+	border-collapse: collapse;
+}
+.cAmortTable TD, .cAmortTable TH
+{
+	padding: 5px;
+	font-size: 9pt;
+	font-family: Arial;
+	text-align: right;
+}
+.cAmortHeader TD, .cAmortHeader TH
+{
+	border-top: #dedfef 1px solid;
+	border-bottom: #dedfef 2px solid;
+	font-weight: bold;
+	background-color: #eeeeee;
+	text-align: center;
+    background-image: url(/timevaluecalculators/images/amortgreyhgradient.jpg);
+    background-repeat: repeat-x;
+}
+.cAmortLineE TD, .cAmortLineE TH
+{
+	background-color: #F7F7F8;
+	white-space: nowrap;
+}
+.cAmortLineO TD, .cAmortLineO TH
+{
+	white-space: nowrap;
+}
+.cAmortLineTotals TD, .cAmortLineTotals TH
+{
+	font-weight: bold;
+	color: black;
+	border-top: double 3px black;
+	white-space: nowrap;
+}
+/*End Amortization Table*/
+
+
+
+/* Collections */
+.cTimeValue .InputCollection .TextInput {
+	FONT-SIZE: 9pt;
+}
+.cTimeValue .InputCollection SELECT {
+	FONT-SIZE: 9pt;
+}
+.cTimeValue .InputCollection INPUT {
+	FONT-SIZE: 9pt;
+}
+.cTimeValue .InputCollection P {
+	FONT-SIZE: 9pt;
+}
+/* End Collections */ 
+
+
+.cTimeValue TH {font-weight:normal;}
+
+.cTimeValue .toggle
+{
+	white-space:nowrap;
+}
+
+.toggle {vertical-align:top;}
+
+
+/* Calculator Answer */
+.Summary   {
+	color: Blue;
+}
+
+br.tvcClearBoth {
+    clear:both;
+}

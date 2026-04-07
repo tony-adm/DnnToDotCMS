@@ -1,0 +1,30 @@
+﻿// write out the string result
+document.write(returnVal.toString());
+
+
+/*
+// special handling for Safari
+//  SafariTimeout = 5500;
+//  if (QS.indexOf("AMORTIZATIONSCHEDULE") >= 0) {SafariTimeout = SafariTimeout * 3;}
+//  setTimeout("refreshIfNecessary()",SafariTimeout);
+
+if ( (navigator.appName.indexOf("Safari") >= 0) || (navigator.appVersion.indexOf("Safari") >= 0) )
+{
+  refreshIfNecessary();
+}
+ 
+function refreshIfNecessary()
+{
+  if (finishedLoading != true)
+  {
+    setTimeout("refreshIfNecessary()",500);
+  }
+  else
+  {
+    if ( !document.getElementById('PostBack') || !document.getElementById('calculator') )
+    {
+      window.location.reload(true);
+    }
+  }
+}
+*/

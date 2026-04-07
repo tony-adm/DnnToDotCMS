@@ -1,0 +1,142 @@
+﻿// Begin StringBuilder Helper: 
+//   Initializes a new instance of the StringBuilder class 
+//   and appends the given value if supplied. 092308 
+function StringBuilder(value)
+{
+    this.strings = new Array("");
+    this.append(value);
+}
+
+// Appends the given value to the end of this instance.
+StringBuilder.prototype.append = function (value)
+{
+    if (value)
+    {
+        this.strings.push(value);
+    }
+}
+
+// Clears the string buffer
+StringBuilder.prototype.clear = function ()
+{
+    this.strings.length = 1;
+}
+
+// Converts this instance to a String.
+StringBuilder.prototype.toString = function ()
+{
+    return this.strings.join("");
+}
+// End StringBuilder Helpers
+
+
+
+var returnVal = new StringBuilder(); //added 092308
+var finishedLoading = false;
+
+function includeCalculatorContent()
+{
+ QS = scrubQS(document.location.search);
+ LOCATION = document.location.href.replace(document.location.search, "");
+ QSVARS = QS.substring(1,QS.length);
+
+ var protocolURL;
+ var useDev = false;
+ if (LOCATION.substring(0,5) == "https") { protocolURL = "https://"; }
+ else { protocolURL = "http://";}
+
+ if ((typeof (window['URL']) != "undefined") && (URL.toUpperCase) && (URL.toUpperCase().indexOf("DEV.TIMEVALUECALCULATORS.COM") != -1)) {useDev = true;}
+ if (useDev) { baseURL = "dev.timevaluecalculators.com/TimeValueCalculators/Calculator.aspx?"; }
+ else { baseURL = "www.timevaluecalculators.com/TimeValueCalculators/Calculator.aspx?"; }
+
+ queryURL = "RESPONSE=ASJSTRING&REFERREDBY=" + escape(LOCATION);
+ if (QS.indexOf("TEMPLATE_ID") == -1)
+ { queryURL += "&TEMPLATE_ID=" + TEMPLATE_ID; }
+
+ // If HIDEFORMTAG is defined, add it to PASSTHROUGH
+ if ((typeof (window['HIDEFORMTAG']) != "undefined") && (HIDEFORMTAG.toUpperCase() == "TRUE") && (PASSTHROUGH.indexOf("HIDEFORMTAG") == -1)) 
+ {
+    if (PASSTHROUGH == "") { PASSTHROUGH = "HIDEFORMTAG=TRUE"; }
+    else { PASSTHROUGH += "&HIDEFORMTAG=TRUE"; }
+ }
+
+// If TVCMOBILE is defined, add it to PASSTHROUGH
+if ((typeof (window['TVCMOBILE']) != "undefined") && (TVCMOBILE.toUpperCase() == "TRUE") && (PASSTHROUGH.indexOf("TVCMOBILE") == -1)) {
+    if (PASSTHROUGH == "") { PASSTHROUGH = "TVCMOBILE=TRUE"; }
+    else { PASSTHROUGH += "&TVCMOBILE=TRUE"; }
+}
+
+// If EXCLUDETVCSTYLES is defined, add it to PASSTHROUGH
+if ((typeof (window['EXCLUDETVCSTYLES']) != "undefined") && (EXCLUDETVCSTYLES.toUpperCase() == "TRUE") && (PASSTHROUGH.indexOf("EXCLUDETVCSTYLES") == -1)) {
+    if (PASSTHROUGH == "") { PASSTHROUGH = "EXCLUDETVCSTYLES=TRUE"; }
+    else { PASSTHROUGH += "&EXCLUDETVCSTYLES=TRUE"; }
+}
+
+// If ACCORDIANINPUT is defined, add it to PASSTHROUGH
+if ((typeof (window['ACCORDIANINPUT']) != "undefined") && (ACCORDIANINPUT.toUpperCase() == "TRUE") && (PASSTHROUGH.indexOf("ACCORDIANINPUT") == -1))
+{
+     if (PASSTHROUGH == "") { PASSTHROUGH = "ACCORDIANINPUT=TRUE"; }
+     else { PASSTHROUGH += "&ACCORDIANINPUT=TRUE"; }
+ }
+
+ // Add the PASSTHROUGH to the queryURL
+ if ((PASSTHROUGH != "") && (QS.indexOf("PASSTHROUGH") == -1))
+ { queryURL += "&PASSTHROUGH=" + escape(PASSTHROUGH); }
+
+ if (QSVARS != "") { queryURL += "&" + QSVARS; }
+
+ //force load of specific calculator if CALULATORID is defined
+ if ((typeof(window['CALCULATORID']) != "undefined") && (CALCULATORID != "") && (QSVARS.indexOf("CALCULATORID") == -1)) 
+ { queryURL += "&CALCULATORID=" + CALCULATORID; }
+
+ // Add TVCMOBILE to the query string if defined.
+ if ((PASSTHROUGH.indexOf("TVCMOBILE") != -1) && (QSVARS.indexOf("TVCMOBILE") == -1))
+ { queryURL += "&TVCMOBILE=TRUE"; }
+
+ // Add EXCLUDETVCSTYLES to the query string if defined.
+ if ((PASSTHROUGH.indexOf("EXCLUDETVCSTYLES") != -1) && (QSVARS.indexOf("EXCLUDETVCSTYLES") == -1))
+ { queryURL += "&EXCLUDETVCSTYLES=TRUE"; }
+
+ // Add ACCORDIANINPUT to the query string if defined.
+ if ((PASSTHROUGH.indexOf("ACCORDIANINPUT") != -1) && (QSVARS.indexOf("ACCORDIANINPUT") == -1))
+ { queryURL += "&ACCORDIANINPUT=TRUE"; }
+ 
+ // Add HIDEFORMTAG to the query string if defined.
+ if ((PASSTHROUGH.indexOf("HIDEFORMTAG") != -1) && (QSVARS.indexOf("HIDEFORMTAG") == -1))
+ { queryURL += "&HIDEFORMTAG=TRUE"; }
+
+ URL = protocolURL + baseURL + queryURL;
+ 
+ document.write('<SCR' + 'IPT LANGUAGE="JavaScript" onLoad="finishedLoading=true;" SRC="');
+ document.write(URL + '" TYPE="text/javascript"></SCR' + 'IPT>');
+ document.write('<SCR' + 'IPT LANGUAGE="JavaScript" onLoad="finishedLoading=true;" SRC="');
+ if (useDev) {
+     document.write(protocolURL + "dev.timevaluecalculators.com/TimeValueCalculators/Includes/docwrite.js" + '" TYPE="text/javascript"></SCR' + 'IPT>');
+ }
+ else {
+     document.write(protocolURL + "www.timevaluecalculators.com/TimeValueCalculators/Includes/docwrite.js" + '" TYPE="text/javascript"></SCR' + 'IPT>');
+ }
+}
+
+function scrubQS(QS)
+{
+    // Removed (QS.toUpperCase().indexOf("%7B") > -1) because some legal state variables contain this. It will be removed in later (Calculator.aspx.cs).
+    if (
+    (QS.toUpperCase().indexOf("<") > -1) ||  
+    (QS.toUpperCase().indexOf("%3C") > -1) ||  
+    (QS.toUpperCase().indexOf(">") > -1) ||  
+    (QS.toUpperCase().indexOf("%3E") > -1) ||  
+    (QS.toUpperCase().indexOf("SCRIPT") > -1) ||  
+    (QS.toUpperCase().indexOf(";") > -1) ||  
+    (QS.toUpperCase().indexOf("%3B") > -1) ||  
+    (QS.toUpperCase().indexOf("{") > -1))  
+    { QS = "";}
+    return QS;
+}
+
+includeCalculatorContent();
+
+function initMenu()
+{
+  document.getElementById("bottom-nav").style.display = "none";
+}
