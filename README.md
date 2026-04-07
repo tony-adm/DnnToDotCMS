@@ -282,12 +282,12 @@ The ASCX markup is transformed:
 Each DNN skin ASCX is converted to a DotCMS `TemplateWrapper` XML entry.
 The ASCX markup is transformed:
 - `<dnn:LOGO …/>` → `<img src="/logo.png" alt="Logo" />`
-- `<dnn:MENU …/>` → `<!-- Navigation -->`
+- `<dnn:MENU …/>` → Velocity `$navtool.getNav("/")` loop
 - `<dnn:SEARCH …/>` → `<!-- Search -->`
 - `<dnn:USER …/>` → `<!-- User Panel -->`
 - `<dnn:LOGIN …/>` → `<!-- Login -->`
 - `<dnn:COPYRIGHT …/>` → `<!-- Copyright -->`
-- `<dnn:BREADCRUMB …/>` → `<!-- Breadcrumb -->`
+- `<dnn:BREADCRUMB …/>` → Velocity `$crumbTool.getCrumbs()` loop
 - `<dnn:STYLES …/>`, `<dnn:jQuery …/>`, `<dnn:META …/>` removed (handled by DotCMS)
 - All other structural HTML is preserved
 

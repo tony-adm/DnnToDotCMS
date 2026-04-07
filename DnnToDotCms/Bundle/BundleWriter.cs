@@ -2014,6 +2014,40 @@ public static class BundleWriter
     // ASCX → HTML conversion helpers
     // ------------------------------------------------------------------
 
+    // Velocity snippet that renders a top-level navigation menu using
+    // the DotCMS $navtool API.  Used for <dnn:MENU> and <dnn:NAV>.
+    private const string NavToolVelocitySnippet =
+        """
+        <ul class="dnn-nav">
+        #set($navItems = $navtool.getNav("/"))
+        #foreach($navItem in $navItems)
+          #if($navItem.showOnMenu)
+            #if($navItem.active)
+              <li class="active"><a href="$navItem.href">$navItem.title</a></li>
+            #else
+              <li><a href="$navItem.href">$navItem.title</a></li>
+            #end
+          #end
+        #end
+        </ul>
+        """;
+
+    // Velocity snippet that renders a breadcrumb trail using $crumbTool.
+    private const string BreadcrumbVelocitySnippet =
+        """
+        <nav class="dnn-breadcrumb" aria-label="Breadcrumb">
+        <ol>
+        #foreach($crumb in $crumbTool.getCrumbs())
+          #if($foreach.last)
+            <li class="active">$crumb.title</li>
+          #else
+            <li><a href="$crumb.href">$crumb.title</a></li>
+          #end
+        #end
+        </ol>
+        </nav>
+        """;
+
     // Pre-compiled skin-control replacement pairs: (regex, replacement).
     // Each entry handles one well-known <dnn:TAGNAME .../> control.
     // Note: <dnn:LOGO> is handled separately in ConvertAscxToTemplateHtml so it can
@@ -2021,9 +2055,9 @@ public static class BundleWriter
     private static readonly (Regex Rx, string Replacement)[] SkinControlReplacements =
     [
         (new(@"<dnn:MENU\s[^>]*/?>",        RegexOptions.IgnoreCase | RegexOptions.Singleline),
-         @"<nav class=""dnn-nav""><!-- Navigation: configure in DotCMS --></nav>"),
+         NavToolVelocitySnippet),
         (new(@"<dnn:NAV\s[^>]*/?>",         RegexOptions.IgnoreCase | RegexOptions.Singleline),
-         @"<nav class=""dnn-nav""><!-- Navigation: configure in DotCMS --></nav>"),
+         NavToolVelocitySnippet),
         (new(@"<dnn:USER\s[^>]*/?>",        RegexOptions.IgnoreCase | RegexOptions.Singleline),
          @"<span class=""dnn-user"">$!{user.firstName} $!{user.lastName}</span>"),
         (new(@"<dnn:LOGIN\s[^>]*/?>",       RegexOptions.IgnoreCase | RegexOptions.Singleline),
@@ -2035,7 +2069,7 @@ public static class BundleWriter
         (new(@"<dnn:COPYRIGHT\s[^>]*/?>",   RegexOptions.IgnoreCase | RegexOptions.Singleline),
          "<span class=\"copyright\">Copyright</span>"),
         (new(@"<dnn:BREADCRUMB\s[^>]*/?>",  RegexOptions.IgnoreCase | RegexOptions.Singleline),
-         @"<nav class=""dnn-breadcrumb"" aria-label=""Breadcrumb""><!-- Breadcrumb: configure in DotCMS --></nav>"),
+         BreadcrumbVelocitySnippet),
         (new(@"<dnn:CURRENTDATE\s[^>]*/?>", RegexOptions.IgnoreCase | RegexOptions.Singleline),
          @"<span class=""dnn-currentdate"">$date.format('MMMM d, yyyy', $date.date)</span>"),
         (new(@"<dnn:LANGUAGE\s[^>]*/?>",    RegexOptions.IgnoreCase | RegexOptions.Singleline),
