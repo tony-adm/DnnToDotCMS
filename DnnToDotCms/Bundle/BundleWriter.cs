@@ -430,6 +430,10 @@ public static class BundleWriter
             // DNN TabPath like "//Personal//CheckingAccounts" maps to a DotCMS
             // folder "/personal/" with the page URL "checking-accounts".
             var pageFolderInodes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            // Track the original (human-readable) DNN page name for each folder
+            // slug so that the folder's <title> preserves spaces/casing for
+            // display in the DotCMS $navtool navigation.
+            var pageFolderTitles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (DnnPortalPage page in pages)
             {
                 // Level-0 (top-level) pages use SYSTEM_FOLDER and parentPath="/"
@@ -456,6 +460,9 @@ public static class BundleWriter
                         unifiedFolderInodes[dotcmsKey] = existingInode;
                     }
                     pageFolderInodes.TryAdd(folderSlug, existingInode);
+                    // Store the original DNN segment name (with spaces/casing)
+                    // for use as the folder display title in navigation.
+                    pageFolderTitles.TryAdd(folderSlug, pathSegments[depth - 1]);
                 }
             }
 
@@ -472,9 +479,13 @@ public static class BundleWriter
                         ? "/" + folderSlug[..lastSlash] + "/"
                         : "/";
 
+                    // Use the original DNN page name (with spaces/casing) as
+                    // the folder title so $navtool.title shows it correctly.
+                    string folderTitle = pageFolderTitles.GetValueOrDefault(folderSlug, folderName);
+
                     string folderXml = BuildFolderXml(
                         folderInode, folderName, dotcmsPath, pageFolderParent,
-                        siteId, siteInode, showOnMenu: true);
+                        siteId, siteInode, showOnMenu: true, title: folderTitle);
                     string entryDir = pageFolderParent == "/"
                         ? "ROOT"
                         : "ROOT/" + pageFolderParent.Trim('/');
@@ -1592,10 +1603,12 @@ public static class BundleWriter
         string parentPath,
         string hostId,
         string hostInode,
-        bool showOnMenu = false)
+        bool showOnMenu = false,
+        string? title = null)
     {
         string now      = DateTime.UtcNow.ToString(XmlTimestampFormat);
         string showOnMenuStr = showOnMenu ? "true" : "false";
+        string folderTitle = System.Security.SecurityElement.Escape(title ?? folderName) ?? folderName;
 
         return $"""
             <com.dotcms.publisher.pusher.wrapper.FolderWrapper>
@@ -1606,7 +1619,7 @@ public static class BundleWriter
                 <type>folder</type>
                 <identifier>{folderInode}</identifier>
                 <name>{folderName}</name>
-                <title>{folderName}</title>
+                <title>{folderTitle}</title>
                 <hostId>{hostId}</hostId>
                 <showOnMenu>{showOnMenuStr}</showOnMenu>
                 <sortOrder>0</sortOrder>
@@ -2044,7 +2057,7 @@ public static class BundleWriter
 
     // Matches DDRMenu template tokens such as [=CssClass], [=ID], [?HASCHILDREN], etc.
     private static readonly Regex DdrTokenRegex =
-        new(@"\[\??\!?=?\/?[A-Za-z]+\]", RegexOptions.Compiled);
+        new(@"\[\??\!?=?\/?\w+\]", RegexOptions.Compiled);
 
     // Matches two or more consecutive whitespace characters (for normalisation).
     private static readonly Regex MultiSpaceRegex =

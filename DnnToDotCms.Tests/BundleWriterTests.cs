@@ -4823,6 +4823,40 @@ public class BundleWriterTests
     }
 
     [Fact]
+    public void Write_WithChildPage_FolderTitlePreservesOriginalName()
+    {
+        // DNN page names like "About Us" contain spaces.  The folder slug is
+        // "about-us" (URL-safe), but the folder <title> must keep the original
+        // name so that DotCMS $navtool.title shows it with spaces.
+        var pages = new[]
+        {
+            new DnnPortalPage("aaa", "About Us", "About Us", "", "//About Us",  0, true, ""),
+            new DnnPortalPage("bbb", "Our Story", "Our Story", "", "//About Us//Our Story", 1, true, ""),
+        };
+        var contents = new[]
+        {
+            new DnnHtmlContent("About Us", "<p>About</p>", TabUniqueId: "aaa"),
+            new DnnHtmlContent("Our Story", "<p>Story</p>", TabUniqueId: "bbb"),
+        };
+
+        string zipPath = BuildThemesZip();
+        try
+        {
+            var (ms, names) = WriteBundleWithPagesAndContents(pages, contents,
+                themesZipPath: zipPath);
+
+            string folderEntry = names.First(n => n.EndsWith(".folder.xml") && n.Contains("ROOT/"));
+            string xml = ReadTarEntry(ms, folderEntry)!;
+
+            // Folder name (path segment) should be the slug.
+            Assert.Contains("<name>about-us</name>", xml);
+            // Folder title should preserve the original DNN page name with spaces.
+            Assert.Contains("<title>About Us</title>", xml);
+        }
+        finally { File.Delete(zipPath); }
+    }
+
+    [Fact]
     public void Write_WithChildPage_PageXmlHasCorrectParentPath()
     {
         var pages = new[]
