@@ -210,8 +210,6 @@ public static class BundleWriter
             string doubledJson = json + json;
             WriteTextEntry(tar, $"working/{contentWorkDir}/{id}.contentType.json", doubledJson);
             WriteTextEntry(tar, $"working/{contentWorkDir}/{id}.contentType.json", doubledJson);
-            WriteTextEntry(tar, $"live/{contentWorkDir}/{id}.contentType.json", doubledJson);
-            WriteTextEntry(tar, $"live/{contentWorkDir}/{id}.contentType.json", doubledJson);
             manifestEntries.Add(("contenttype", id, "", ct.Name, contentWorkDir, "/"));
 
             if (ct.Variable == "htmlContent")
@@ -290,24 +288,15 @@ public static class BundleWriter
                 }
 
                 // Track per-pane container votes for template resolution.
-                // Modules with an empty ContainerSrc inherit the site/page
-                // default container.  They MUST still count as votes so that
-                // a single specialised container (e.g. zelle.ascx on one page)
-                // does not win the per-pane vote when the vast majority of
-                // pages use the default container for the same pane.
-                if (!string.IsNullOrEmpty(hc.PaneName))
+                if (!string.IsNullOrEmpty(hc.PaneName) && !string.IsNullOrEmpty(hc.ContainerSrc))
                 {
-                    string voteSrc = string.IsNullOrEmpty(hc.ContainerSrc)
-                        ? "_default_"          // sentinel – won't match any real container
-                        : hc.ContainerSrc;
-
                     if (!paneContainerVotes.TryGetValue(hc.PaneName, out var votes))
                     {
                         votes = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
                         paneContainerVotes[hc.PaneName] = votes;
                     }
-                    votes.TryGetValue(voteSrc, out int count);
-                    votes[voteSrc] = count + 1;
+                    votes.TryGetValue(hc.ContainerSrc, out int count);
+                    votes[hc.ContainerSrc] = count + 1;
                 }
             }
         }
@@ -736,7 +725,6 @@ public static class BundleWriter
             Clazz           = ctClazz,
             Name            = ct.Name.Trim(),
             Id              = id,
-            Inode           = id,
             Description     = string.IsNullOrWhiteSpace(ct.Description)
                                   ? null
                                   : Truncate(ct.Description, MaxVarcharLength),
@@ -747,7 +735,6 @@ public static class BundleWriter
             Icon            = ct.Icon,
             Host            = hostId,
             SiteName        = siteName,
-            BaseType        = "CONTENT",
         };
 
         var bundleFields = BuildBundleFields(ct.Fields, id);

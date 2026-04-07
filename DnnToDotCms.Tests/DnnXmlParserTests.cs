@@ -831,10 +831,10 @@ public class DnnXmlParserTests
     }
 
     [Fact]
-    public void ParseHtmlContents_CustomModuleWithoutContentIsSkipped()
+    public void ParseHtmlContents_PlaceholderUsesCustomModuleFriendlyName()
     {
-        // Custom modules without extractable content are silently skipped
-        // to avoid polluting pages with placeholder text.
+        // When ExportModule has no FriendlyName, the placeholder falls
+        // back to "Custom Module".
         string tempDir = BuildExportDbFolder(db =>
         {
             var tabs = db.GetCollection("ExportTab");
@@ -861,7 +861,9 @@ public class DnnXmlParserTests
             IReadOnlyList<DnnHtmlContent> result =
                 DnnXmlParser.ParseHtmlContents(tempDir);
 
-            Assert.Empty(result);
+            Assert.Single(result);
+            Assert.Contains("Custom Module", result[0].HtmlBody);
+            Assert.Contains("My Widget", result[0].HtmlBody);
         }
         finally
         {
@@ -921,16 +923,18 @@ public class DnnXmlParserTests
             IReadOnlyList<DnnHtmlContent> result =
                 DnnXmlParser.ParseHtmlContents(tempDir);
 
-            Assert.Single(result);
+            Assert.Equal(2, result.Count);
 
             // The HTML module should have actual content.
             DnnHtmlContent htmlItem = result.First(r => r.Title == "Welcome Text");
             Assert.Equal("<p>Hello!</p>", htmlItem.HtmlBody);
             Assert.Equal("ContentPane", htmlItem.PaneName);
 
-            // The custom module (ImageCarousel) should be skipped entirely
-            // because it has no extractable content.
-            Assert.DoesNotContain(result, r => r.Title == "Image Carousel");
+            // The custom module should have a placeholder.
+            DnnHtmlContent placeholder = result.First(r => r.Title == "Image Carousel");
+            Assert.Contains("dnn-module-placeholder", placeholder.HtmlBody);
+            Assert.Contains("ImageCarousel", placeholder.HtmlBody);
+            Assert.Equal("BannerPane", placeholder.PaneName);
         }
         finally
         {
@@ -1004,10 +1008,10 @@ public class DnnXmlParserTests
     }
 
     [Fact]
-    public void ParseHtmlContents_CustomModuleSkippedDoesNotAffectOtherFields()
+    public void ParseHtmlContents_PlaceholderPreservesContainerSrcAndIconFile()
     {
-        // Custom modules without extractable content are skipped entirely,
-        // so even modules with ContainerSrc/IconFile produce no entry.
+        // Verify that ContainerSrc and IconFile from ExportTabModule are
+        // carried through to the placeholder DnnHtmlContent entry.
         string tempDir = BuildExportDbFolder(db =>
         {
             var tabs = db.GetCollection("ExportTab");
@@ -1041,7 +1045,11 @@ public class DnnXmlParserTests
             IReadOnlyList<DnnHtmlContent> result =
                 DnnXmlParser.ParseHtmlContents(tempDir);
 
-            Assert.Empty(result);
+            Assert.Single(result);
+            DnnHtmlContent hc = result[0];
+            Assert.Equal("[L]Containers/FBOT/gallery.ascx", hc.ContainerSrc);
+            Assert.Equal("Images/gallery-icon.png", hc.IconFile);
+            Assert.Equal("TopPane", hc.PaneName);
         }
         finally
         {
@@ -1141,208 +1149,6 @@ public class DnnXmlParserTests
             var checking = pages.First(p => p.Name == "Checking");
             Assert.Equal(3, checking.TabOrder);
             Assert.Equal(100, checking.ParentId);
-        }
-        finally
-        {
-            Directory.Delete(tempDir, recursive: true);
-        }
-    }
-
-    // ------------------------------------------------------------------
-    // ParsePortalPages tests — DefaultPortalSkin inheritance
-    // ------------------------------------------------------------------
-
-    [Fact]
-    public void ParsePortalPages_AppliesDefaultPortalSkin_WhenPageSkinSrcIsEmpty()
-    {
-        string tempDir = BuildExportDbFolder(db =>
-        {
-            var settings = db.GetCollection("ExportPortalSetting");
-            settings.Insert(new BsonDocument
-            {
-                ["SettingName"]  = "DefaultPortalSkin",
-                ["SettingValue"] = "[L]skins/fbot/inner.ascx",
-            });
-
-            var tabs = db.GetCollection("ExportTab");
-            tabs.Insert(new BsonDocument
-            {
-                ["TabName"]   = "Home",
-                ["UniqueId"]  = new BsonValue(Guid.Parse("aaaa1111-0000-0000-0000-000000000001")),
-                ["IsDeleted"] = false,
-                ["TabPath"]   = "//Home",
-                ["Level"]     = 0,
-                ["IsVisible"] = true,
-                ["SkinSrc"]   = "[L]skins/fbot/home.ascx",
-            });
-            tabs.Insert(new BsonDocument
-            {
-                ["TabName"]   = "About Us",
-                ["UniqueId"]  = new BsonValue(Guid.Parse("aaaa1111-0000-0000-0000-000000000002")),
-                ["IsDeleted"] = false,
-                ["TabPath"]   = "//AboutUs",
-                ["Level"]     = 0,
-                ["IsVisible"] = true,
-                // SkinSrc intentionally omitted — inherits portal default.
-            });
-            tabs.Insert(new BsonDocument
-            {
-                ["TabName"]   = "Our Story",
-                ["UniqueId"]  = new BsonValue(Guid.Parse("aaaa1111-0000-0000-0000-000000000003")),
-                ["IsDeleted"] = false,
-                ["TabPath"]   = "//AboutUs//OurStory",
-                ["Level"]     = 1,
-                ["IsVisible"] = true,
-                ["SkinSrc"]   = "",  // Explicit empty string — inherits portal default.
-            });
-        });
-
-        try
-        {
-            IReadOnlyList<DnnPortalPage> pages = DnnXmlParser.ParsePortalPages(tempDir);
-
-            Assert.Equal(3, pages.Count);
-
-            // Home keeps its explicit skin.
-            var home = pages.First(p => p.Name == "Home");
-            Assert.Equal("[L]skins/fbot/home.ascx", home.SkinSrc);
-
-            // About Us had no SkinSrc → receives the portal default.
-            var about = pages.First(p => p.Name == "About Us");
-            Assert.Equal("[L]skins/fbot/inner.ascx", about.SkinSrc);
-
-            // Our Story had empty SkinSrc → receives the portal default.
-            var story = pages.First(p => p.Name == "Our Story");
-            Assert.Equal("[L]skins/fbot/inner.ascx", story.SkinSrc);
-        }
-        finally
-        {
-            Directory.Delete(tempDir, recursive: true);
-        }
-    }
-
-    [Fact]
-    public void ParsePortalPages_LeavesEmptySkinSrc_WhenNoDefaultPortalSkinSetting()
-    {
-        string tempDir = BuildExportDbFolder(db =>
-        {
-            // No ExportPortalSetting collection populated at all.
-            var tabs = db.GetCollection("ExportTab");
-            tabs.Insert(new BsonDocument
-            {
-                ["TabName"]   = "About",
-                ["UniqueId"]  = new BsonValue(Guid.Parse("cccc3333-0000-0000-0000-000000000001")),
-                ["IsDeleted"] = false,
-                ["TabPath"]   = "//About",
-                ["Level"]     = 0,
-                ["IsVisible"] = true,
-                // No SkinSrc
-            });
-        });
-
-        try
-        {
-            IReadOnlyList<DnnPortalPage> pages = DnnXmlParser.ParsePortalPages(tempDir);
-            Assert.Single(pages);
-            Assert.Equal(string.Empty, pages[0].SkinSrc);
-        }
-        finally
-        {
-            Directory.Delete(tempDir, recursive: true);
-        }
-    }
-
-    [Fact]
-    public void ParsePortalPages_DoesNotOverrideExplicitSkinSrc_WithDefault()
-    {
-        string tempDir = BuildExportDbFolder(db =>
-        {
-            var settings = db.GetCollection("ExportPortalSetting");
-            settings.Insert(new BsonDocument
-            {
-                ["SettingName"]  = "DefaultPortalSkin",
-                ["SettingValue"] = "[G]Skins/Xcillion/Inner.ascx",
-            });
-
-            var tabs = db.GetCollection("ExportTab");
-            tabs.Insert(new BsonDocument
-            {
-                ["TabName"]   = "Activity Feed",
-                ["UniqueId"]  = new BsonValue(Guid.Parse("dddd4444-0000-0000-0000-000000000001")),
-                ["IsDeleted"] = false,
-                ["TabPath"]   = "//ActivityFeed",
-                ["Level"]     = 0,
-                ["IsVisible"] = true,
-                ["SkinSrc"]   = "[G]Skins/Cavalier/3-Col-Social.ascx",
-            });
-        });
-
-        try
-        {
-            IReadOnlyList<DnnPortalPage> pages = DnnXmlParser.ParsePortalPages(tempDir);
-            Assert.Single(pages);
-            // Explicit skin is preserved, not overridden by the default.
-            Assert.Equal("[G]Skins/Cavalier/3-Col-Social.ascx", pages[0].SkinSrc);
-        }
-        finally
-        {
-            Directory.Delete(tempDir, recursive: true);
-        }
-    }
-
-    [Fact]
-    public void ParsePortalPages_FallsBackToTabName_WhenTitleIsEmpty()
-    {
-        // DNN pages often have an empty Title string.  The parser should
-        // fall back to TabName so DotCMS pages get a non-empty title
-        // (DotCMS ContentHandler may reject pages with empty titles).
-        string tempDir = BuildExportDbFolder(db =>
-        {
-            var tabs = db.GetCollection("ExportTab");
-            tabs.Insert(new BsonDocument
-            {
-                ["TabName"]   = "Checking Accounts",
-                ["UniqueId"]  = new BsonValue(Guid.Parse("cccc3333-0000-0000-0000-000000000000")),
-                ["IsDeleted"] = false,
-                ["Title"]     = "",          // empty title
-                ["TabPath"]   = "//Checking Accounts",
-                ["Level"]     = 0,
-                ["IsVisible"] = true,
-            });
-            tabs.Insert(new BsonDocument
-            {
-                ["TabName"]   = "Savings Accounts",
-                ["UniqueId"]  = new BsonValue(Guid.Parse("dddd4444-0000-0000-0000-000000000000")),
-                ["IsDeleted"] = false,
-                // Title key completely absent
-                ["TabPath"]   = "//Savings Accounts",
-                ["Level"]     = 0,
-                ["IsVisible"] = true,
-            });
-            tabs.Insert(new BsonDocument
-            {
-                ["TabName"]   = "Careers",
-                ["UniqueId"]  = new BsonValue(Guid.Parse("eeee5555-0000-0000-0000-000000000000")),
-                ["IsDeleted"] = false,
-                ["Title"]     = "Careers Page",  // explicit title
-                ["TabPath"]   = "//Careers",
-                ["Level"]     = 0,
-                ["IsVisible"] = true,
-            });
-        });
-
-        try
-        {
-            IReadOnlyList<DnnPortalPage> pages = DnnXmlParser.ParsePortalPages(tempDir);
-
-            var checking = pages.First(p => p.Name == "Checking Accounts");
-            Assert.Equal("Checking Accounts", checking.Title); // falls back to Name
-
-            var savings = pages.First(p => p.Name == "Savings Accounts");
-            Assert.Equal("Savings Accounts", savings.Title); // falls back to Name
-
-            var careers = pages.First(p => p.Name == "Careers");
-            Assert.Equal("Careers Page", careers.Title); // keeps explicit title
         }
         finally
         {

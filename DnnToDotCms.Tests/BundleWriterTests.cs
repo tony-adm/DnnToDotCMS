@@ -123,19 +123,14 @@ public class BundleWriterTests
 
         var (_, names) = WriteBundleToMemory(contentTypes);
 
-        // Each content type is written twice to the tar (DotCMS push-publish requirement)
-        // in both working/ and live/ directories, so count unique file names per directory.
-        int workingCount = names
+        // Each content type is written twice to the tar (DotCMS push-publish requirement),
+        // so count unique file names.
+        int count = names
             .Where(n => n.StartsWith("working/System Host/") && n.EndsWith(".contentType.json"))
             .Distinct()
             .Count();
-        int liveCount = names
-            .Where(n => n.StartsWith("live/System Host/") && n.EndsWith(".contentType.json"))
-            .Distinct()
-            .Count();
 
-        Assert.Equal(2, workingCount);
-        Assert.Equal(2, liveCount);
+        Assert.Equal(2, count);
     }
 
     [Fact]
@@ -255,22 +250,6 @@ public class BundleWriterTests
     }
 
     [Fact]
-    public void ContentTypeJson_ContentType_HasInodeMatchingId()
-    {
-        // DotCMS ContentTypeHandler skips content types with empty inode,
-        // so inode must be present and match the id to ensure import.
-        var (ms, names) = WriteBundleToMemory([MakeHtmlContentType()]);
-        using var doc = ParseFirstContentTypeJson(ms, names);
-
-        JsonElement ct = doc.RootElement.GetProperty("contentType");
-        string id    = ct.GetProperty("id").GetString()!;
-        string inode = ct.GetProperty("inode").GetString()!;
-
-        Assert.False(string.IsNullOrEmpty(inode));
-        Assert.Equal(id, inode);
-    }
-
-    [Fact]
     public void ContentTypeJson_ContentType_HasSystemHostAndFolder()
     {
         var (ms, names) = WriteBundleToMemory([MakeHtmlContentType()]);
@@ -357,21 +336,6 @@ public class BundleWriterTests
         Assert.Equal("PUBLISH", doc.RootElement.GetProperty("operation").GetString());
     }
 
-    [Fact]
-    public void ContentTypeJson_ContentType_HasBaseType()
-    {
-        // DotCMS requires a baseType field on every content type in a push-publish
-        // bundle.  Without it DotCMS skips the content type, causing a
-        // "content type does not exist" error when importing contentlets.
-        var (ms, names) = WriteBundleToMemory([MakeHtmlContentType()]);
-        using var doc = ParseFirstContentTypeJson(ms, names);
-
-        string baseType = doc.RootElement
-            .GetProperty("contentType").GetProperty("baseType").GetString()!;
-
-        Assert.Equal("CONTENT", baseType);
-    }
-
     // ------------------------------------------------------------------
     // ToImmutableClazz utility tests
     // ------------------------------------------------------------------
@@ -424,17 +388,12 @@ public class BundleWriterTests
 
             var (_, names) = WriteBundleToMemory([MakeHtmlContentType()]);
             Assert.Contains("manifest.csv", names);
-            // Each content type is written twice in both directories; count unique file names.
-            int workingCtCount = names
+            // Each content type is written twice; count unique file names.
+            int ctCount = names
                 .Where(n => n.StartsWith("working/System Host/") && n.EndsWith(".contentType.json"))
                 .Distinct()
                 .Count();
-            int liveCtCount = names
-                .Where(n => n.StartsWith("live/System Host/") && n.EndsWith(".contentType.json"))
-                .Distinct()
-                .Count();
-            Assert.Equal(1, workingCtCount);
-            Assert.Equal(1, liveCtCount);
+            Assert.Equal(1, ctCount);
         }
         finally
         {
@@ -1032,11 +991,10 @@ public class BundleWriterTests
         const string ascx = """<div id="body"></div>""";
         var available = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        var (body, header, _) = BundleWriter.ConvertAscxToTemplateHtml(
+        var (body, _, _) = BundleWriter.ConvertAscxToTemplateHtml(
             ascx, themeName: "Xcillion", availableThemeFiles: available);
 
         Assert.DoesNotContain("skin.css", body);
-        Assert.DoesNotContain("skin.css", header);
     }
 
     [Fact]
@@ -1051,13 +1009,12 @@ public class BundleWriterTests
             "application/themes/Xcillion/skin.css"
         };
 
-        var (body, header, _) = BundleWriter.ConvertAscxToTemplateHtml(
+        var (body, _, _) = BundleWriter.ConvertAscxToTemplateHtml(
             ascx, themeName: "Xcillion", skinName: "Home",
             availableThemeFiles: available);
 
         Assert.Contains("skin.css", body);
         Assert.Contains("Home.css", body);
-        Assert.Empty(header);
     }
 
     [Fact]
@@ -1072,13 +1029,12 @@ public class BundleWriterTests
             "application/themes/Xcillion/Home.css"
         };
 
-        var (body, header, _) = BundleWriter.ConvertAscxToTemplateHtml(
+        var (body, _, _) = BundleWriter.ConvertAscxToTemplateHtml(
             ascx, themeName: "Xcillion", skinName: "Home",
             availableThemeFiles: available);
 
         Assert.Contains("skin.css", body);
         Assert.Contains("Home.css", body);
-        Assert.Empty(header);
     }
 
     // ------------------------------------------------------------------
@@ -1790,12 +1746,6 @@ public class BundleWriterTests
         Assert.DoesNotContain(names, n =>
             n.StartsWith("working/System Host/") &&
             n.EndsWith(".contentType.json"));
-        Assert.Contains(names, n =>
-            n.StartsWith("live/My-Website/") &&
-            n.EndsWith(".contentType.json"));
-        Assert.DoesNotContain(names, n =>
-            n.StartsWith("live/System Host/") &&
-            n.EndsWith(".contentType.json"));
     }
 
     [Fact]
@@ -1852,10 +1802,6 @@ public class BundleWriterTests
             n.EndsWith(".contentType.json"));
         Assert.DoesNotContain(names, n =>
             !n.StartsWith("working/System Host/") &&
-            !n.StartsWith("live/System Host/") &&
-            n.EndsWith(".contentType.json"));
-        Assert.Contains(names, n =>
-            n.StartsWith("live/System Host/") &&
             n.EndsWith(".contentType.json"));
     }
 
@@ -2365,16 +2311,13 @@ public class BundleWriterTests
     public void Write_ContentTypeJson_FileAppearsTwiceInTar()
     {
         // The DotCMS push-publish format requires each .contentType.json to be
-        // written twice to the tar archive, in both working/ and live/.
+        // written twice to the tar archive.
         var (_, names) = WriteBundleToMemory([MakeHtmlContentType()]);
 
-        int workingCount = names.Count(n =>
+        int totalCount = names.Count(n =>
             n.StartsWith("working/") && n.EndsWith(".contentType.json"));
-        int liveCount = names.Count(n =>
-            n.StartsWith("live/") && n.EndsWith(".contentType.json"));
 
-        Assert.Equal(2, workingCount); // one content type → two tar entries in working/
-        Assert.Equal(2, liveCount);    // one content type → two tar entries in live/
+        Assert.Equal(2, totalCount); // one content type → two tar entries
     }
 
     [Fact]
@@ -4757,73 +4700,6 @@ public class BundleWriterTests
                 sw.Write(containerAscx2);
         }
         return zipPath;
-    }
-
-    [Fact]
-    public void Write_DefaultContainerVotesOutweighSingleSpecialised()
-    {
-        // Regression: when many modules in a pane use the default container
-        // (empty ContainerSrc) and only one uses a specialised container,
-        // the default should win the per-pane vote so the specialised
-        // container is NOT baked into the template for all pages.
-        string skinAscx = """
-            <%@ Control Inherits="DotNetNuke.UI.Skins.Skin" %>
-            <div id="ContentPane" runat="server"></div>
-            <div id="BannerPaneInner" runat="server"></div>
-            """;
-        string standardAscx = """
-            <%@ Control Inherits="DotNetNuke.UI.Containers.Container" %>
-            <div id="ContentPane" runat="server"></div>
-            """;
-        string zelleAscx = """
-            <%@ Control Inherits="DotNetNuke.UI.Containers.Container" %>
-            <div id="ContentPane" runat="server" style="display:none"></div>
-            <div class="zelle-faq">Zelle FAQ content</div>
-            """;
-
-        string zipPath = BuildThemesZipWithMultipleContainers(
-            skinAscx, standardAscx, "standard", zelleAscx, "zelle");
-        try
-        {
-            var pages = new[]
-            {
-                new DnnPortalPage("tab-1", "Home", "Home", "", "//Home", 0, true, ""),
-                new DnnPortalPage("tab-2", "About", "About", "", "//About", 0, true, ""),
-            };
-
-            // Three modules in BannerPaneInner: two use the default container
-            // (empty ContainerSrc), one uses the specialised "zelle" container.
-            var contents = new[]
-            {
-                new DnnHtmlContent("Banner", "<img src='banner.jpg'/>",
-                    TabUniqueId: "tab-1", PaneName: "BannerPaneInner"),
-                new DnnHtmlContent("Banner", "<img src='banner.jpg'/>",
-                    TabUniqueId: "tab-2", PaneName: "BannerPaneInner"),
-                new DnnHtmlContent("Zelle", "placeholder",
-                    TabUniqueId: "tab-1", PaneName: "BannerPaneInner",
-                    ContainerSrc: "[L]Containers/TestTheme/zelle.ascx"),
-            };
-
-            var (ms, names) = WriteBundleWithPagesAndContents(pages, contents,
-                themesZipPath: zipPath);
-
-            // Read the template XML – it should use the default ("standard")
-            // container for the BannerPaneInner pane, NOT the zelle container.
-            string? templateXml = null;
-            foreach (string name in names.Where(n => n.EndsWith(".template.template.xml")))
-            {
-                templateXml = ReadTarEntry(ms, name);
-                break;
-            }
-
-            Assert.NotNull(templateXml);
-            // The template must NOT reference the zelle container for the
-            // BannerPaneInner pane – verify by checking the template body
-            // does not contain "zelle-faq" (which would be the case if the
-            // zelle container code were embedded).
-            Assert.DoesNotContain("zelle-faq", templateXml);
-        }
-        finally { File.Delete(zipPath); }
     }
 
     // ------------------------------------------------------------------

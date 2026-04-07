@@ -416,11 +416,17 @@ public static class DnnXmlParser
             }
             else
             {
-                // Custom modules with no extractable content (FAQ, ImageCarousel,
-                // etc.) are silently skipped.  Creating visible placeholder content
-                // would pollute the migrated pages with static text that editors
-                // would have to delete before adding the real DotCMS content.
-                continue;
+                // Generic placeholder for other custom modules so that content
+                // editors know what needs to be recreated in DotCMS.
+                string escapedType  = System.Security.SecurityElement.Escape(moduleType) ?? moduleType;
+                string escapedTitle = System.Security.SecurityElement.Escape(displayTitle) ?? displayTitle;
+                body =
+                    $"""
+                    <div class="dnn-module-placeholder" data-module-type="{escapedType}">
+                      <p><strong>{escapedType}</strong>: {escapedTitle}</p>
+                      <p><em>This content was managed by a custom DNN module and needs to be recreated in DotCMS.</em></p>
+                    </div>
+                    """;
             }
 
             foreach (var (tabUniqueId, paneName, containerSrc, iconFile) in tabPanes)
@@ -444,10 +450,6 @@ public static class DnnXmlParser
 
     private static IReadOnlyList<DnnPortalPage> ExtractPortalPages(LiteDatabase db)
     {
-        // Read the portal-level default skin so that pages without an
-        // explicit SkinSrc inherit it — matching DNN's runtime behaviour.
-        string defaultSkin = ExtractDefaultPortalSkin(db);
-
         var results = new List<DnnPortalPage>();
         ILiteCollection<BsonDocument> tabs = db.GetCollection("ExportTab");
 
@@ -469,8 +471,7 @@ public static class DnnXmlParser
 
             string uniqueId = uidVal.AsGuid.ToString();
             string name     = nameVal.AsString  ?? string.Empty;
-            string? rawTitle = titleVal?.AsString;
-            string title    = string.IsNullOrWhiteSpace(rawTitle) ? name : rawTitle;
+            string title    = titleVal?.AsString ?? name;
             string desc     = descVal?.AsString  ?? string.Empty;
             string tabPath  = pathVal?.AsString  ?? string.Empty;
             int level       = levelVal?.AsInt32  ?? 0;
@@ -479,40 +480,11 @@ public static class DnnXmlParser
             int tabOrder    = tabOrderVal?.AsInt32 ?? 0;
             int parentId    = parentIdVal?.AsInt32 ?? -1;
 
-            // When a page has no explicit skin, apply the portal default so
-            // that downstream template resolution picks the correct skin
-            // (layout + theme) instead of an arbitrary first-available one.
-            if (string.IsNullOrWhiteSpace(skinSrc))
-                skinSrc = defaultSkin;
-
             results.Add(new DnnPortalPage(uniqueId, name, title, desc,
                 tabPath, level, isVisible, skinSrc, tabOrder, parentId));
         }
 
         return results;
-    }
-
-    /// <summary>
-    /// Reads the <c>DefaultPortalSkin</c> setting from the
-    /// <c>ExportPortalSetting</c> LiteDB collection.  Returns an empty
-    /// string when the collection or setting does not exist.
-    /// </summary>
-    internal static string ExtractDefaultPortalSkin(LiteDatabase db)
-    {
-        ILiteCollection<BsonDocument> settings = db.GetCollection("ExportPortalSetting");
-        foreach (BsonDocument doc in settings.FindAll())
-        {
-            if (!doc.TryGetValue("SettingName", out BsonValue nameVal))
-                continue;
-            string settingName = nameVal.AsString ?? string.Empty;
-            if (settingName.Equals("DefaultPortalSkin", StringComparison.OrdinalIgnoreCase))
-            {
-                if (doc.TryGetValue("SettingValue", out BsonValue valVal))
-                    return valVal.AsString ?? string.Empty;
-                break;
-            }
-        }
-        return string.Empty;
     }
 
     // ------------------------------------------------------------------
