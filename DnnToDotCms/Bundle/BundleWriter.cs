@@ -1533,7 +1533,11 @@ public static class BundleWriter
         int cardinality = 1)
     {
         string now = DateTime.UtcNow.ToString(XmlTimestampFormat);
-        // relationTypeValue follows the new-style format: parentVariable.fieldVariable
+        // DotCMS "new-style" RelationshipField relationships use a
+        // relationTypeValue in the format "parentVariable.fieldVariable"
+        // (e.g. "slider.slides").  The old-style (legacy) relationships
+        // used "ParentRelName-ChildRelName".  DotCMS checks for a dot
+        // to distinguish between the two formats.
         string relationTypeValue = $"{parentContentTypeVariable}.{fieldVariable}";
 
         return $"""
