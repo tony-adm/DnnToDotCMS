@@ -1,6 +1,7 @@
 ﻿using DnnToDotCms.Bundle;
 using DnnToDotCms.Converter;
 using DnnToDotCms.Crawler;
+using DnnToDotCms.Mappings;
 using DnnToDotCms.Models;
 using DnnToDotCms.Parser;
 
@@ -179,6 +180,25 @@ try
         ? DnnXmlParser.ParseSliderSlides(exportDir, scrapedSlides)
         : [];
 
+    // If slider slides were found, ensure both the Slide and Slider content
+    // types are present in the content type list.  The Slide type is already
+    // added by ConvertAll (it maps from FisSlider), but the Slider parent
+    // type must be added explicitly because it is not a direct DNN module.
+    IReadOnlyList<DotCmsContentType> finalContentTypes = contentTypes;
+    if (sliderSlides.Count > 0)
+    {
+        bool hasSlider = contentTypes.Any(ct =>
+            string.Equals(ct.Variable, "slider", StringComparison.Ordinal));
+        if (!hasSlider)
+        {
+            var extended = new List<DotCmsContentType>(contentTypes)
+            {
+                ModuleMappings.GetSliderContentType()
+            };
+            finalContentTypes = extended;
+        }
+    }
+
     // Extract portal pages (tabs) from the LiteDB database.
     IReadOnlyList<DnnPortalPage> portalPages = exportDir is not null
         ? DnnXmlParser.ParsePortalPages(exportDir)
@@ -202,7 +222,7 @@ try
 
     // Write the DotCMS site bundle.
     using (var outStream = File.Create(outputPath))
-        BundleWriter.Write(contentTypes, outStream, themesZip, portalName, htmlContents,
+        BundleWriter.Write(finalContentTypes, outStream, themesZip, portalName, htmlContents,
             portalPages, portalFiles, defaultSkinSrc, sliderSlides: sliderSlides);
 
     string themeNote = themesZip is not null
@@ -234,7 +254,7 @@ try
         : string.Empty;
 
     Console.WriteLine(
-        $"Converted {modules.Count} module(s) to {contentTypes.Count} content type(s)." +
+        $"Converted {modules.Count} module(s) to {finalContentTypes.Count} content type(s)." +
         $"{themeNote}{siteNote}{contentNote}{slideNote}{pageNote}{fileNote} Bundle written to: {outputPath}");
 
     return 0;

@@ -124,6 +124,8 @@ public sealed record DnnSliderSlide(
     string ImageUrl,
     /// <summary>Destination link URL (or "#" if unknown).</summary>
     string LinkUrl,
+    /// <summary>Button label (e.g. "Learn More", "About Us").</summary>
+    string LinkText = "",
     /// <summary>
     /// The UniqueId GUID of the DNN tab (page) that the slider lives on.
     /// </summary>

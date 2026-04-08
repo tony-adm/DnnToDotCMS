@@ -208,6 +208,8 @@ public static class BundleWriter
         // HTML module contentlets can reference it via their stInode and assetSubType fields.
         string? htmlContentTypeId = null;
         string? htmlContentTypeVariable = null;
+        string? slideContentTypeId = null;
+        string? slideContentTypeVariable = null;
         string? sliderContentTypeId = null;
         string? sliderContentTypeVariable = null;
         foreach (DotCmsContentType ct in contentTypes)
@@ -228,7 +230,12 @@ public static class BundleWriter
                 htmlContentTypeId = id;
                 htmlContentTypeVariable = ct.Variable;
             }
-            else if (ct.Variable == "sliderSlide")
+            else if (ct.Variable == "slide")
+            {
+                slideContentTypeId = id;
+                slideContentTypeVariable = ct.Variable;
+            }
+            else if (ct.Variable == "slider")
             {
                 sliderContentTypeId = id;
                 sliderContentTypeVariable = ct.Variable;
@@ -352,15 +359,19 @@ public static class BundleWriter
             }
         }
 
-        // --- slider slide contentlets (from DNN FisSlider modules) ----------
-        // Each slide becomes its own contentlet of type sliderSlide, placed in
-        // a dedicated "Slider" container with Velocity rendering code.
+        // --- slider contentlets (from DNN FisSlider modules) -------------------
+        // Two content types: "Slide" (individual slides) and "Slider" (parent
+        // with a one-to-many relationship to slides).  Each Slider is placed on
+        // the page; each Slide is a child of a Slider.  The Slider container
+        // renders the slides using FisSlider CSS classes and IDs so the original
+        // site CSS/JS continues to work.
         string? sliderContainerId = null;
         if (sliderSlides is not null && sliderSlides.Count > 0
+            && slideContentTypeId is not null && slideContentTypeVariable is not null
             && sliderContentTypeId is not null && sliderContentTypeVariable is not null)
         {
             // Create a dedicated slider container with Velocity code that
-            // renders slides as a Bootstrap 5 carousel.
+            // renders slides using FisSlider-compatible HTML structure.
             sliderContainerId = DeterministicId("Container:Slider");
             string sliderContainerInode = DeterministicId("ContainerInode:Slider");
             string sliderContainerCode = BuildSliderContainerVelocity();
@@ -372,38 +383,74 @@ public static class BundleWriter
                 sliderContainerXml);
             manifestEntries.Add(("containers", sliderContainerId, sliderContainerInode, "Slider", "", ""));
 
-            // Write each slide as a published contentlet.
-            foreach (DnnSliderSlide slide in sliderSlides)
+            // Group slides by (TabUniqueId, PaneName) → list of slides.
+            // Each group becomes one Slider contentlet.
+            var sliderGroups = sliderSlides
+                .GroupBy(s => (s.TabUniqueId, s.PaneName), StringTupleComparer.Instance)
+                .ToList();
+
+            foreach (var group in sliderGroups)
             {
-                string identifier = Guid.NewGuid().ToString();
-                string inode      = Guid.NewGuid().ToString();
+                string tabUniqueId = group.Key.Item1;
+                string paneName    = group.Key.Item2;
+                var slidesInGroup = group.OrderBy(s => s.SortOrder).ToList();
 
-                string slideXml = BuildSliderSlideXml(
-                    identifier, inode, slide.Title, slide.Description,
-                    slide.ImageUrl, slide.LinkUrl,
-                    contentHostId, sliderContentTypeId, sliderContentTypeVariable,
-                    slide.SortOrder);
+                // Write each Slide contentlet.
+                var slideIdentifiers = new List<string>();
+                foreach (DnnSliderSlide slide in slidesInGroup)
+                {
+                    string slideId    = Guid.NewGuid().ToString();
+                    string slideInode = Guid.NewGuid().ToString();
+                    slideIdentifiers.Add(slideId);
+
+                    string slideXml = BuildSlideContentletXml(
+                        slideId, slideInode, slide.Title, slide.Description,
+                        slide.ImageUrl, slide.LinkUrl, slide.LinkText,
+                        contentHostId, slideContentTypeId, slideContentTypeVariable,
+                        slide.SortOrder);
+                    WriteTextEntry(tar,
+                        $"live/{contentWorkDir}/1/{slideId}.content.xml",
+                        slideXml);
+
+                    string slideWorkflowXml = BuildContentWorkflowXml(slideId, slide.Title);
+                    WriteTextEntry(tar,
+                        $"live/{contentWorkDir}/1/{slideId}.contentworkflow.xml",
+                        slideWorkflowXml);
+
+                    manifestEntries.Add(("contentlet", slideId, slideInode, slide.Title,
+                        contentWorkDir, "/"));
+                }
+
+                // Write one Slider (parent) contentlet that references all its slides.
+                string sliderTitle = slidesInGroup.Count > 0
+                    ? $"Slider – {slidesInGroup[0].Title}" : "Slider";
+                string sliderId    = Guid.NewGuid().ToString();
+                string sliderInode = Guid.NewGuid().ToString();
+
+                string sliderXml = BuildSliderContentletXml(
+                    sliderId, sliderInode, sliderTitle, slideIdentifiers,
+                    contentHostId, sliderContentTypeId, sliderContentTypeVariable);
                 WriteTextEntry(tar,
-                    $"live/{contentWorkDir}/1/{identifier}.content.xml",
-                    slideXml);
+                    $"live/{contentWorkDir}/1/{sliderId}.content.xml",
+                    sliderXml);
 
-                string workflowXml = BuildContentWorkflowXml(identifier, slide.Title);
+                string sliderWorkflowXml = BuildContentWorkflowXml(sliderId, sliderTitle);
                 WriteTextEntry(tar,
-                    $"live/{contentWorkDir}/1/{identifier}.contentworkflow.xml",
-                    workflowXml);
+                    $"live/{contentWorkDir}/1/{sliderId}.contentworkflow.xml",
+                    sliderWorkflowXml);
 
-                manifestEntries.Add(("contentlet", identifier, inode, slide.Title,
+                manifestEntries.Add(("contentlet", sliderId, sliderInode, sliderTitle,
                     contentWorkDir, "/"));
 
-                // Record the association so pages can reference this slide in multiTree.
-                if (!string.IsNullOrEmpty(slide.TabUniqueId) && sliderContainerId is not null)
+                // Add the Slider (not individual slides) to the page's multiTree.
+                if (!string.IsNullOrEmpty(tabUniqueId) && sliderContainerId is not null)
                 {
-                    if (!tabContentMap.TryGetValue(slide.TabUniqueId, out var items))
+                    if (!tabContentMap.TryGetValue(tabUniqueId, out var items))
                     {
                         items = [];
-                        tabContentMap[slide.TabUniqueId] = items;
+                        tabContentMap[tabUniqueId] = items;
                     }
-                    items.Add((identifier, slide.PaneName, sliderContainerId));
+                    items.Add((sliderId, paneName, sliderContainerId));
                 }
             }
         }
@@ -872,7 +919,7 @@ public static class BundleWriter
         {
             DotCmsField f       = fields[i];
             string immutableClazz = ToImmutableClazz(f.Clazz);
-            string dbColumn       = AssignDbColumn(f.DataType, ref textCount, ref textAreaCount,
+            string dbColumn       = AssignDbColumn(f.DataType, f.Clazz, ref textCount, ref textAreaCount,
                                                    ref dateCount, ref binaryCount);
 
             result.Add(new DotCmsBundleField
@@ -894,6 +941,7 @@ public static class BundleWriter
                 Unique        = f.Unique,
                 Values        = f.Values,
                 Hint          = f.Hint,
+                RelationType  = f.RelationType,
             });
         }
 
@@ -1261,20 +1309,22 @@ public static class BundleWriter
     }
 
     // ------------------------------------------------------------------
-    // Slider slide contentlet (PushContentWrapper) XML builder
+    // Slide contentlet (PushContentWrapper) XML builder
     // ------------------------------------------------------------------
 
     /// <summary>
-    /// Builds a DotCMS <c>PushContentWrapper</c> XML for a single slider
-    /// slide contentlet of the <c>sliderSlide</c> content type.
+    /// Builds a DotCMS <c>PushContentWrapper</c> XML for a single
+    /// <c>slide</c> contentlet (individual slide with title, description,
+    /// image, link, and link text).
     /// </summary>
-    private static string BuildSliderSlideXml(
+    private static string BuildSlideContentletXml(
         string identifier,
         string inode,
         string title,
         string description,
         string imageUrl,
         string linkUrl,
+        string linkText,
         string hostId,
         string contentTypeId,
         string contentTypeVariable,
@@ -1285,6 +1335,7 @@ public static class BundleWriter
         string xmlDescription  = System.Security.SecurityElement.Escape(description ?? string.Empty) ?? string.Empty;
         string xmlImage        = System.Security.SecurityElement.Escape(imageUrl ?? string.Empty) ?? string.Empty;
         string xmlLink         = System.Security.SecurityElement.Escape(linkUrl ?? string.Empty) ?? string.Empty;
+        string xmlLinkText     = System.Security.SecurityElement.Escape(linkText ?? string.Empty) ?? string.Empty;
 
         return $"""
             <com.dotcms.publisher.pusher.wrapper.PushContentWrapper>
@@ -1309,6 +1360,7 @@ public static class BundleWriter
                   {EStr("description", xmlDescription)}
                   {EStr("image", xmlImage)}
                   {EStr("link", xmlLink)}
+                  {EStr("linkText", xmlLinkText)}
                   {EStr("owner", "dotcms.org.1")}
                   {EStr("identifier", identifier)}
                   {ELong("languageId", 1)}
@@ -1348,67 +1400,192 @@ public static class BundleWriter
             """;
     }
 
+    // ------------------------------------------------------------------
+    // Slider (parent) contentlet (PushContentWrapper) XML builder
+    // ------------------------------------------------------------------
+
     /// <summary>
-    /// Generates Velocity template code for the slider container.  This code
-    /// renders all <c>sliderSlide</c> contentlets placed in the container as
-    /// a Bootstrap 5 carousel.  Each slide is a text overlay on an image
-    /// background, making individual slides easy to edit in DotCMS.
+    /// Builds a DotCMS <c>PushContentWrapper</c> XML for a <c>slider</c>
+    /// contentlet (the parent that holds a one-to-many relationship to
+    /// <c>slide</c> contentlets).  The <paramref name="slideIdentifiers"/>
+    /// are serialised into the <c>&lt;tree&gt;</c> element so DotCMS can
+    /// reconstruct the relationship on import.
+    /// </summary>
+    private static string BuildSliderContentletXml(
+        string identifier,
+        string inode,
+        string title,
+        IReadOnlyList<string> slideIdentifiers,
+        string hostId,
+        string contentTypeId,
+        string contentTypeVariable)
+    {
+        string now      = DateTime.UtcNow.ToString(XmlTimestampFormat);
+        string xmlTitle = System.Security.SecurityElement.Escape(Truncate(title, MaxVarcharLength)) ?? string.Empty;
+
+        // Build <tree> entries that encode the relationship between this
+        // Slider and its child Slide contentlets.  DotCMS uses these
+        // Tree records to recreate relationship links on push-publish
+        // import.
+        var treeSb = new StringBuilder();
+        for (int i = 0; i < slideIdentifiers.Count; i++)
+        {
+            treeSb.AppendLine($"""
+                  <com.dotmarketing.beans.Tree>
+                    <parent>{identifier}</parent>
+                    <child>{slideIdentifiers[i]}</child>
+                    <relationType>slider-slides</relationType>
+                    <treeOrder>{i}</treeOrder>
+                  </com.dotmarketing.beans.Tree>
+                """);
+        }
+        string treeXml = treeSb.Length > 0 ? treeSb.ToString() : string.Empty;
+
+        return $"""
+            <com.dotcms.publisher.pusher.wrapper.PushContentWrapper>
+              <info>
+                <identifier>{identifier}</identifier>
+                <liveInode>{inode}</liveInode>
+                <workingInode>{inode}</workingInode>
+                <lockedOn class="sql-timestamp">{now}</lockedOn>
+                <deleted>false</deleted>
+                <versionTs class="sql-timestamp">{now}</versionTs>
+                <lang>1</lang>
+                <variant>DEFAULT</variant>
+                <publishDate class="sql-timestamp">{now}</publishDate>
+              </info>
+              <content>
+                <map class="java.util.concurrent.ConcurrentHashMap">
+                  {ETimestamp("modDate", now)}
+                  {EStr("inode", inode)}
+                  {EStr("host", hostId)}
+                  {EStr("stInode", contentTypeId)}
+                  {EStr("title", xmlTitle)}
+                  {EStr("owner", "dotcms.org.1")}
+                  {EStr("identifier", identifier)}
+                  {ELong("languageId", 1)}
+                  {EStr("folder", "SYSTEM_FOLDER")}
+                  {ELong("sortOrder", 0)}
+                  {EStr("modUser", "dotcms.org.1")}
+                </map>
+                <lowIndexPriority>false</lowIndexPriority>
+                <variantId>DEFAULT</variantId>
+              </content>
+              <id>
+                <id>{identifier}</id>
+                <assetName>{identifier}.content</assetName>
+                <assetType>contentlet</assetType>
+                <parentPath>/</parentPath>
+                <hostId>{hostId}</hostId>
+                <owner>dotcms.org.1</owner>
+                <createDate class="sql-timestamp">{now}</createDate>
+                <assetSubType>{contentTypeVariable}</assetSubType>
+              </id>
+              <multiTree/>
+              <tree>
+            {treeXml}
+              </tree>
+              <categories/>
+              <tags class="java.util.ArrayList"/>
+              <operation>PUBLISH</operation>
+              <language>
+                <id>1</id>
+                <languageCode>en</languageCode>
+                <countryCode>US</countryCode>
+                <language>English</language>
+                <country>United States</country>
+                <isoCode>en-us</isoCode>
+              </language>
+              <contentTags/>
+              <contentletMetadata/>
+            </com.dotcms.publisher.pusher.wrapper.PushContentWrapper>
+            """;
+    }
+
+    /// <summary>
+    /// Generates Velocity template code for the Slider container.  The
+    /// container renders the <c>slider</c> contentlet and its related
+    /// <c>slide</c> children using the original FisSlider CSS classes
+    /// and element IDs so the site's existing CSS and JavaScript continue
+    /// to work without modification.
     /// </summary>
     internal static string BuildSliderContainerVelocity()
     {
-        // The Velocity code uses $dotContent.field to access each slide's
-        // fields.  The #foreach iterates over all contentlets in the container.
-        // The carousel ID uses $containerInode to ensure uniqueness on pages
-        // with multiple slider containers.
+        // The Velocity code accesses the Slider contentlet via
+        // $dotContentMap.get("slider") and then iterates over its
+        // related slides.  FisSlider-specific classes and IDs are
+        // preserved: .Mvc-FisSliderModule-Container, .slideshow,
+        // .slide-container, .slide-item, .slide-title, .slide-desc,
+        // .slide-arrows, .slide-nav, .dot, etc.
+        //
+        // The module ID placeholder $velocityCount provides unique IDs
+        // per container instance, mirroring the DNN module ID pattern.
         return """
-            #set($sliderId = "dnn-slider-${containerInode.substring(0,8)}")
-            <div id="$sliderId" class="carousel slide" data-bs-ride="carousel">
-              <div class="carousel-indicators">
-                #set($indicatorIndex = 0)
-                #foreach($dotContent in $dotContentMap.get("sliderSlide"))
-                  #if($indicatorIndex == 0)
-                    <button type="button" data-bs-target="#$sliderId" data-bs-slide-to="$indicatorIndex" class="active" aria-current="true" aria-label="Slide $math.add($indicatorIndex, 1)"></button>
-                  #else
-                    <button type="button" data-bs-target="#$sliderId" data-bs-slide-to="$indicatorIndex" aria-label="Slide $math.add($indicatorIndex, 1)"></button>
-                  #end
-                  #set($indicatorIndex = $indicatorIndex + 1)
-                #end
-              </div>
-              <div class="carousel-inner">
-                #set($slideIndex = 0)
-                #foreach($dotContent in $dotContentMap.get("sliderSlide"))
-                  #if($slideIndex == 0)
-                    <div class="carousel-item active">
-                  #else
-                    <div class="carousel-item">
-                  #end
-                    #if($dotContent.image && $dotContent.image != "")
-                      <img src="$dotContent.image" class="d-block w-100" alt="$!{dotContent.title}">
-                    #end
-                    <div class="carousel-caption d-none d-md-block">
-                      #if($dotContent.title && $dotContent.title != "")
-                        <h5>$dotContent.title</h5>
-                      #end
-                      #if($dotContent.description && $dotContent.description != "")
-                        <p>$dotContent.description</p>
-                      #end
-                      #if($dotContent.link && $dotContent.link != "" && $dotContent.link != "#")
-                        <a href="$dotContent.link" class="btn btn-primary">Learn More</a>
+            #set($modId = ${velocityCount})
+            #foreach($slider in $dotContentMap.get("slider"))
+            <div id="mvcContainer-${modId}" class="Mvc-FisSliderModule-Container">
+              <div id="Items-${modId}">
+                <section id="slideshow${modId}" class="slideshow" aria-roledescription="carousel" aria-label="$!{slider.title}">
+                  <div id="slideshowContent${modId}" class="slideshowContent">
+                    <div id="slideContainer${modId}" class="slide-container" aria-live="off">
+                      #set($slideIdx = 0)
+                      #set($slideTotal = $slider.slides.size())
+                      #foreach($slide in $slider.slides)
+                        #if($slideIdx == 0)
+                          #set($activeClass = "active")
+                          #set($ariaHidden = "false")
+                        #else
+                          #set($activeClass = "")
+                          #set($ariaHidden = "true")
+                        #end
+                        <div class="slide-item slide-item-${modId} slide-left ${activeClass}" style="background: url('$!{slide.image}');" role="group" aria-roledescription="slide" aria-label="$math.add($slideIdx, 1) of ${slideTotal}" aria-hidden="${ariaHidden}">
+                          <div class="sr-only"><span aria-label="Slide description">$!{slide.title}</span></div>
+                          <div class="slide-text-container">
+                            <div class="slide-title">
+                              <p class="h1"><span class="s-title">$!{slide.title}</span></p>
+                            </div>
+                            <div class="slide-desc">
+                              #if($slide.description && $slide.description != "")
+                                <p>$slide.description</p>
+                              #end
+                              #if($slide.link && $slide.link != "" && $slide.link != "#")
+                                <span class="linkButtonContainer">
+                                  #set($btnLabel = $!{slide.linkText})
+                                  #if(!$btnLabel || $btnLabel == "")
+                                    #set($btnLabel = "Learn More")
+                                  #end
+                                  <a aria-label="$!{slide.title}" class="btn btn-primary slide-link" href="$slide.link" target="_self">$btnLabel</a>
+                                </span>
+                              #end
+                            </div>
+                          </div>
+                        </div>
+                        #set($slideIdx = $slideIdx + 1)
                       #end
                     </div>
+                    <div class="slide-arrows slide-navStyle">
+                      <button type="button" aria-controls="slideContainer${modId}" class="prev active" aria-label="Previous Slide"><span class="fa fa-angle-left"></span></button>
+                      <button type="button" aria-controls="slideContainer${modId}" class="next active" aria-label="Next Slide"><span class="fa fa-angle-right"></span></button>
+                    </div>
+                    <ul class="slide-nav slide-navStyle">
+                      #set($dotIdx = 1)
+                      #foreach($slide in $slider.slides)
+                        #if($dotIdx == 1)
+                          #set($dotActive = "active")
+                          #set($ariaCurrent = "true")
+                        #else
+                          #set($dotActive = "")
+                          #set($ariaCurrent = "false")
+                        #end
+                        <li><button aria-controls="slideContainer${modId}" type="button" class="dot dot-${modId} ${dotActive}" aria-label="Switch to Slide ${dotIdx}" aria-current="${ariaCurrent}"><span class="fas fa-circle"></span></button></li>
+                        #set($dotIdx = $dotIdx + 1)
+                      #end
+                    </ul>
                   </div>
-                  #set($slideIndex = $slideIndex + 1)
-                #end
+                </section>
               </div>
-              <button class="carousel-control-prev" type="button" data-bs-target="#$sliderId" data-bs-slide="prev">
-                <span class="carousel-control-prev-icon" aria-hidden="true"></span>
-                <span class="visually-hidden">Previous</span>
-              </button>
-              <button class="carousel-control-next" type="button" data-bs-target="#$sliderId" data-bs-slide="next">
-                <span class="carousel-control-next-icon" aria-hidden="true"></span>
-                <span class="visually-hidden">Next</span>
-              </button>
             </div>
+            #end
             """;
     }
 
@@ -3250,17 +3427,26 @@ public static class BundleWriter
     /// </summary>
     private static string AssignDbColumn(
         string dataType,
+        string clazz,
         ref int textCount,
         ref int textAreaCount,
         ref int dateCount,
-        ref int binaryCount) =>
-        dataType switch
+        ref int binaryCount)
+    {
+        // Relationship and category fields use "system_field" as their dbColumn,
+        // not the auto-incremented binary/system column.
+        if (clazz.Contains("RelationshipField", StringComparison.Ordinal)
+            || clazz.Contains("CategoryField", StringComparison.Ordinal))
+            return "system_field";
+
+        return dataType switch
         {
             "LONG_TEXT" => $"text_area{++textAreaCount}",
             "DATE"      => $"date{++dateCount}",
             "SYSTEM"    => $"binary{++binaryCount}",
             _           => $"text{++textCount}",
         };
+    }
 
     /// <summary>
     /// Truncates <paramref name="value"/> to at most <paramref name="maxLength"/>
@@ -3361,5 +3547,21 @@ public static class BundleWriter
         }
 
         return defaultContainerId;
+    }
+
+    /// <summary>
+    /// Case-insensitive equality comparer for <c>(string, string)</c> tuples.
+    /// Used to group slider slides by (TabUniqueId, PaneName).
+    /// </summary>
+    private sealed class StringTupleComparer : IEqualityComparer<(string, string)>
+    {
+        public static readonly StringTupleComparer Instance = new();
+        public bool Equals((string, string) x, (string, string) y) =>
+            string.Equals(x.Item1, y.Item1, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(x.Item2, y.Item2, StringComparison.OrdinalIgnoreCase);
+        public int GetHashCode((string, string) obj) =>
+            HashCode.Combine(
+                StringComparer.OrdinalIgnoreCase.GetHashCode(obj.Item1 ?? ""),
+                StringComparer.OrdinalIgnoreCase.GetHashCode(obj.Item2 ?? ""));
     }
 }

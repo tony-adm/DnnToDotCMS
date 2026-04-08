@@ -633,6 +633,7 @@ public static class DnnXmlParser
                 string slideDescription;
                 string slideImage;
                 string slideLink;
+                string slideLinkText;
 
                 if (useScraped)
                 {
@@ -642,6 +643,7 @@ public static class DnnXmlParser
                         ? s.Caption : fallbackTitle(i);
                     slideDescription = s.Description ?? string.Empty;
                     slideLink = s.LinkUrl ?? "#";
+                    slideLinkText = s.LinkText ?? string.Empty;
                 }
                 else
                 {
@@ -651,6 +653,7 @@ public static class DnnXmlParser
                         slideTitle = fallbackTitle(i);
                     slideDescription = string.Empty;
                     slideLink = "#";
+                    slideLinkText = string.Empty;
                 }
 
                 // Create a slide entry for EVERY tab the module appears on.
@@ -661,6 +664,7 @@ public static class DnnXmlParser
                         Description:  slideDescription,
                         ImageUrl:     slideImage,
                         LinkUrl:      slideLink,
+                        LinkText:     slideLinkText,
                         TabUniqueId:  tabUniqueId,
                         PaneName:     paneName,
                         ContainerSrc: containerSrc,

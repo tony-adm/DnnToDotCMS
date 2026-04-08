@@ -58,6 +58,14 @@ public sealed class DotCmsField
     [JsonPropertyName("values")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Values { get; set; }
+
+    /// <summary>
+    /// For relationship fields, the velocity variable name of the target
+    /// content type (e.g. <c>"slide"</c>).  Ignored for non-relationship fields.
+    /// </summary>
+    [JsonPropertyName("relationType")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RelationType { get; set; }
 }
 
 /// <summary>
@@ -239,4 +247,12 @@ public sealed class DotCmsBundleField
     [JsonPropertyName("hint")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Hint { get; set; }
+
+    [JsonPropertyName("relationType")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RelationType { get; set; }
+
+    [JsonPropertyName("skipRelationshipCreation")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool SkipRelationshipCreation { get; set; }
 }
