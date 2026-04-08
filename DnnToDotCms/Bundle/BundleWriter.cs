@@ -656,6 +656,20 @@ public static class BundleWriter
             // slug so that the folder's <title> preserves spaces/casing for
             // display in the DotCMS $navtool navigation.
             var pageFolderTitles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            // Pre-compute folder sort orders from Level-0 parent pages so that
+            // navigation folders appear in the same position as the original
+            // DNN parent page.  Without this, all folders default to sortOrder 0
+            // and may appear in the wrong position in the DotCMS $navtool menu.
+            var folderSortOrders = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (DnnPortalPage page in pages)
+            {
+                if (page.Level != 0) continue;
+                if (page.Name.Equals("Admin", StringComparison.OrdinalIgnoreCase)) continue;
+                string slug = PageNameToUrl(page.Name);
+                folderSortOrders.TryAdd(slug, page.TabOrder);
+            }
+
             foreach (DnnPortalPage page in pages)
             {
                 // Level-0 (top-level) pages use SYSTEM_FOLDER and parentPath="/"
@@ -705,9 +719,17 @@ public static class BundleWriter
                     // the folder title so $navtool.title shows it correctly.
                     string folderTitle = pageFolderTitles.GetValueOrDefault(folderSlug, folderName);
 
+                    // For root-level folders, inherit the sort order from the
+                    // Level-0 DNN parent page so the folder appears in the
+                    // correct navigation position.
+                    int sortOrder = folderSlug.Contains('/')
+                        ? 0
+                        : folderSortOrders.GetValueOrDefault(folderSlug, 0);
+
                     string folderXml = BuildFolderXml(
                         folderInode, folderName, dotcmsPath, pageFolderParent,
-                        siteId, siteInode, showOnMenu: true, title: folderTitle);
+                        siteId, siteInode, showOnMenu: true, title: folderTitle,
+                        sortOrder: sortOrder);
                     string entryDir = pageFolderParent == "/"
                         ? "ROOT"
                         : "ROOT/" + pageFolderParent.Trim('/');
@@ -2506,7 +2528,8 @@ public static class BundleWriter
         string hostId,
         string hostInode,
         bool showOnMenu = false,
-        string? title = null)
+        string? title = null,
+        int sortOrder = 0)
     {
         string now      = DateTime.UtcNow.ToString(XmlTimestampFormat);
         string showOnMenuStr = showOnMenu ? "true" : "false";
@@ -2524,7 +2547,7 @@ public static class BundleWriter
                 <title>{folderTitle}</title>
                 <hostId>{hostId}</hostId>
                 <showOnMenu>{showOnMenuStr}</showOnMenu>
-                <sortOrder>0</sortOrder>
+                <sortOrder>{sortOrder}</sortOrder>
                 <filesMasks></filesMasks>
                 <defaultFileType>{FileAssetContentTypeId}</defaultFileType>
                 <modDate class="sql-timestamp">{now}</modDate>
@@ -2990,16 +3013,30 @@ public static class BundleWriter
         // Top-level items with children get the "dropdown" class and a
         // nested <ul class="dropdown-menu">.  This matches the DNN
         // BootStrapNav menu style used by the original site.
+        //
+        // DotCMS $navtool.getNav("/") returns NavResult items at the root
+        // level.  For FOLDERS it populates $navItem.children with the
+        // pages inside that folder.  However, some DotCMS configurations
+        // may not pre-populate children on the NavResult, so we fall back
+        // to explicitly loading the folder contents via
+        // $navtool.getNav($navItem.href) when the href ends with "/".
         return $"""
         <ul{attrs}>
         #set($navItems = $navtool.getNav("/"))
         #foreach($navItem in $navItems)
           #if($navItem.showOnMenu)
-            #if($navItem.children && $navItem.children.size() > 0)
+            ## Attempt to get children from the nav item directly.
+            #set($children = $navItem.children)
+            ## Fallback: if children is empty and the item looks like a folder
+            ## (href ending with "/"), explicitly load items from that path.
+            #if((!$children || $children.size() == 0) && $navItem.href && $navItem.href.endsWith("/"))
+              #set($children = $navtool.getNav($navItem.href))
+            #end
+            #if($children && $children.size() > 0)
               <li class="nav-item dropdown #if($navItem.active) active #end py-0 my-0">
                 <a href="#" class="nav-link text-expanded dropdown-toggle" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">$navItem.title<b class="caret"></b></a>
                 <ul class="dropdown-menu py-0 my-0">
-                #foreach($childItem in $navItem.children)
+                #foreach($childItem in $children)
                   #if($childItem.showOnMenu)
                     <li class="nav-item #if($childItem.active) active #end py-0 my-0">
                       <a href="$childItem.href" class="nav-link text-expanded">$childItem.title</a>
