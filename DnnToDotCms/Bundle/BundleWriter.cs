@@ -108,7 +108,8 @@ public static class BundleWriter
         IReadOnlyList<DnnPortalFile>? portalFiles = null,
         string? defaultSkinSrc = null,
         IReadOnlyList<(string id, string inode, string name, string html, string themeName)>? prebuiltContainers = null,
-        IReadOnlyList<(string id, string inode, string name, string html, string header, string themeName, IReadOnlyDictionary<string, int> paneUuidMap)>? prebuiltTemplates = null)
+        IReadOnlyList<(string id, string inode, string name, string html, string header, string themeName, IReadOnlyDictionary<string, int> paneUuidMap)>? prebuiltTemplates = null,
+        IReadOnlyList<DnnSliderSlide>? sliderSlides = null)
     {
         string bundleId = Guid.NewGuid().ToString("N").ToUpperInvariant();
 
@@ -207,6 +208,8 @@ public static class BundleWriter
         // HTML module contentlets can reference it via their stInode and assetSubType fields.
         string? htmlContentTypeId = null;
         string? htmlContentTypeVariable = null;
+        string? sliderContentTypeId = null;
+        string? sliderContentTypeVariable = null;
         foreach (DotCmsContentType ct in contentTypes)
         {
             string id   = DeterministicId("ContentType:" + ct.Variable);
@@ -225,6 +228,11 @@ public static class BundleWriter
                 htmlContentTypeId = id;
                 htmlContentTypeVariable = ct.Variable;
             }
+            else if (ct.Variable == "sliderSlide")
+            {
+                sliderContentTypeId = id;
+                sliderContentTypeVariable = ct.Variable;
+            }
         }
 
         // --- containers (from DNN containers) --------------------------------
@@ -242,7 +250,7 @@ public static class BundleWriter
         // --- HTML contentlets (from DNN HTML modules) ------------------------
         // Pre-generate identifiers so they can be referenced in page multiTree entries.
         // Build a lookup: tab UniqueId → list of (contentlet identifier, pane name).
-        var tabContentMap = new Dictionary<string, List<(string contentletId, string paneName)>>(StringComparer.OrdinalIgnoreCase);
+        var tabContentMap = new Dictionary<string, List<(string contentletId, string paneName, string? containerOverride)>>(StringComparer.OrdinalIgnoreCase);
 
         // Collect per-pane container source from content items so templates
         // can use the correct container for each pane slot.
@@ -295,7 +303,7 @@ public static class BundleWriter
                         items = [];
                         tabContentMap[hc.TabUniqueId] = items;
                     }
-                    items.Add((identifier, hc.PaneName));
+                    items.Add((identifier, hc.PaneName, null));
                 }
 
                 // Track per-pane container votes for template resolution.
@@ -341,6 +349,62 @@ public static class BundleWriter
                 string resolved = ResolveContainerIdFromSrc(topSrc, containerDefs, defaultCtr);
                 if (resolved != defaultCtr)
                     paneContainerIds[paneName] = resolved;
+            }
+        }
+
+        // --- slider slide contentlets (from DNN FisSlider modules) ----------
+        // Each slide becomes its own contentlet of type sliderSlide, placed in
+        // a dedicated "Slider" container with Velocity rendering code.
+        string? sliderContainerId = null;
+        if (sliderSlides is not null && sliderSlides.Count > 0
+            && sliderContentTypeId is not null && sliderContentTypeVariable is not null)
+        {
+            // Create a dedicated slider container with Velocity code that
+            // renders slides as a Bootstrap 5 carousel.
+            sliderContainerId = DeterministicId("Container:Slider");
+            string sliderContainerInode = DeterministicId("ContainerInode:Slider");
+            string sliderContainerCode = BuildSliderContainerVelocity();
+            string sliderContainerXml = BuildContainerXml(
+                sliderContainerId, sliderContainerInode, "Slider",
+                sliderContainerCode, contentHostId, sliderContentTypeId);
+            WriteTextEntry(tar,
+                $"live/{contentWorkDir}/{sliderContainerId}.containers.container.xml",
+                sliderContainerXml);
+            manifestEntries.Add(("containers", sliderContainerId, sliderContainerInode, "Slider", "", ""));
+
+            // Write each slide as a published contentlet.
+            foreach (DnnSliderSlide slide in sliderSlides)
+            {
+                string identifier = Guid.NewGuid().ToString();
+                string inode      = Guid.NewGuid().ToString();
+
+                string slideXml = BuildSliderSlideXml(
+                    identifier, inode, slide.Title, slide.Description,
+                    slide.ImageUrl, slide.LinkUrl,
+                    contentHostId, sliderContentTypeId, sliderContentTypeVariable,
+                    slide.SortOrder);
+                WriteTextEntry(tar,
+                    $"live/{contentWorkDir}/1/{identifier}.content.xml",
+                    slideXml);
+
+                string workflowXml = BuildContentWorkflowXml(identifier, slide.Title);
+                WriteTextEntry(tar,
+                    $"live/{contentWorkDir}/1/{identifier}.contentworkflow.xml",
+                    workflowXml);
+
+                manifestEntries.Add(("contentlet", identifier, inode, slide.Title,
+                    contentWorkDir, "/"));
+
+                // Record the association so pages can reference this slide in multiTree.
+                if (!string.IsNullOrEmpty(slide.TabUniqueId) && sliderContainerId is not null)
+                {
+                    if (!tabContentMap.TryGetValue(slide.TabUniqueId, out var items))
+                    {
+                        items = [];
+                        tabContentMap[slide.TabUniqueId] = items;
+                    }
+                    items.Add((identifier, slide.PaneName, sliderContainerId));
+                }
             }
         }
 
@@ -1197,6 +1261,158 @@ public static class BundleWriter
     }
 
     // ------------------------------------------------------------------
+    // Slider slide contentlet (PushContentWrapper) XML builder
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Builds a DotCMS <c>PushContentWrapper</c> XML for a single slider
+    /// slide contentlet of the <c>sliderSlide</c> content type.
+    /// </summary>
+    private static string BuildSliderSlideXml(
+        string identifier,
+        string inode,
+        string title,
+        string description,
+        string imageUrl,
+        string linkUrl,
+        string hostId,
+        string contentTypeId,
+        string contentTypeVariable,
+        int sortOrder = 0)
+    {
+        string now             = DateTime.UtcNow.ToString(XmlTimestampFormat);
+        string xmlTitle        = System.Security.SecurityElement.Escape(Truncate(title, MaxVarcharLength)) ?? string.Empty;
+        string xmlDescription  = System.Security.SecurityElement.Escape(description ?? string.Empty) ?? string.Empty;
+        string xmlImage        = System.Security.SecurityElement.Escape(imageUrl ?? string.Empty) ?? string.Empty;
+        string xmlLink         = System.Security.SecurityElement.Escape(linkUrl ?? string.Empty) ?? string.Empty;
+
+        return $"""
+            <com.dotcms.publisher.pusher.wrapper.PushContentWrapper>
+              <info>
+                <identifier>{identifier}</identifier>
+                <liveInode>{inode}</liveInode>
+                <workingInode>{inode}</workingInode>
+                <lockedOn class="sql-timestamp">{now}</lockedOn>
+                <deleted>false</deleted>
+                <versionTs class="sql-timestamp">{now}</versionTs>
+                <lang>1</lang>
+                <variant>DEFAULT</variant>
+                <publishDate class="sql-timestamp">{now}</publishDate>
+              </info>
+              <content>
+                <map class="java.util.concurrent.ConcurrentHashMap">
+                  {ETimestamp("modDate", now)}
+                  {EStr("inode", inode)}
+                  {EStr("host", hostId)}
+                  {EStr("stInode", contentTypeId)}
+                  {EStr("title", xmlTitle)}
+                  {EStr("description", xmlDescription)}
+                  {EStr("image", xmlImage)}
+                  {EStr("link", xmlLink)}
+                  {EStr("owner", "dotcms.org.1")}
+                  {EStr("identifier", identifier)}
+                  {ELong("languageId", 1)}
+                  {EStr("folder", "SYSTEM_FOLDER")}
+                  {ELong("sortOrder", sortOrder)}
+                  {EStr("modUser", "dotcms.org.1")}
+                </map>
+                <lowIndexPriority>false</lowIndexPriority>
+                <variantId>DEFAULT</variantId>
+              </content>
+              <id>
+                <id>{identifier}</id>
+                <assetName>{identifier}.content</assetName>
+                <assetType>contentlet</assetType>
+                <parentPath>/</parentPath>
+                <hostId>{hostId}</hostId>
+                <owner>dotcms.org.1</owner>
+                <createDate class="sql-timestamp">{now}</createDate>
+                <assetSubType>{contentTypeVariable}</assetSubType>
+              </id>
+              <multiTree/>
+              <tree/>
+              <categories/>
+              <tags class="java.util.ArrayList"/>
+              <operation>PUBLISH</operation>
+              <language>
+                <id>1</id>
+                <languageCode>en</languageCode>
+                <countryCode>US</countryCode>
+                <language>English</language>
+                <country>United States</country>
+                <isoCode>en-us</isoCode>
+              </language>
+              <contentTags/>
+              <contentletMetadata/>
+            </com.dotcms.publisher.pusher.wrapper.PushContentWrapper>
+            """;
+    }
+
+    /// <summary>
+    /// Generates Velocity template code for the slider container.  This code
+    /// renders all <c>sliderSlide</c> contentlets placed in the container as
+    /// a Bootstrap 5 carousel.  Each slide is a text overlay on an image
+    /// background, making individual slides easy to edit in DotCMS.
+    /// </summary>
+    internal static string BuildSliderContainerVelocity()
+    {
+        // The Velocity code uses $dotContent.field to access each slide's
+        // fields.  The #foreach iterates over all contentlets in the container.
+        // The carousel ID uses $containerInode to ensure uniqueness on pages
+        // with multiple slider containers.
+        return """
+            #set($sliderId = "dnn-slider-${containerInode.substring(0,8)}")
+            <div id="$sliderId" class="carousel slide" data-bs-ride="carousel">
+              <div class="carousel-indicators">
+                #set($indicatorIndex = 0)
+                #foreach($dotContent in $dotContentMap.get("sliderSlide"))
+                  #if($indicatorIndex == 0)
+                    <button type="button" data-bs-target="#$sliderId" data-bs-slide-to="$indicatorIndex" class="active" aria-current="true" aria-label="Slide $math.add($indicatorIndex, 1)"></button>
+                  #else
+                    <button type="button" data-bs-target="#$sliderId" data-bs-slide-to="$indicatorIndex" aria-label="Slide $math.add($indicatorIndex, 1)"></button>
+                  #end
+                  #set($indicatorIndex = $indicatorIndex + 1)
+                #end
+              </div>
+              <div class="carousel-inner">
+                #set($slideIndex = 0)
+                #foreach($dotContent in $dotContentMap.get("sliderSlide"))
+                  #if($slideIndex == 0)
+                    <div class="carousel-item active">
+                  #else
+                    <div class="carousel-item">
+                  #end
+                    #if($dotContent.image && $dotContent.image != "")
+                      <img src="$dotContent.image" class="d-block w-100" alt="$!{dotContent.title}">
+                    #end
+                    <div class="carousel-caption d-none d-md-block">
+                      #if($dotContent.title && $dotContent.title != "")
+                        <h5>$dotContent.title</h5>
+                      #end
+                      #if($dotContent.description && $dotContent.description != "")
+                        <p>$dotContent.description</p>
+                      #end
+                      #if($dotContent.link && $dotContent.link != "" && $dotContent.link != "#")
+                        <a href="$dotContent.link" class="btn btn-primary">Learn More</a>
+                      #end
+                    </div>
+                  </div>
+                  #set($slideIndex = $slideIndex + 1)
+                #end
+              </div>
+              <button class="carousel-control-prev" type="button" data-bs-target="#$sliderId" data-bs-slide="prev">
+                <span class="carousel-control-prev-icon" aria-hidden="true"></span>
+                <span class="visually-hidden">Previous</span>
+              </button>
+              <button class="carousel-control-next" type="button" data-bs-target="#$sliderId" data-bs-slide="next">
+                <span class="carousel-control-next-icon" aria-hidden="true"></span>
+                <span class="visually-hidden">Next</span>
+              </button>
+            </div>
+            """;
+    }
+
+    // ------------------------------------------------------------------
     // Content workflow (PushContentWorkflowWrapper) XML builder
     // ------------------------------------------------------------------
 
@@ -1262,7 +1478,7 @@ public static class BundleWriter
         string hostId,
         string templateId,
         string containerId = "",
-        IReadOnlyList<(string contentletId, string paneName)>? contentItems = null,
+        IReadOnlyList<(string contentletId, string paneName, string? containerOverride)>? contentItems = null,
         IReadOnlyDictionary<string, int>? paneUuidMap = null,
         IReadOnlyDictionary<string, string>? paneContainerIds = null,
         bool showOnMenu = true,
@@ -1377,7 +1593,7 @@ public static class BundleWriter
     private static string BuildMultiTreeXml(
         string pageId,
         string defaultContainerId,
-        IReadOnlyList<(string contentletId, string paneName)> contentItems,
+        IReadOnlyList<(string contentletId, string paneName, string? containerOverride)> contentItems,
         IReadOnlyDictionary<string, int>? paneUuidMap = null,
         IReadOnlyDictionary<string, string>? paneContainerIds = null)
     {
@@ -1393,9 +1609,11 @@ public static class BundleWriter
             for (int i = 0; i < contentItems.Count; i++)
             {
                 string relationType = (i + 1).ToString();
-                // Resolve per-pane container ID when available.
-                string containerId = ResolveContentContainerId(
-                    contentItems[i].paneName, paneContainerIds, defaultContainerId);
+                // Per-item container override takes priority (e.g. slider slides
+                // reference the Slider container instead of the default HTML one).
+                string containerId = contentItems[i].containerOverride
+                    ?? ResolveContentContainerId(
+                        contentItems[i].paneName, paneContainerIds, defaultContainerId);
                 AppendMultiTreeEntry(sb, pageId, containerId,
                     contentItems[i].contentletId, relationType, i);
             }
@@ -1409,7 +1627,7 @@ public static class BundleWriter
             var paneOrders = new Dictionary<int, int>(); // uuid → next tree_order
             int globalOrder = 0;
 
-            foreach (var (contentletId, paneName) in contentItems)
+            foreach (var (contentletId, paneName, containerOverride) in contentItems)
             {
                 int uuid;
                 if (!string.IsNullOrEmpty(paneName) && paneUuidMap.TryGetValue(paneName, out int mapped))
@@ -1421,9 +1639,10 @@ public static class BundleWriter
                     order = 0;
                 paneOrders[uuid] = order + 1;
 
-                // Resolve per-pane container ID when available.
-                string containerId = ResolveContentContainerId(
-                    paneName, paneContainerIds, defaultContainerId);
+                // Per-item container override takes priority.
+                string containerId = containerOverride
+                    ?? ResolveContentContainerId(
+                        paneName, paneContainerIds, defaultContainerId);
 
                 AppendMultiTreeEntry(sb, pageId, containerId,
                     contentletId, uuid.ToString(), globalOrder++);

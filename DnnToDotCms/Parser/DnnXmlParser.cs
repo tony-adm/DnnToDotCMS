@@ -93,6 +93,17 @@ public static class DnnXmlParser
         IReadOnlyList<ScrapedSlide>? scrapedSlides)
         => WithLiteDb(exportFolderOrJson, db => ExtractHtmlContents(db, scrapedSlides));
 
+    /// <summary>
+    /// Extracts individual slider slides from FisSlider modules in a DNN
+    /// export.  Each slide becomes a <see cref="DnnSliderSlide"/> with
+    /// structured fields (title, description, image, link) ready to be
+    /// written as separate DotCMS contentlets.
+    /// </summary>
+    public static IReadOnlyList<DnnSliderSlide> ParseSliderSlides(
+        string exportFolderOrJson,
+        IReadOnlyList<ScrapedSlide>? scrapedSlides = null)
+        => WithLiteDb(exportFolderOrJson, db => ExtractSliderSlides(db, scrapedSlides));
+
     // ------------------------------------------------------------------
     // Shared LiteDB helper
     // ------------------------------------------------------------------
@@ -443,9 +454,9 @@ public static class DnnXmlParser
 
         // Create entries for modules that have page/pane associations but no
         // content in ExportModuleContent (e.g. custom modules like FisSlider
-        // that store data in their own SQL tables).  FisSlider modules receive
-        // a Bootstrap 5 carousel populated with any slider images found in the
-        // portal file export; other custom modules get a generic placeholder.
+        // that store data in their own SQL tables).  FisSlider modules are
+        // now handled separately as individual slide contentlets; other custom
+        // modules get a generic placeholder.
         foreach (var (moduleId, tabPanes) in moduleTabPanes)
         {
             if (modulesWithContent.Contains(moduleId))
@@ -457,20 +468,12 @@ public static class DnnXmlParser
             moduleFriendlyNames.TryGetValue(moduleId, out string? friendlyName);
             string moduleType = string.IsNullOrWhiteSpace(friendlyName) ? "Custom Module" : friendlyName;
 
-            string body;
+            // FisSlider modules are converted to individual SliderSlide
+            // contentlets by ExtractSliderSlides — skip them here.
             if (string.Equals(moduleType, "FisSlider", StringComparison.OrdinalIgnoreCase))
-            {
-                // Collect images from portal folders whose name contains "slider"
-                // (case-insensitive), e.g. "FisSlider-Images/".  Sort them so
-                // the carousel order is deterministic across runs.
-                List<string> sliderImages = imageFilesByFolder
-                    .Where(kv => kv.Key.Contains("slider", StringComparison.OrdinalIgnoreCase))
-                    .SelectMany(kv => kv.Value)
-                    .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
-                    .ToList();
-                body = BuildSliderHtml(displayTitle, sliderImages, scrapedSlides);
-            }
-            else
+                continue;
+
+            string body;
             {
                 // Generic placeholder for other custom modules so that content
                 // editors know what needs to be recreated in DotCMS.
@@ -494,6 +497,192 @@ public static class DnnXmlParser
                     PaneName:     paneName,
                     ContainerSrc: containerSrc,
                     IconFile:     iconFile));
+            }
+        }
+
+        return results;
+    }
+
+    // ------------------------------------------------------------------
+    // LiteDB slider slide extraction
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Extracts individual <see cref="DnnSliderSlide"/> entries from
+    /// FisSlider modules in the LiteDB export database.  When
+    /// <paramref name="scrapedSlides"/> is provided, scraped metadata
+    /// (link URL, caption, description) takes priority; otherwise the
+    /// slide data is derived from export-only images.
+    /// </summary>
+    private static IReadOnlyList<DnnSliderSlide> ExtractSliderSlides(
+        LiteDatabase db, IReadOnlyList<ScrapedSlide>? scrapedSlides = null)
+    {
+        // Build tab ID → UniqueId map.
+        var tabUniqueIds = new Dictionary<int, string>();
+        ILiteCollection<BsonDocument> tabs = db.GetCollection("ExportTab");
+        foreach (BsonDocument doc in tabs.FindAll())
+        {
+            if (!doc.TryGetValue("TabID",    out BsonValue tabIdVal))  continue;
+            if (!doc.TryGetValue("UniqueId", out BsonValue uidVal))    continue;
+            tabUniqueIds[tabIdVal.AsInt32] = uidVal.AsGuid.ToString();
+        }
+
+        // Build module → tab/pane associations.
+        var moduleTabPanes = new Dictionary<int, List<(string tabUniqueId, string paneName, string containerSrc)>>();
+        var moduleSeenTabs = new Dictionary<int, HashSet<string>>();
+        ILiteCollection<BsonDocument> tabModules = db.GetCollection("ExportTabModule");
+        foreach (BsonDocument doc in tabModules.FindAll())
+        {
+            if (!doc.TryGetValue("ModuleID", out BsonValue moduleIdVal)) continue;
+            int moduleId = moduleIdVal.AsInt32;
+
+            if (doc.TryGetValue("TabID", out BsonValue tabIdVal)
+                && tabUniqueIds.TryGetValue(tabIdVal.AsInt32, out string? tabUniqueId))
+            {
+                string paneName = doc.TryGetValue("PaneName", out BsonValue paneVal)
+                    ? (paneVal.AsString ?? string.Empty) : string.Empty;
+                string containerSrc = doc.TryGetValue("ContainerSrc", out BsonValue cVal)
+                    ? (cVal.AsString ?? string.Empty) : string.Empty;
+
+                if (!moduleTabPanes.TryGetValue(moduleId, out var tabPanes))
+                {
+                    tabPanes = [];
+                    moduleTabPanes[moduleId] = tabPanes;
+                    moduleSeenTabs[moduleId] = [];
+                }
+                if (!moduleSeenTabs.TryGetValue(moduleId, out var seen))
+                {
+                    seen = [];
+                    moduleSeenTabs[moduleId] = seen;
+                }
+                if (seen.Add(tabUniqueId))
+                    tabPanes.Add((tabUniqueId, paneName, containerSrc));
+            }
+        }
+
+        // Collect image files by folder (for slider images).
+        var imageFilesByFolder = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        ILiteCollection<BsonDocument> exportFiles = db.GetCollection("ExportFile");
+        foreach (BsonDocument doc in exportFiles.FindAll())
+        {
+            string folder = doc.TryGetValue("Folder", out BsonValue folderVal)
+                ? (folderVal.AsString ?? string.Empty) : string.Empty;
+            string fileName = doc.TryGetValue("FileName", out BsonValue fnVal)
+                ? (fnVal.AsString ?? string.Empty) : string.Empty;
+            string contentType = doc.TryGetValue("ContentType", out BsonValue ctVal)
+                ? (ctVal.AsString ?? string.Empty) : string.Empty;
+            if (contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrEmpty(folder) && !string.IsNullOrEmpty(fileName))
+            {
+                if (!imageFilesByFolder.TryGetValue(folder, out var imgs))
+                {
+                    imgs = [];
+                    imageFilesByFolder[folder] = imgs;
+                }
+                imgs.Add(folder + fileName);
+            }
+        }
+
+        // Identify FisSlider modules and build slides.
+        var moduleFriendlyNames = new Dictionary<int, string>();
+        ILiteCollection<BsonDocument> exportModules = db.GetCollection("ExportModule");
+        foreach (BsonDocument doc in exportModules.FindAll())
+        {
+            if (!doc.TryGetValue("ModuleID", out BsonValue midVal)) continue;
+            string fn = doc.TryGetValue("FriendlyName", out BsonValue fnVal)
+                ? (fnVal.AsString ?? string.Empty) : string.Empty;
+            if (!string.IsNullOrWhiteSpace(fn))
+                moduleFriendlyNames[midVal.AsInt32] = fn;
+        }
+
+        // Track modules that have content in ExportModuleContent (not FisSlider).
+        var modulesWithContent = new HashSet<int>();
+        ILiteCollection<BsonDocument> moduleContents = db.GetCollection("ExportModuleContent");
+        foreach (BsonDocument doc in moduleContents.FindAll())
+        {
+            if (doc.TryGetValue("ModuleID", out BsonValue midVal))
+                modulesWithContent.Add(midVal.AsInt32);
+        }
+
+        var results = new List<DnnSliderSlide>();
+
+        foreach (var (moduleId, tabPanes) in moduleTabPanes)
+        {
+            if (modulesWithContent.Contains(moduleId))
+                continue;
+
+            moduleFriendlyNames.TryGetValue(moduleId, out string? friendlyName);
+            if (!string.Equals(friendlyName, "FisSlider", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            // Determine slide data: prefer scraped slides over export images.
+            bool useScraped = scrapedSlides is not null && scrapedSlides.Count > 0;
+
+            List<string> sliderImages = imageFilesByFolder
+                .Where(kv => kv.Key.Contains("slider", StringComparison.OrdinalIgnoreCase))
+                .SelectMany(kv => kv.Value)
+                .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            int slideCount = useScraped ? scrapedSlides!.Count : sliderImages.Count;
+
+            for (int i = 0; i < slideCount; i++)
+            {
+                string slideTitle;
+                string slideDescription;
+                string slideImage;
+                string slideLink;
+
+                if (useScraped)
+                {
+                    var s = scrapedSlides![i];
+                    slideImage = s.ImageUrl;
+                    slideTitle = !string.IsNullOrWhiteSpace(s.Caption)
+                        ? s.Caption : $"Slide {i + 1}";
+                    slideDescription = s.Description ?? string.Empty;
+                    slideLink = s.LinkUrl ?? "#";
+                }
+                else
+                {
+                    slideImage = "/" + sliderImages[i].TrimStart('/');
+                    slideTitle = Path.GetFileNameWithoutExtension(sliderImages[i]);
+                    if (string.IsNullOrWhiteSpace(slideTitle))
+                        slideTitle = $"Slide {i + 1}";
+                    slideDescription = string.Empty;
+                    slideLink = "#";
+                }
+
+                // Create a slide entry for EVERY tab the module appears on.
+                foreach (var (tabUniqueId, paneName, containerSrc) in tabPanes)
+                {
+                    results.Add(new DnnSliderSlide(
+                        Title:        slideTitle,
+                        Description:  slideDescription,
+                        ImageUrl:     slideImage,
+                        LinkUrl:      slideLink,
+                        TabUniqueId:  tabUniqueId,
+                        PaneName:     paneName,
+                        ContainerSrc: containerSrc,
+                        SortOrder:    i));
+                }
+            }
+
+            // When no slides are available, create a single placeholder slide
+            // so that the slider container is still placed on the page.
+            if (slideCount == 0)
+            {
+                foreach (var (tabUniqueId, paneName, containerSrc) in tabPanes)
+                {
+                    results.Add(new DnnSliderSlide(
+                        Title:        "Slide 1",
+                        Description:  string.Empty,
+                        ImageUrl:     string.Empty,
+                        LinkUrl:      "#",
+                        TabUniqueId:  tabUniqueId,
+                        PaneName:     paneName,
+                        ContainerSrc: containerSrc,
+                        SortOrder:    0));
+                }
             }
         }
 

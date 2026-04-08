@@ -173,6 +173,12 @@ try
         ? DnnXmlParser.ParseHtmlContents(exportDir, scrapedSlides)
         : [];
 
+    // Extract individual slider slides from FisSlider modules so they
+    // become separate editable contentlets in DotCMS.
+    IReadOnlyList<DnnSliderSlide> sliderSlides = exportDir is not null
+        ? DnnXmlParser.ParseSliderSlides(exportDir, scrapedSlides)
+        : [];
+
     // Extract portal pages (tabs) from the LiteDB database.
     IReadOnlyList<DnnPortalPage> portalPages = exportDir is not null
         ? DnnXmlParser.ParsePortalPages(exportDir)
@@ -197,7 +203,7 @@ try
     // Write the DotCMS site bundle.
     using (var outStream = File.Create(outputPath))
         BundleWriter.Write(contentTypes, outStream, themesZip, portalName, htmlContents,
-            portalPages, portalFiles, defaultSkinSrc);
+            portalPages, portalFiles, defaultSkinSrc, sliderSlides: sliderSlides);
 
     string themeNote = themesZip is not null
         ? " Containers, templates, and static theme assets included from export_themes.zip."
@@ -209,6 +215,10 @@ try
 
     string contentNote = htmlContents.Count > 0
         ? $" {htmlContents.Count} HTML content item(s) included."
+        : string.Empty;
+
+    string slideNote = sliderSlides.Count > 0
+        ? $" {sliderSlides.Count} slider slide(s) included."
         : string.Empty;
 
     // Count all non-Admin pages that are actually written to the bundle.
@@ -225,7 +235,7 @@ try
 
     Console.WriteLine(
         $"Converted {modules.Count} module(s) to {contentTypes.Count} content type(s)." +
-        $"{themeNote}{siteNote}{contentNote}{pageNote}{fileNote} Bundle written to: {outputPath}");
+        $"{themeNote}{siteNote}{contentNote}{slideNote}{pageNote}{fileNote} Bundle written to: {outputPath}");
 
     return 0;
 }

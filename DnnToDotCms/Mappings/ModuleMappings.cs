@@ -109,6 +109,9 @@ public static class ModuleMappings
 
         // Feedback
         ["feedback"] = Feedback,
+
+        // FisSlider
+        ["fisslider"] = SliderSlide,
     };
 
     // ------------------------------------------------------------------
@@ -315,6 +318,25 @@ public static class ModuleMappings
             TextField("Subject",        "subject",     required: true, listed: true),
             WysiwygField("Message",     "message",     required: true),
             DateTimeField("Submitted At","submittedAt",listed: true),
+        ]
+    };
+
+    private static DotCmsContentType SliderSlide() => new()
+    {
+        Name        = "SliderSlide",
+        Variable    = "sliderSlide",
+        Description = "Slide for a carousel/slider widget. Each slide has a title, description, background image, and link.",
+        Icon        = "fa fa-picture-o",
+        Fields      =
+        [
+            TextField("Title",       "title",       required: true, listed: true,
+                hint: "Heading text displayed over the slide image"),
+            TextField("Description", "description",
+                hint: "Short description or call-to-action text"),
+            TextField("Image",       "image",       required: true,
+                hint: "Background image URL (portal-relative or absolute)"),
+            TextField("Link",        "link",
+                hint: "Destination URL when the slide is clicked"),
         ]
     };
 
