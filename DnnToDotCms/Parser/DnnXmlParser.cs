@@ -683,6 +683,7 @@ public static class DnnXmlParser
                         Description:  string.Empty,
                         ImageUrl:     string.Empty,
                         LinkUrl:      "#",
+                        LinkText:     string.Empty,
                         TabUniqueId:  tabUniqueId,
                         PaneName:     paneName,
                         ContainerSrc: containerSrc,
