@@ -365,7 +365,14 @@ public static class BundleWriter
         // the page; each Slide is a child of a Slider.  The Slider container
         // renders the slides using FisSlider CSS classes and IDs so the original
         // site CSS/JS continues to work.
+        //
+        // The slider uses a dedicated DotCMS container (separate from the
+        // default HTML-content container).  For DotCMS to render the slider,
+        // the template must include a #parseContainer directive for this
+        // container.  We collect the pane names where sliders live so the
+        // template post-processing step can inject the directive.
         string? sliderContainerId = null;
+        var sliderPaneNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         if (sliderSlides is not null && sliderSlides.Count > 0
             && slideContentTypeId is not null && slideContentTypeVariable is not null
             && sliderContentTypeId is not null && sliderContentTypeVariable is not null)
@@ -394,6 +401,7 @@ public static class BundleWriter
                 string tabUniqueId = group.Key.Item1;
                 string paneName    = group.Key.Item2;
                 var slidesInGroup = group.OrderBy(s => s.SortOrder).ToList();
+                sliderPaneNames.Add(paneName);
 
                 // Write each Slide contentlet.
                 var slideIdentifiers = new List<string>();
@@ -443,6 +451,9 @@ public static class BundleWriter
                     contentWorkDir, "/"));
 
                 // Add the Slider (not individual slides) to the page's multiTree.
+                // The containerOverride ensures the multiTree entry references the
+                // slider container, matching the #parseContainer directive that
+                // will be injected into the template during post-processing.
                 if (!string.IsNullOrEmpty(tabUniqueId) && sliderContainerId is not null)
                 {
                     if (!tabContentMap.TryGetValue(tabUniqueId, out var items))
@@ -476,6 +487,14 @@ public static class BundleWriter
         // --- templates (from DNN skins) --------------------------------------
         // Written to live/ after per-pane container resolution so the correct
         // container IDs are baked into each #parseContainer directive.
+        //
+        // sliderPaneUuids maps (templateId, paneName) → uuid for slider
+        // container slots injected into templates.  This is used later
+        // when building multiTree entries so the relationType matches the
+        // #parseContainer directive in the template.
+        var sliderPaneUuids = new Dictionary<(string templateId, string paneName), int>(
+            new StringTupleComparer());
+
         foreach (var (id, inode, name, html, header, themeName, paneMap) in templateDefs)
         {
             // Post-process the template HTML to replace the default container
@@ -491,6 +510,44 @@ public static class BundleWriter
                         string oldDirective = $"#parseContainer('{defaultCtr}', '{uuid}')";
                         string newDirective = $"#parseContainer('{paneContainerId}', '{uuid}')";
                         finalHtml = finalHtml.Replace(oldDirective, newDirective);
+                    }
+                }
+            }
+
+            // Inject a #parseContainer for the slider container in each
+            // pane where sliders are placed.  This creates a second
+            // container slot in the template so DotCMS knows to render
+            // slider content in that pane alongside normal HTML content.
+            if (sliderContainerId is not null && sliderPaneNames.Count > 0 && paneMap.Count > 0)
+            {
+                int maxUuid = paneMap.Values.DefaultIfEmpty(0).Max();
+                foreach (var (paneName, existingUuid) in paneMap)
+                {
+                    if (!sliderPaneNames.Contains(paneName))
+                        continue;
+
+                    int sliderUuid = ++maxUuid;
+                    sliderPaneUuids[(id, paneName)] = sliderUuid;
+
+                    // Find the existing #parseContainer for this pane and
+                    // append the slider directive right after it.
+                    string existingDirective = $"#parseContainer(";
+                    string sliderDirective = $"#parseContainer('{sliderContainerId}', '{sliderUuid}')";
+
+                    // Look for the container directive with the pane's UUID.
+                    // It may have been replaced by per-pane resolution above,
+                    // so search by the UUID part: , 'uuid')
+                    string uuidSuffix = $", '{existingUuid}')";
+                    int pos = finalHtml.IndexOf(uuidSuffix, StringComparison.Ordinal);
+                    if (pos >= 0)
+                    {
+                        int insertAt = pos + uuidSuffix.Length;
+                        finalHtml = finalHtml.Insert(insertAt, "\n" + sliderDirective);
+                    }
+                    else
+                    {
+                        // Fallback: append at the end of the template body.
+                        finalHtml += "\n" + sliderDirective;
                     }
                 }
             }
@@ -644,6 +701,21 @@ public static class BundleWriter
                 // Resolve the pane-UUID mapping for the page's template.
                 templatePaneMaps.TryGetValue(templateId, out var paneUuidMap);
 
+                // Resolve slider-pane UUID overrides for this template.
+                // sliderPaneUuids is keyed by (templateId, paneName).
+                Dictionary<string, int>? pageSliderPaneUuids = null;
+                if (sliderPaneUuids.Count > 0)
+                {
+                    foreach (var ((tid, pn), sUuid) in sliderPaneUuids)
+                    {
+                        if (string.Equals(tid, templateId, StringComparison.OrdinalIgnoreCase))
+                        {
+                            pageSliderPaneUuids ??= new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                            pageSliderPaneUuids[pn] = sUuid;
+                        }
+                    }
+                }
+
                 // Resolve the folder and parentPath for child pages.
                 string pageFolderInode = "SYSTEM_FOLDER";
                 string pageParentPath  = "/";
@@ -677,7 +749,8 @@ public static class BundleWriter
                     identifier, inode, page.Name, url,
                     contentHostId, templateId,
                     defaultContainerId, pageContentItems ?? [], paneUuidMap,
-                    paneContainerIds, page.IsVisible, page.TabOrder,
+                    paneContainerIds, pageSliderPaneUuids,
+                    page.IsVisible, page.TabOrder,
                     pageFolderInode, pageParentPath);
                 WriteTextEntry(
                     tar,
@@ -1765,6 +1838,7 @@ public static class BundleWriter
         IReadOnlyList<(string contentletId, string paneName, string? containerOverride)>? contentItems = null,
         IReadOnlyDictionary<string, int>? paneUuidMap = null,
         IReadOnlyDictionary<string, string>? paneContainerIds = null,
+        IReadOnlyDictionary<string, int>? sliderPaneUuidMap = null,
         bool showOnMenu = true,
         int sortOrder = 0,
         string folderInode = "SYSTEM_FOLDER",
@@ -1778,7 +1852,7 @@ public static class BundleWriter
 
         // Build multiTree entries linking this page to its contentlets via the container.
         string multiTreeContent = BuildMultiTreeXml(identifier, containerId,
-            contentItems ?? [], paneUuidMap, paneContainerIds);
+            contentItems ?? [], paneUuidMap, paneContainerIds, sliderPaneUuidMap);
         string multiTreeElement = string.IsNullOrEmpty(multiTreeContent)
             ? "<multiTree/>"
             : $"<multiTree>{multiTreeContent}</multiTree>";
@@ -1879,7 +1953,8 @@ public static class BundleWriter
         string defaultContainerId,
         IReadOnlyList<(string contentletId, string paneName, string? containerOverride)> contentItems,
         IReadOnlyDictionary<string, int>? paneUuidMap = null,
-        IReadOnlyDictionary<string, string>? paneContainerIds = null)
+        IReadOnlyDictionary<string, string>? paneContainerIds = null,
+        IReadOnlyDictionary<string, int>? sliderPaneUuidMap = null)
     {
         if (string.IsNullOrEmpty(defaultContainerId) || contentItems.Count == 0)
             return string.Empty;
@@ -1898,6 +1973,18 @@ public static class BundleWriter
                 string containerId = contentItems[i].containerOverride
                     ?? ResolveContentContainerId(
                         contentItems[i].paneName, paneContainerIds, defaultContainerId);
+
+                // When a container override is present and the template has
+                // an injected slider #parseContainer, use its UUID so the
+                // multiTree relationType matches the template directive.
+                if (contentItems[i].containerOverride is not null
+                    && sliderPaneUuidMap is not null
+                    && !string.IsNullOrEmpty(contentItems[i].paneName)
+                    && sliderPaneUuidMap.TryGetValue(contentItems[i].paneName, out int sliderUuid))
+                {
+                    relationType = sliderUuid.ToString();
+                }
+
                 AppendMultiTreeEntry(sb, pageId, containerId,
                     contentItems[i].contentletId, relationType, i);
             }
@@ -1914,7 +2001,18 @@ public static class BundleWriter
             foreach (var (contentletId, paneName, containerOverride) in contentItems)
             {
                 int uuid;
-                if (!string.IsNullOrEmpty(paneName) && paneUuidMap.TryGetValue(paneName, out int mapped))
+                // When the item has a container override (e.g. slider) and
+                // the template has an injected slider #parseContainer slot,
+                // use the slider-specific UUID so the multiTree relationType
+                // matches the #parseContainer directive in the template.
+                if (containerOverride is not null
+                    && sliderPaneUuidMap is not null
+                    && !string.IsNullOrEmpty(paneName)
+                    && sliderPaneUuidMap.TryGetValue(paneName, out int sliderUuid))
+                {
+                    uuid = sliderUuid;
+                }
+                else if (!string.IsNullOrEmpty(paneName) && paneUuidMap.TryGetValue(paneName, out int mapped))
                     uuid = mapped;
                 else
                     uuid = fallbackUuid;

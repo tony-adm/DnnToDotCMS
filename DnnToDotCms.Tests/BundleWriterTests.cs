@@ -5895,6 +5895,117 @@ public class BundleWriterTests
         Assert.DoesNotContain("binary1", ctJson);
     }
 
+    [Fact]
+    public void Write_WithSliderSlides_TemplateContainsSliderParseContainer()
+    {
+        // When slider slides are placed on a page, the template must include
+        // a #parseContainer for the slider container so DotCMS renders it.
+        // The page's multiTree must reference the slider container with the
+        // UUID matching the template's #parseContainer directive.
+        var slideCt = new DotCmsContentType
+        {
+            Name     = "Slide",
+            Variable = "slide",
+            Fields   =
+            [
+                new DotCmsField { Name = "Title", Variable = "title", DataType = "TEXT",
+                    Clazz = "com.dotcms.contenttype.model.field.TextField" },
+            ]
+        };
+        var sliderCt = new DotCmsContentType
+        {
+            Name     = "Slider",
+            Variable = "slider",
+            Fields   =
+            [
+                new DotCmsField { Name = "Title",  Variable = "title",  DataType = "TEXT",
+                    Clazz = "com.dotcms.contenttype.model.field.TextField" },
+                new DotCmsField { Name = "Slides", Variable = "slides", DataType = "SYSTEM",
+                    Clazz = "com.dotcms.contenttype.model.field.RelationshipField",
+                    RelationType = "slide" },
+            ]
+        };
+
+        string tabId = "tab-slider-parse";
+        var pages = new[]
+        {
+            new DnnPortalPage(tabId, "Home", "Home", "", "//Home", 0, true, ""),
+        };
+        var contents = new[]
+        {
+            new DnnHtmlContent("Welcome", "<h1>Hello</h1>", TabUniqueId: tabId, PaneName: "ContentPane"),
+        };
+        var slides = new[]
+        {
+            new DnnSliderSlide("Slide 1", "", "/img/1.jpg", "#",
+                TabUniqueId: tabId, PaneName: "ContentPane", SortOrder: 0),
+        };
+
+        using var ms = new MemoryStream();
+        BundleWriter.Write([MakeHtmlContentType(), slideCt, sliderCt], ms,
+            siteName: "test-site", htmlContents: contents, pages: pages,
+            sliderSlides: slides);
+        ms.Position = 0;
+
+        var entries = ReadAllTarEntries(ms);
+
+        // The template XML must contain a #parseContainer for the slider container.
+        var templateEntry = entries.FirstOrDefault(e => e.Name.Contains(".template.template.xml"));
+        Assert.NotNull(templateEntry.Content);
+        string templateXml = Encoding.UTF8.GetString(templateEntry.Content);
+
+        // Count #parseContainer directives — should be at least 2:
+        // one for the default HTML container and one for the slider container.
+        int parseContainerCount = System.Text.RegularExpressions.Regex.Matches(
+            templateXml, @"#parseContainer\(").Count;
+        Assert.True(parseContainerCount >= 2,
+            $"Expected at least 2 #parseContainer directives in template, got {parseContainerCount}");
+
+        // The page multiTree must reference the slider container with
+        // the same UUID used in the template's #parseContainer.
+        // Find the Slider container ID from the container XML entry.
+        var sliderContainerEntry = entries.First(e =>
+            e.Name.Contains(".containers.container.xml")
+            && Encoding.UTF8.GetString(e.Content).Contains("Slider"));
+        string sliderContainerXml = Encoding.UTF8.GetString(sliderContainerEntry.Content);
+        var containerIdMatch = System.Text.RegularExpressions.Regex.Match(
+            sliderContainerXml, @"<containerId>\s*<id>([^<]+)</id>");
+        Assert.True(containerIdMatch.Success, "Could not extract slider container ID from container XML");
+        string sliderContainerId = containerIdMatch.Groups[1].Value;
+
+        // The template must have #parseContainer(sliderContainerId, uuid).
+        Assert.Contains(sliderContainerId, templateXml);
+
+        // Extract the UUID used for the slider container in the template.
+        // Note: the template body is XML-escaped, so apostrophes become &apos;
+        string escapedSliderId = System.Text.RegularExpressions.Regex.Escape(
+            System.Security.SecurityElement.Escape(sliderContainerId)!);
+        var uuidMatch = System.Text.RegularExpressions.Regex.Match(
+            templateXml, $@"#parseContainer\(&apos;{escapedSliderId}&apos;,\s*&apos;(\d+)&apos;\)");
+        Assert.True(uuidMatch.Success,
+            $"Template must have #parseContainer for slider container '{sliderContainerId}'");
+        string sliderUuid = uuidMatch.Groups[1].Value;
+
+        // The page's multiTree must reference the slider container
+        // with this UUID as the relation_type.
+        string pageEntryName = entries
+            .Select(e => e.Name)
+            .First(n => n.Contains("/1/") && n.EndsWith(".content.xml")
+                && !n.Contains("host.xml")
+                && Encoding.UTF8.GetString(
+                    entries.First(e2 => e2.Name == n).Content)
+                    .Contains("htmlpageasset"));
+        string pageXml = Encoding.UTF8.GetString(
+            entries.First(e => e.Name == pageEntryName).Content);
+
+        // Page multiTree must contain the slider container ID.
+        Assert.Contains(sliderContainerId, pageXml);
+
+        // Page multiTree must use the slider UUID as relation_type for
+        // the slider container entries.
+        Assert.Contains(sliderUuid, pageXml);
+    }
+
     private static List<(string Name, byte[] Content)> ReadAllTarEntries(Stream gzStream)
     {
         gzStream.Position = 0;
