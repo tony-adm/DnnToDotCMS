@@ -864,6 +864,7 @@ public static class BundleWriter
         // are served correctly.  When a theme is available the files are
         // placed under application/themes/{themeName}/ — matching where
         // WriteThemeFileAssets places all other theme static assets.
+        // When no theme is available, they are placed at the site root.
         if (sliderThemeName is not null)
         {
             string sliderFolderPath;
@@ -874,43 +875,43 @@ public static class BundleWriter
                 sliderFolderPath = $"application/themes/{sliderThemeName}/";
                 string dotcmsKey = "/" + sliderFolderPath;
 
-                if (!unifiedFolderInodes.TryGetValue(dotcmsKey, out string? existingInode))
+            if (!unifiedFolderInodes.TryGetValue(dotcmsKey, out string? existingInode))
+            {
+                // The theme folder hierarchy doesn't exist yet (no
+                // themes zip was provided).  Create the necessary
+                // folder entries: application/, application/themes/,
+                // application/themes/{themeName}/.
+                string[] folderSegments = sliderFolderPath.TrimEnd('/').Split('/');
+                for (int depth = 1; depth <= folderSegments.Length; depth++)
                 {
-                    // The theme folder hierarchy doesn't exist yet (no
-                    // themes zip was provided).  Create the necessary
-                    // folder entries: application/, application/themes/,
-                    // application/themes/{themeName}/.
-                    string[] folderSegments = sliderFolderPath.TrimEnd('/').Split('/');
-                    for (int depth = 1; depth <= folderSegments.Length; depth++)
+                    string partial = string.Join("/", folderSegments[..depth]);
+                    string key = "/" + partial + "/";
+                    if (!unifiedFolderInodes.ContainsKey(key))
                     {
-                        string partial = string.Join("/", folderSegments[..depth]);
-                        string key = "/" + partial + "/";
-                        if (!unifiedFolderInodes.ContainsKey(key))
-                        {
-                            string newInode = Guid.NewGuid().ToString();
-                            unifiedFolderInodes[key] = newInode;
+                        string newInode = DeterministicId("SliderFolder:" + key);
+                        unifiedFolderInodes[key] = newInode;
 
-                            if (siteId is not null && siteInode is not null
-                                && writtenFolderPaths.Add(key))
-                            {
-                                string folderName = folderSegments[depth - 1];
-                                string parentPath = depth == 1
-                                    ? "/"
-                                    : "/" + string.Join("/", folderSegments[..(depth - 1)]) + "/";
-                                string folderXml = BuildFolderXml(
-                                    newInode, folderName, key, parentPath,
-                                    siteId, siteInode);
-                                string entryDir = parentPath == "/"
-                                    ? "ROOT"
-                                    : "ROOT/" + parentPath.Trim('/');
-                                WriteTextEntry(tar, $"{entryDir}/{newInode}.folder.xml", folderXml);
-                                manifestEntries.Add(("folder", newInode, newInode, key, contentWorkDir, "/"));
-                            }
+                        if (siteId is not null && siteInode is not null
+                            && writtenFolderPaths.Add(key))
+                        {
+                            string folderName = folderSegments[depth - 1];
+                            string parentPath = depth == 1
+                                ? "/"
+                                : "/" + string.Join("/", folderSegments[..(depth - 1)]) + "/";
+                            string folderXml = BuildFolderXml(
+                                newInode, folderName, key, parentPath,
+                                siteId, siteInode);
+                            string entryDir = parentPath == "/"
+                                ? "ROOT"
+                                : "ROOT/" + parentPath.Trim('/');
+                            WriteTextEntry(tar, $"{entryDir}/{newInode}.folder.xml", folderXml);
+                            manifestEntries.Add(("folder", newInode, newInode, key, contentWorkDir, "/"));
                         }
                     }
-                    existingInode = unifiedFolderInodes[dotcmsKey];
                 }
-                sliderFolderInode = existingInode;
+                existingInode = unifiedFolderInodes[dotcmsKey];
+            }
+            sliderFolderInode = existingInode;
             }
             else
             {
@@ -925,8 +926,8 @@ public static class BundleWriter
             foreach (var (fileName, content) in new[]
                 { ("slider.css", sliderCssBytes), ("slider.js", sliderJsBytes) })
             {
-                string id    = Guid.NewGuid().ToString();
-                string inode = Guid.NewGuid().ToString();
+                string id    = DeterministicId("SliderAsset:" + fileName);
+                string inode = DeterministicId("SliderAssetInode:" + fileName);
                 string assetPath = BuildAssetPath(inode, fileName);
                 WriteBinaryEntry(tar, assetPath, content);
                 WriteTextEntry(tar,
