@@ -373,15 +373,31 @@ public static class BundleWriter
         // template post-processing step can inject the directive.
         string? sliderContainerId = null;
         var sliderPaneNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // Track whether we need to write slider CSS/JS after folder
+        // hierarchy creation — set to the theme name used by the slider
+        // container Velocity code.
+        string? sliderThemeName = null;
         if (sliderSlides is not null && sliderSlides.Count > 0
             && slideContentTypeId is not null && slideContentTypeVariable is not null
             && sliderContentTypeId is not null && sliderContentTypeVariable is not null)
         {
+            // Resolve the first non-empty theme name from the template
+            // definitions so the slider CSS/JS are placed in the correct
+            // application/themes/{themeName}/ directory.
+            sliderThemeName = templateDefs
+                .Select(t => t.themeName)
+                .FirstOrDefault(n => !string.IsNullOrWhiteSpace(n))
+                ?? string.Empty;
+
+            string sliderAssetPrefix = string.IsNullOrEmpty(sliderThemeName)
+                ? ""
+                : $"/application/themes/{sliderThemeName}";
+
             // Create a dedicated slider container with Velocity code that
             // renders slides using FisSlider-compatible HTML structure.
             sliderContainerId = DeterministicId("Container:Slider");
             string sliderContainerInode = DeterministicId("ContainerInode:Slider");
-            string sliderContainerCode = BuildSliderContainerVelocity();
+            string sliderContainerCode = BuildSliderContainerVelocity(sliderAssetPrefix);
             string sliderContainerXml = BuildContainerXml(
                 sliderContainerId, sliderContainerInode, "Slider",
                 sliderContainerCode, contentHostId, sliderContentTypeId);
@@ -389,14 +405,6 @@ public static class BundleWriter
                 $"live/{contentWorkDir}/{sliderContainerId}.containers.container.xml",
                 sliderContainerXml);
             manifestEntries.Add(("containers", sliderContainerId, sliderContainerInode, "Slider", "", ""));
-
-            // Write external slider CSS and JS as static resources at the
-            // site root so the <link> and <script src> in the Velocity
-            // template can reference /slider.css and /slider.js.  This
-            // keeps all styles and behaviour out of inline blocks for CSP
-            // compliance.
-            WriteTextEntry(tar, "ROOT/slider.css", BuildSliderCss());
-            WriteTextEntry(tar, "ROOT/slider.js", BuildSliderJs());
 
             // Group slides by (TabUniqueId, PaneName) → list of slides.
             // Each group becomes one Slider contentlet.
@@ -648,6 +656,20 @@ public static class BundleWriter
             // slug so that the folder's <title> preserves spaces/casing for
             // display in the DotCMS $navtool navigation.
             var pageFolderTitles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            // Pre-compute folder sort orders from Level-0 parent pages so that
+            // navigation folders appear in the same position as the original
+            // DNN parent page.  Without this, all folders default to sortOrder 0
+            // and may appear in the wrong position in the DotCMS $navtool menu.
+            var folderSortOrders = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (DnnPortalPage page in pages)
+            {
+                if (page.Level != 0) continue;
+                if (page.Name.Equals("Admin", StringComparison.OrdinalIgnoreCase)) continue;
+                string slug = PageNameToUrl(page.Name);
+                folderSortOrders.TryAdd(slug, page.TabOrder);
+            }
+
             foreach (DnnPortalPage page in pages)
             {
                 // Level-0 (top-level) pages use SYSTEM_FOLDER and parentPath="/"
@@ -697,9 +719,17 @@ public static class BundleWriter
                     // the folder title so $navtool.title shows it correctly.
                     string folderTitle = pageFolderTitles.GetValueOrDefault(folderSlug, folderName);
 
+                    // For root-level folders, inherit the sort order from the
+                    // Level-0 DNN parent page so the folder appears in the
+                    // correct navigation position.
+                    int sortOrder = folderSlug.Contains('/')
+                        ? 0
+                        : folderSortOrders.GetValueOrDefault(folderSlug, 0);
+
                     string folderXml = BuildFolderXml(
                         folderInode, folderName, dotcmsPath, pageFolderParent,
-                        siteId, siteInode, showOnMenu: true, title: folderTitle);
+                        siteId, siteInode, showOnMenu: true, title: folderTitle,
+                        sortOrder: sortOrder);
                     string entryDir = pageFolderParent == "/"
                         ? "ROOT"
                         : "ROOT/" + pageFolderParent.Trim('/');
@@ -823,6 +853,91 @@ public static class BundleWriter
             {
                 Console.Error.WriteLine(
                     $"Warning: Could not read theme assets from '{themesZipPath}': {ex.Message}");
+            }
+        }
+
+        // --- slider CSS/JS as FileAsset contentlets --------------------------
+        // The slider container Velocity code references slider.css and
+        // slider.js via <link> and <script> tags.  These files must be
+        // written as proper DotCMS FileAsset contentlets (not raw ROOT/
+        // entries) so that the push-publish importer creates them and they
+        // are served correctly.  When a theme is available the files are
+        // placed under application/themes/{themeName}/ — matching where
+        // WriteThemeFileAssets places all other theme static assets.
+        // When no theme is available, they are placed at the site root.
+        if (sliderThemeName is not null)
+        {
+            string sliderFolderPath;
+            string sliderFolderInode;
+
+            if (!string.IsNullOrEmpty(sliderThemeName))
+            {
+                sliderFolderPath = $"application/themes/{sliderThemeName}/";
+                string dotcmsKey = "/" + sliderFolderPath;
+
+            if (!unifiedFolderInodes.TryGetValue(dotcmsKey, out string? existingInode))
+            {
+                // The theme folder hierarchy doesn't exist yet (no
+                // themes zip was provided).  Create the necessary
+                // folder entries: application/, application/themes/,
+                // application/themes/{themeName}/.
+                string[] folderSegments = sliderFolderPath.TrimEnd('/').Split('/');
+                for (int depth = 1; depth <= folderSegments.Length; depth++)
+                {
+                    string partial = string.Join("/", folderSegments[..depth]);
+                    string key = "/" + partial + "/";
+                    if (!unifiedFolderInodes.ContainsKey(key))
+                    {
+                        string newInode = DeterministicId("SliderFolder:" + key);
+                        unifiedFolderInodes[key] = newInode;
+
+                        if (siteId is not null && siteInode is not null
+                            && writtenFolderPaths.Add(key))
+                        {
+                            string folderName = folderSegments[depth - 1];
+                            string parentPath = depth == 1
+                                ? "/"
+                                : "/" + string.Join("/", folderSegments[..(depth - 1)]) + "/";
+                            string folderXml = BuildFolderXml(
+                                newInode, folderName, key, parentPath,
+                                siteId, siteInode);
+                            string entryDir = parentPath == "/"
+                                ? "ROOT"
+                                : "ROOT/" + parentPath.Trim('/');
+                            WriteTextEntry(tar, $"{entryDir}/{newInode}.folder.xml", folderXml);
+                            manifestEntries.Add(("folder", newInode, newInode, key, contentWorkDir, "/"));
+                        }
+                    }
+                }
+                existingInode = unifiedFolderInodes[dotcmsKey];
+            }
+            sliderFolderInode = existingInode;
+            }
+            else
+            {
+                // No theme available — place at the site root.
+                sliderFolderPath = "";
+                sliderFolderInode = "SYSTEM_FOLDER";
+            }
+
+            byte[] sliderCssBytes = Encoding.UTF8.GetBytes(BuildSliderCss());
+            byte[] sliderJsBytes  = Encoding.UTF8.GetBytes(BuildSliderJs());
+
+            foreach (var (fileName, content) in new[]
+                { ("slider.css", sliderCssBytes), ("slider.js", sliderJsBytes) })
+            {
+                string id    = DeterministicId("SliderAsset:" + fileName);
+                string inode = DeterministicId("SliderAssetInode:" + fileName);
+                string assetPath = BuildAssetPath(inode, fileName);
+                WriteBinaryEntry(tar, assetPath, content);
+                WriteTextEntry(tar,
+                    $"live/{contentWorkDir}/1/{id}.content.xml",
+                    BuildFileAssetXml(id, inode, fileName, assetPath,
+                        contentHostId, sliderFolderPath, sliderFolderInode));
+                WriteTextEntry(tar,
+                    $"live/{contentWorkDir}/1/{id}.contentworkflow.xml",
+                    BuildContentWorkflowXml(id, fileName));
+                manifestEntries.Add(("contentlet", id, inode, fileName, contentWorkDir, "/"));
             }
         }
 
@@ -1755,8 +1870,21 @@ public static class BundleWriter
     /// and element IDs so the site's existing CSS and JavaScript continue
     /// to work without modification.
     /// </summary>
-    internal static string BuildSliderContainerVelocity()
+    /// <param name="sliderAssetPrefix">
+    /// URL prefix for the slider CSS/JS files, e.g.
+    /// <c>/application/themes/Xcillion</c>.  When non-empty the generated
+    /// <c>&lt;link&gt;</c> and <c>&lt;script&gt;</c> tags reference
+    /// <c>{prefix}/slider.css</c> and <c>{prefix}/slider.js</c>.
+    /// When empty the paths fall back to the site root (<c>/slider.css</c>).
+    /// </param>
+    internal static string BuildSliderContainerVelocity(string sliderAssetPrefix = "")
     {
+        string cssHref = string.IsNullOrEmpty(sliderAssetPrefix)
+            ? "/slider.css"
+            : $"{sliderAssetPrefix}/slider.css";
+        string jsSrc = string.IsNullOrEmpty(sliderAssetPrefix)
+            ? "/slider.js"
+            : $"{sliderAssetPrefix}/slider.js";
         // This code is evaluated PER CONTENTLET by DotCMS's
         // ContainerLoader.  Inside the container rendering loop,
         // $dotContentMap is set to the CURRENT Slider contentlet via
@@ -1780,8 +1908,8 @@ public static class BundleWriter
         // mirroring the DNN module ID pattern.
         return """
             #set($modId = ${velocityCount})
-            <link rel="stylesheet" href="/slider.css" />
-            <script src="/slider.js"></script>
+            <link rel="stylesheet" href="SLIDER_CSS_HREF" />
+            <script src="SLIDER_JS_SRC"></script>
             <div class="Mvc-FisSliderModule-Container">
               <section class="slideshow" data-slider-id="${modId}" aria-roledescription="carousel" aria-label="$!{dotContentMap.title}">
                 <div class="slideshowContent">
@@ -1842,7 +1970,7 @@ public static class BundleWriter
                 </div>
               </section>
             </div>
-            """;
+            """.Replace("SLIDER_CSS_HREF", cssHref).Replace("SLIDER_JS_SRC", jsSrc);
     }
 
     /// <summary>
@@ -2401,7 +2529,8 @@ public static class BundleWriter
         string hostId,
         string hostInode,
         bool showOnMenu = false,
-        string? title = null)
+        string? title = null,
+        int sortOrder = 0)
     {
         string now      = DateTime.UtcNow.ToString(XmlTimestampFormat);
         string showOnMenuStr = showOnMenu ? "true" : "false";
@@ -2419,7 +2548,7 @@ public static class BundleWriter
                 <title>{folderTitle}</title>
                 <hostId>{hostId}</hostId>
                 <showOnMenu>{showOnMenuStr}</showOnMenu>
-                <sortOrder>0</sortOrder>
+                <sortOrder>{sortOrder}</sortOrder>
                 <filesMasks></filesMasks>
                 <defaultFileType>{FileAssetContentTypeId}</defaultFileType>
                 <modDate class="sql-timestamp">{now}</modDate>
@@ -2885,16 +3014,30 @@ public static class BundleWriter
         // Top-level items with children get the "dropdown" class and a
         // nested <ul class="dropdown-menu">.  This matches the DNN
         // BootStrapNav menu style used by the original site.
+        //
+        // DotCMS $navtool.getNav("/") returns NavResult items at the root
+        // level.  For FOLDERS it populates $navItem.children with the
+        // pages inside that folder.  However, some DotCMS configurations
+        // may not pre-populate children on the NavResult, so we fall back
+        // to explicitly loading the folder contents via
+        // $navtool.getNav($navItem.href) when the href ends with "/".
         return $"""
         <ul{attrs}>
         #set($navItems = $navtool.getNav("/"))
         #foreach($navItem in $navItems)
           #if($navItem.showOnMenu)
-            #if($navItem.children && $navItem.children.size() > 0)
+            ## Attempt to get children from the nav item directly.
+            #set($children = $navItem.children)
+            ## Fallback: if children is empty and the item looks like a folder
+            ## (href ending with "/"), explicitly load items from that path.
+            #if((!$children || $children.size() == 0) && $navItem.href && $navItem.href.endsWith("/"))
+              #set($children = $navtool.getNav($navItem.href))
+            #end
+            #if($children && $children.size() > 0)
               <li class="nav-item dropdown #if($navItem.active) active #end py-0 my-0">
                 <a href="#" class="nav-link text-expanded dropdown-toggle" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">$navItem.title<b class="caret"></b></a>
                 <ul class="dropdown-menu py-0 my-0">
-                #foreach($childItem in $navItem.children)
+                #foreach($childItem in $children)
                   #if($childItem.showOnMenu)
                     <li class="nav-item #if($childItem.active) active #end py-0 my-0">
                       <a href="$childItem.href" class="nav-link text-expanded">$childItem.title</a>

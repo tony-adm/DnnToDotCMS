@@ -4916,6 +4916,106 @@ public class BundleWriterTests
         Assert.Equal(1, pageCount);
     }
 
+    [Fact]
+    public void Write_WithChildPage_ChildPageHasShowOnMenuTrue()
+    {
+        // Child pages that are visible in DNN (IsVisible=true) must be
+        // marked showOnMenu=true in DotCMS so the $navtool includes them
+        // in the navigation dropdown.
+        var pages = new[]
+        {
+            new DnnPortalPage("aaa", "Personal", "Personal", "", "//Personal",  0, true, ""),
+            new DnnPortalPage("bbb", "Checking", "Checking", "", "//Personal//Checking", 1, true, ""),
+        };
+        var contents = new[]
+        {
+            new DnnHtmlContent("Personal", "<p>Personal</p>", TabUniqueId: "aaa"),
+            new DnnHtmlContent("Checking", "<p>Checking</p>", TabUniqueId: "bbb"),
+        };
+
+        string zipPath = BuildThemesZip();
+        try
+        {
+            var (ms, names) = WriteBundleWithPagesAndContents(pages, contents,
+                themesZipPath: zipPath);
+
+            // Find the child page XML (the "checking" page, not the "index" page).
+            string? childPageXml = null;
+            foreach (string name in names.Where(n =>
+                n.Contains("/1/") && n.EndsWith(".content.xml") && !n.Contains("host.xml")))
+            {
+                string candidate = ReadTarEntry(ms, name)!;
+                if (candidate.Contains("<assetSubType>htmlpageasset</assetSubType>")
+                    && candidate.Contains("<string>checking</string>"))
+                {
+                    childPageXml = candidate;
+                    break;
+                }
+            }
+
+            Assert.NotNull(childPageXml);
+            // The child page must have showOnMenu=true.
+            Assert.Contains("<string>showOnMenu</string>", childPageXml);
+            Assert.Contains("<boolean>true</boolean>", childPageXml);
+        }
+        finally { File.Delete(zipPath); }
+    }
+
+    [Fact]
+    public void Write_WithChildPage_FolderHasShowOnMenuTrue()
+    {
+        // Navigation folders must have showOnMenu=true so the $navtool
+        // includes the folder (and its children) in the top-level nav.
+        var pages = new[]
+        {
+            new DnnPortalPage("aaa", "Personal", "Personal", "", "//Personal",  0, true, ""),
+            new DnnPortalPage("bbb", "Checking", "Checking", "", "//Personal//Checking", 1, true, ""),
+        };
+
+        var (ms, names) = WriteBundleWithPages(pages);
+
+        string folderEntry = names.First(n => n.EndsWith(".folder.xml") && n.Contains("ROOT/"));
+        string xml = ReadTarEntry(ms, folderEntry)!;
+
+        Assert.Contains("<showOnMenu>true</showOnMenu>", xml);
+    }
+
+    [Fact]
+    public void Write_WithChildPage_FolderSortOrderMatchesParentTabOrder()
+    {
+        // The navigation folder's sortOrder should match the Level-0
+        // parent page's TabOrder so the folder appears in the correct
+        // position in the DotCMS $navtool navigation.
+        var pages = new[]
+        {
+            new DnnPortalPage("aaa", "Personal", "Personal", "", "//Personal",  0, true, "", 5),
+            new DnnPortalPage("bbb", "Checking", "Checking", "", "//Personal//Checking", 1, true, "", 1),
+        };
+
+        var (ms, names) = WriteBundleWithPages(pages);
+
+        string folderEntry = names.First(n => n.EndsWith(".folder.xml") && n.Contains("ROOT/"));
+        string xml = ReadTarEntry(ms, folderEntry)!;
+
+        // Folder sort order should be 5 (from the Level-0 "Personal" page),
+        // not 0 (the default) or 1 (from the Level-1 "Checking" page).
+        Assert.Contains("<sortOrder>5</sortOrder>", xml);
+    }
+
+    [Fact]
+    public void BuildNavSnippet_ContainsChildrenFallback()
+    {
+        // The nav Velocity snippet should include a fallback that
+        // explicitly loads folder children via $navtool.getNav() when
+        // $navItem.children is not automatically populated.
+        string snippet = BundleWriter.BuildNavSnippet(
+            @"<dnn:MENU runat=""server"" />");
+
+        Assert.Contains("$navItem.children", snippet);
+        Assert.Contains("$navtool.getNav($navItem.href)", snippet);
+        Assert.Contains("endsWith(\"/\")", snippet);
+    }
+
     // ------------------------------------------------------------------
     // Per-pane container multiTree tests
     // ------------------------------------------------------------------
@@ -5674,6 +5774,7 @@ public class BundleWriterTests
         Assert.Contains("slide.linkText", velocity);
 
         // External CSS and JS must be linked (no inline <style>/<script> for CSP compliance).
+        // When no theme prefix is provided, paths fall back to the site root.
         Assert.Contains("<link rel=\"stylesheet\" href=\"/slider.css\"", velocity);
         Assert.Contains("<script src=\"/slider.js\"", velocity);
         Assert.DoesNotContain("<style>", velocity);
@@ -5686,6 +5787,16 @@ public class BundleWriterTests
 
         // data-slider-id attribute is used by external JS to initialise each instance.
         Assert.Contains("data-slider-id", velocity);
+    }
+
+    [Fact]
+    public void BuildSliderContainerVelocity_WithThemePrefix_UsesThemePaths()
+    {
+        string velocity = BundleWriter.BuildSliderContainerVelocity("/application/themes/Xcillion");
+
+        // CSS and JS must reference the theme directory, not the site root.
+        Assert.Contains("<link rel=\"stylesheet\" href=\"/application/themes/Xcillion/slider.css\"", velocity);
+        Assert.Contains("<script src=\"/application/themes/Xcillion/slider.js\"", velocity);
     }
 
     [Fact]
