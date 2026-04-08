@@ -625,6 +625,7 @@ public static class DnnXmlParser
                 .ToList();
 
             int slideCount = useScraped ? scrapedSlides!.Count : sliderImages.Count;
+            string fallbackTitle(int idx) => $"Slide {idx + 1}";
 
             for (int i = 0; i < slideCount; i++)
             {
@@ -638,7 +639,7 @@ public static class DnnXmlParser
                     var s = scrapedSlides![i];
                     slideImage = s.ImageUrl;
                     slideTitle = !string.IsNullOrWhiteSpace(s.Caption)
-                        ? s.Caption : $"Slide {i + 1}";
+                        ? s.Caption : fallbackTitle(i);
                     slideDescription = s.Description ?? string.Empty;
                     slideLink = s.LinkUrl ?? "#";
                 }
@@ -647,7 +648,7 @@ public static class DnnXmlParser
                     slideImage = "/" + sliderImages[i].TrimStart('/');
                     slideTitle = Path.GetFileNameWithoutExtension(sliderImages[i]);
                     if (string.IsNullOrWhiteSpace(slideTitle))
-                        slideTitle = $"Slide {i + 1}";
+                        slideTitle = fallbackTitle(i);
                     slideDescription = string.Empty;
                     slideLink = "#";
                 }
