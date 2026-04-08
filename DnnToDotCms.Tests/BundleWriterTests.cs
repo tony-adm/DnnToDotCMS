@@ -6006,6 +6006,99 @@ public class BundleWriterTests
         Assert.Contains(sliderUuid, pageXml);
     }
 
+    [Fact]
+    public void Write_WithSliderSlides_TemplateHeaderContainsJqueryCdnLinks()
+    {
+        // Templates that contain slider panes must include jQuery, jQuery
+        // Migrate, and jQuery UI CDN script tags in the header so the
+        // slider JavaScript works (DNN ships jQuery by default but the
+        // exported bundle doesn't include it).
+        var slideCt = new DotCmsContentType
+        {
+            Name     = "Slide",
+            Variable = "slide",
+            Fields   =
+            [
+                new DotCmsField { Name = "Title", Variable = "title", DataType = "TEXT",
+                    Clazz = "com.dotcms.contenttype.model.field.TextField" },
+            ]
+        };
+        var sliderCt = new DotCmsContentType
+        {
+            Name     = "Slider",
+            Variable = "slider",
+            Fields   =
+            [
+                new DotCmsField { Name = "Title",  Variable = "title",  DataType = "TEXT",
+                    Clazz = "com.dotcms.contenttype.model.field.TextField" },
+                new DotCmsField { Name = "Slides", Variable = "slides", DataType = "SYSTEM",
+                    Clazz = "com.dotcms.contenttype.model.field.RelationshipField",
+                    RelationType = "slide" },
+            ]
+        };
+
+        string tabId = "tab-jquery-cdn";
+        var pages = new[]
+        {
+            new DnnPortalPage(tabId, "Home", "Home", "", "//Home", 0, true, ""),
+        };
+        var contents = new[]
+        {
+            new DnnHtmlContent("Welcome", "<p>Hello</p>", TabUniqueId: tabId, PaneName: "ContentPane"),
+        };
+        var slides = new[]
+        {
+            new DnnSliderSlide("Slide A", "", "/img/a.jpg", "#",
+                TabUniqueId: tabId, PaneName: "ContentPane", SortOrder: 0),
+        };
+
+        using var ms = new MemoryStream();
+        BundleWriter.Write([MakeHtmlContentType(), slideCt, sliderCt], ms,
+            siteName: "test-site", htmlContents: contents, pages: pages,
+            sliderSlides: slides);
+        ms.Position = 0;
+
+        var entries = ReadAllTarEntries(ms);
+        var templateEntry = entries.FirstOrDefault(e => e.Name.Contains(".template.template.xml"));
+        Assert.NotNull(templateEntry.Content);
+        string templateXml = Encoding.UTF8.GetString(templateEntry.Content);
+
+        // The <header> element must contain CDN links for jQuery 3.5.1,
+        // jQuery Migrate 3.4.0, and jQuery UI 1.12.2.
+        Assert.Contains("jquery-3.5.1.min.js", templateXml);
+        Assert.Contains("jquery-migrate-3.4.0.min.js", templateXml);
+        Assert.Contains("jquery-ui.min.js", templateXml);
+        Assert.Contains("code.jquery.com", templateXml);
+    }
+
+    [Fact]
+    public void Write_WithoutSliderSlides_TemplateHeaderDoesNotContainJquery()
+    {
+        // Templates for pages without sliders must NOT include jQuery CDN
+        // links so we don't add unnecessary overhead.
+        var pages = new[]
+        {
+            new DnnPortalPage("tab1", "About", "About", "", "//About", 0, true, ""),
+        };
+        var contents = new[]
+        {
+            new DnnHtmlContent("About us", "<p>Info</p>", TabUniqueId: "tab1", PaneName: "ContentPane"),
+        };
+
+        using var ms = new MemoryStream();
+        BundleWriter.Write([MakeHtmlContentType()], ms,
+            siteName: "test-site", htmlContents: contents, pages: pages);
+        ms.Position = 0;
+
+        var entries = ReadAllTarEntries(ms);
+        var templateEntry = entries.FirstOrDefault(e => e.Name.Contains(".template.template.xml"));
+        Assert.NotNull(templateEntry.Content);
+        string templateXml = Encoding.UTF8.GetString(templateEntry.Content);
+
+        Assert.DoesNotContain("jquery-3.5.1.min.js", templateXml);
+        Assert.DoesNotContain("jquery-migrate-3.4.0.min.js", templateXml);
+    }
+
     private static List<(string Name, byte[] Content)> ReadAllTarEntries(Stream gzStream)
     {
         gzStream.Position = 0;
