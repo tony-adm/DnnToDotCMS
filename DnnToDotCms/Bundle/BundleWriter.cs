@@ -390,6 +390,14 @@ public static class BundleWriter
                 sliderContainerXml);
             manifestEntries.Add(("containers", sliderContainerId, sliderContainerInode, "Slider", "", ""));
 
+            // Write external slider CSS and JS as static resources at the
+            // site root so the <link> and <script src> in the Velocity
+            // template can reference /slider.css and /slider.js.  This
+            // keeps all styles and behaviour out of inline blocks for CSP
+            // compliance.
+            WriteTextEntry(tar, "ROOT/slider.css", BuildSliderCss());
+            WriteTextEntry(tar, "ROOT/slider.js", BuildSliderJs());
+
             // Group slides by (TabUniqueId, PaneName) → list of slides.
             // Each group becomes one Slider contentlet.
             var sliderGroups = sliderSlides
@@ -912,7 +920,19 @@ public static class BundleWriter
 
                 // Write the actual file bytes under assets/{x}/{y}/{inode}/fileAsset/{filename}
                 string assetPath = BuildAssetPath(inode, pf.FileName);
-                WriteBinaryEntry(tar, assetPath, pf.Content);
+
+                // Rewrite DNN portal-relative url() references inside CSS
+                // files so that /Portals/{PortalName}/path → /path.
+                byte[] portalFileContent = pf.Content;
+                if (pf.FileName.EndsWith(".css", StringComparison.OrdinalIgnoreCase))
+                {
+                    string cssText = Encoding.UTF8.GetString(pf.Content);
+                    string rewritten = RewriteCssPortalUrls(cssText);
+                    if (!ReferenceEquals(rewritten, cssText))
+                        portalFileContent = Encoding.UTF8.GetBytes(rewritten);
+                }
+
+                WriteBinaryEntry(tar, assetPath, portalFileContent);
 
                 // Write the contentlet XML.
                 string fileContentXml = BuildFileAssetXml(
@@ -959,7 +979,7 @@ public static class BundleWriter
                     // All portal files (including Images/) are written to
                     // ROOT/{folderPath}/{fileName}, matching the uniform
                     // {{PortalRoot}} → "/" replacement.
-                    WriteBinaryEntry(tar, "ROOT/" + normalizedFolderPath + pf.FileName, pf.Content);
+                    WriteBinaryEntry(tar, "ROOT/" + normalizedFolderPath + pf.FileName, portalFileContent);
                 }
             }
         }
@@ -1750,160 +1770,198 @@ public static class BundleWriter
         // .slide-container, .slide-item, .slide-title, .slide-desc,
         // .slide-arrows, .slide-nav, .dot, etc.
         //
+        // CSS and JS are kept in separate files (slider.css / slider.js)
+        // linked here for CSP compliance — no inline <style> or <script>
+        // blocks.  The JS self-initialises each .slideshow section via
+        // data-slider-id attributes, so multiple slider instances on the
+        // same page work independently.
+        //
         // $velocityCount provides unique IDs per container instance,
         // mirroring the DNN module ID pattern.
         return """
             #set($modId = ${velocityCount})
-            <style>
-              /* 569px matches the original FisSlider module inline style height */
-              #Items-${modId} .slideshowContent { position: relative; height: 569px; width: 100%; }
-              #Items-${modId} .slide-item { background-size: cover !important; background-position: 50% 50% !important; background-repeat: no-repeat !important; position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: none; }
-              #Items-${modId} .slide-item.active { display: block; }
-              #Items-${modId} .slide-text-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; padding: 5% 4% 3% 15%; background-color: rgba(0,0,0,.15); }
-              @media (max-width: 990px) {
-                #Items-${modId} .slide-text-container { padding: 7% 3% 7% 3%; }
-              }
-            </style>
-            <div id="mvcContainer-${modId}" class="Mvc-FisSliderModule-Container">
-              <div id="Items-${modId}">
-                <section id="slideshow${modId}" class="slideshow" aria-roledescription="carousel" aria-label="$!{dotContentMap.title}">
-                  <div id="slideshowContent${modId}" class="slideshowContent">
-                    <div id="slideContainer${modId}" class="slide-container" aria-live="off">
-                      #set($slideIdx = 0)
-                      #set($slideTotal = $dotContentMap.slides.size())
-                      #foreach($slide in $dotContentMap.slides)
-                        #if($slideIdx == 0)
-                          #set($activeClass = "active")
-                          #set($ariaHidden = "false")
-                        #else
-                          #set($activeClass = "")
-                          #set($ariaHidden = "true")
-                        #end
-                        <div class="slide-item slide-item-${modId} slide-left ${activeClass}" style="background: url('$!{slide.image}');" role="group" aria-roledescription="slide" aria-label="$math.add($slideIdx, 1) of ${slideTotal}" aria-hidden="${ariaHidden}">
-                          <div class="sr-only"><span aria-label="Slide description">$!{slide.title}</span></div>
-                          <div class="slide-text-container">
-                            <div class="slide-title">
-                              <p class="h1"><span class="s-title">$!{slide.title}</span></p>
-                            </div>
-                            <div class="slide-desc">
-                              #if($slide.description && $slide.description != "")
-                                <p>$slide.description</p>
-                              #end
-                              #if($slide.link && $slide.link != "" && $slide.link != "#")
-                                <span class="linkButtonContainer">
-                                  #set($btnLabel = $!{slide.linkText})
-                                  #if(!$btnLabel || $btnLabel == "")
-                                    #set($btnLabel = "Learn More")
-                                  #end
-                                  <a aria-label="$!{slide.title}" class="btn btn-primary slide-link" href="$slide.link" target="_self">$btnLabel</a>
-                                </span>
-                              #end
-                            </div>
+            <link rel="stylesheet" href="/slider.css" />
+            <script src="/slider.js"></script>
+            <div class="Mvc-FisSliderModule-Container">
+              <section class="slideshow" data-slider-id="${modId}" aria-roledescription="carousel" aria-label="$!{dotContentMap.title}">
+                <div class="slideshowContent">
+                  <div class="slide-container" aria-live="off">
+                    #set($slideIdx = 0)
+                    #set($slideTotal = $dotContentMap.slides.size())
+                    #foreach($slide in $dotContentMap.slides)
+                      #if($slideIdx == 0)
+                        #set($activeClass = "active")
+                        #set($ariaHidden = "false")
+                      #else
+                        #set($activeClass = "")
+                        #set($ariaHidden = "true")
+                      #end
+                      <div class="slide-item ${activeClass}" style="background-image: url('$!{slide.image}');" role="group" aria-roledescription="slide" aria-label="$math.add($slideIdx, 1) of ${slideTotal}" aria-hidden="${ariaHidden}">
+                        <div class="sr-only"><span aria-label="Slide description">$!{slide.title}</span></div>
+                        <div class="slide-text-container">
+                          <div class="slide-title">
+                            <p class="h1"><span class="s-title">$!{slide.title}</span></p>
+                          </div>
+                          <div class="slide-desc">
+                            #if($slide.description && $slide.description != "")
+                              <p>$slide.description</p>
+                            #end
+                            #if($slide.link && $slide.link != "" && $slide.link != "#")
+                              <span class="linkButtonContainer">
+                                #set($btnLabel = $!{slide.linkText})
+                                #if(!$btnLabel || $btnLabel == "")
+                                  #set($btnLabel = "Learn More")
+                                #end
+                                <a aria-label="$!{slide.title}" class="btn btn-primary slide-link" href="$slide.link" target="_self">$btnLabel</a>
+                              </span>
+                            #end
                           </div>
                         </div>
-                        #set($slideIdx = $slideIdx + 1)
-                      #end
-                    </div>
-                    <div class="slide-arrows slide-navStyle">
-                      <button type="button" aria-controls="slideContainer${modId}" class="prev active" aria-label="Previous Slide"><span class="fa fa-angle-left"></span></button>
-                      <button type="button" aria-controls="slideContainer${modId}" class="next active" aria-label="Next Slide"><span class="fa fa-angle-right"></span></button>
-                    </div>
-                    <ul class="slide-nav slide-navStyle">
-                      #set($dotIdx = 1)
-                      #foreach($slide in $dotContentMap.slides)
-                        #if($dotIdx == 1)
-                          #set($dotActive = "active")
-                          #set($ariaCurrent = "true")
-                        #else
-                          #set($dotActive = "")
-                          #set($ariaCurrent = "false")
-                        #end
-                        <li><button aria-controls="slideContainer${modId}" type="button" class="dot dot-${modId} ${dotActive}" aria-label="Switch to Slide ${dotIdx}" aria-current="${ariaCurrent}"><span class="fas fa-circle"></span></button></li>
-                        #set($dotIdx = $dotIdx + 1)
-                      #end
-                    </ul>
+                      </div>
+                      #set($slideIdx = $slideIdx + 1)
+                    #end
                   </div>
-                </section>
-              </div>
+                  <div class="slide-arrows">
+                    <button type="button" class="prev" aria-label="Previous Slide"><span class="fa fa-angle-left"></span></button>
+                    <button type="button" class="next" aria-label="Next Slide"><span class="fa fa-angle-right"></span></button>
+                  </div>
+                  <ul class="slide-nav">
+                    #set($dotIdx = 1)
+                    #foreach($slide in $dotContentMap.slides)
+                      #if($dotIdx == 1)
+                        #set($dotActive = "active")
+                        #set($ariaCurrent = "true")
+                      #else
+                        #set($dotActive = "")
+                        #set($ariaCurrent = "false")
+                      #end
+                      <li><button type="button" class="dot ${dotActive}" aria-label="Switch to Slide ${dotIdx}" aria-current="${ariaCurrent}"></button></li>
+                      #set($dotIdx = $dotIdx + 1)
+                    #end
+                  </ul>
+                </div>
+              </section>
             </div>
-            <script>
-            (function(){
-              var modId = '${modId}';
-              var slides = document.getElementsByClassName('slide-item-' + modId);
-              var dots = document.getElementsByClassName('dot-' + modId);
-              var slideIndex = 0;
-              var timer = null;
-              var interval = 5000; /* ms between auto-advance slides */
-              var autoPlay = true;
-              var mouseOver = false;
+            """;
+    }
 
-              function showSlide(n) {
-                if (slides.length === 0) return;
-                slideIndex = ((n % slides.length) + slides.length) % slides.length;
-                for (var i = 0; i < slides.length; i++) {
-                  slides[i].style.display = 'none';
-                  slides[i].className = slides[i].className.replace(/ ?active/g, '');
-                  slides[i].setAttribute('aria-hidden', 'true');
+    /// <summary>
+    /// Returns the content of the external <c>slider.css</c> file written
+    /// alongside the slider container.  All slider styles live here so that
+    /// no inline <c>&lt;style&gt;</c> block is needed (CSP compliance).
+    /// </summary>
+    internal static string BuildSliderCss()
+    {
+        return """
+            /* FisSlider — external stylesheet for CSP compliance */
+            .slideshowContent { position: relative; height: 569px; width: 100%; overflow: hidden; }
+            .slide-item { background-size: cover !important; background-position: 50% 50% !important; background-repeat: no-repeat !important; position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; transition: opacity 0.8s ease-in-out; }
+            .slide-item.active { opacity: 1; }
+            .slide-text-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; padding: 5% 4% 3% 15%; }
+            .slide-arrows { position: absolute; top: 50%; width: 100%; display: flex; justify-content: space-between; transform: translateY(-50%); z-index: 10; pointer-events: none; padding: 0 10px; box-sizing: border-box; }
+            .slide-arrows button { pointer-events: auto; background: rgba(0,0,0,0.4); color: #fff; border: none; font-size: 2rem; width: 44px; height: 44px; cursor: pointer; border-radius: 50%; display: flex; align-items: center; justify-content: center; transition: background 0.3s; }
+            .slide-arrows button:hover { background: rgba(0,0,0,0.7); }
+            .slide-nav { position: absolute; bottom: 15px; left: 50%; transform: translateX(-50%); z-index: 10; display: flex; list-style: none; margin: 0; padding: 0; gap: 8px; }
+            .slide-nav li { list-style: none; }
+            .slide-nav .dot { background: rgba(255,255,255,0.5); border: none; width: 14px; height: 14px; border-radius: 50%; cursor: pointer; padding: 0; transition: background 0.3s; }
+            .slide-nav .dot.active { background: #fff; }
+            @media (max-width: 990px) {
+              .slide-text-container { padding: 7% 3% 7% 3%; }
+            }
+            """;
+    }
+
+    /// <summary>
+    /// Returns the content of the external <c>slider.js</c> file.
+    /// The script self-initialises every <c>.slideshow[data-slider-id]</c>
+    /// section on the page, so multiple slider instances work independently
+    /// and no inline <c>&lt;script&gt;</c> block is required (CSP compliance).
+    /// </summary>
+    internal static string BuildSliderJs()
+    {
+        return """
+            /* FisSlider — external script for CSP compliance.
+               Self-initialises each .slideshow[data-slider-id] section. */
+            (function() {
+              function initSlider(section) {
+                if (section.getAttribute('data-slider-init')) return;
+                section.setAttribute('data-slider-init', 'true');
+
+                var container = section.querySelector('.slideshowContent');
+                if (!container) return;
+                var slides = container.querySelectorAll('.slide-item');
+                var dots   = container.querySelectorAll('.slide-nav .dot');
+                var slideIndex = 0;
+                var timer = null;
+                var interval = 5000;
+                var autoPlay = true;
+                var mouseOver = false;
+
+                function showSlide(n) {
+                  if (slides.length === 0) return;
+                  slideIndex = ((n % slides.length) + slides.length) % slides.length;
+                  for (var i = 0; i < slides.length; i++) {
+                    slides[i].className = slides[i].className.replace(/ ?active/g, '');
+                    slides[i].setAttribute('aria-hidden', 'true');
+                  }
+                  slides[slideIndex].className += ' active';
+                  slides[slideIndex].setAttribute('aria-hidden', 'false');
+                  for (var j = 0; j < dots.length; j++) {
+                    dots[j].className = dots[j].className.replace(/ ?active/g, '');
+                    dots[j].setAttribute('aria-current', 'false');
+                  }
+                  if (dots.length > slideIndex) {
+                    dots[slideIndex].className += ' active';
+                    dots[slideIndex].setAttribute('aria-current', 'true');
+                  }
                 }
-                slides[slideIndex].style.display = 'block';
-                slides[slideIndex].className += ' active';
-                slides[slideIndex].setAttribute('aria-hidden', 'false');
-                for (var j = 0; j < dots.length; j++) {
-                  dots[j].className = dots[j].className.replace(/ ?active/g, '');
-                  dots[j].setAttribute('aria-current', 'false');
+
+                function nextSlide() { showSlide(slideIndex + 1); }
+                function prevSlide() { showSlide(slideIndex - 1); }
+
+                function startAutoPlay() {
+                  stopAutoPlay();
+                  if (autoPlay && !mouseOver) {
+                    timer = setTimeout(function tick() {
+                      nextSlide();
+                      timer = setTimeout(tick, interval);
+                    }, interval);
+                  }
                 }
-                if (dots.length > slideIndex) {
-                  dots[slideIndex].className += ' active';
-                  dots[slideIndex].setAttribute('aria-current', 'true');
+
+                function stopAutoPlay() {
+                  if (timer) { clearTimeout(timer); timer = null; }
                 }
-              }
 
-              function nextSlide() { showSlide(slideIndex + 1); }
-              function prevSlide() { showSlide(slideIndex - 1); }
-              function goToSlide(n) { showSlide(n); }
-
-              function startAutoPlay() {
-                stopAutoPlay();
-                if (autoPlay && !mouseOver) {
-                  timer = setTimeout(function tick() {
-                    nextSlide();
-                    timer = setTimeout(tick, interval);
-                  }, interval);
-                }
-              }
-
-              function stopAutoPlay() {
-                if (timer) { clearTimeout(timer); timer = null; }
-              }
-
-              /* Wire prev / next buttons */
-              var container = document.getElementById('slideshowContent' + modId);
-              if (container) {
                 var prevBtn = container.querySelector('.prev');
                 var nextBtn = container.querySelector('.next');
                 if (prevBtn) prevBtn.addEventListener('click', function() { prevSlide(); stopAutoPlay(); startAutoPlay(); });
                 if (nextBtn) nextBtn.addEventListener('click', function() { nextSlide(); stopAutoPlay(); startAutoPlay(); });
-              }
 
-              /* Wire nav dots */
-              for (var d = 0; d < dots.length; d++) {
-                (function(idx) {
-                  dots[idx].addEventListener('click', function() { goToSlide(idx); stopAutoPlay(); startAutoPlay(); });
-                })(d);
-              }
+                for (var d = 0; d < dots.length; d++) {
+                  (function(idx) {
+                    dots[idx].addEventListener('click', function() { showSlide(idx); stopAutoPlay(); startAutoPlay(); });
+                  })(d);
+                }
 
-              /* Pause on hover */
-              var section = document.getElementById('slideshow' + modId);
-              if (section) {
                 section.addEventListener('mouseenter', function() { mouseOver = true; stopAutoPlay(); });
                 section.addEventListener('mouseleave', function() { mouseOver = false; startAutoPlay(); });
+
+                showSlide(0);
+                startAutoPlay();
               }
 
-              /* Initialise */
-              showSlide(0);
-              startAutoPlay();
+              function initAll() {
+                var sections = document.querySelectorAll('.slideshow[data-slider-id]');
+                for (var i = 0; i < sections.length; i++) initSlider(sections[i]);
+              }
+
+              if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', initAll);
+              } else {
+                initAll();
+              }
             })();
-            </script>
             """;
     }
 
@@ -3434,8 +3492,21 @@ public static class BundleWriter
             using var entryStream = entry.Open();
             using var ms = new MemoryStream();
             entryStream.CopyTo(ms);
+            byte[] fileBytes = ms.ToArray();
 
-            themeFiles.Add((relPath, entry.Name, ms.ToArray()));
+            // Rewrite DNN portal-relative url() references inside CSS files
+            // so that /Portals/{PortalName}/path → /path.  This ensures
+            // background-image and other CSS url() values point to the
+            // correct DotCMS location after migration.
+            if (entry.Name.EndsWith(".css", StringComparison.OrdinalIgnoreCase))
+            {
+                string cssText = Encoding.UTF8.GetString(fileBytes);
+                string rewritten = RewriteCssPortalUrls(cssText);
+                if (!ReferenceEquals(rewritten, cssText))
+                    fileBytes = Encoding.UTF8.GetBytes(rewritten);
+            }
+
+            themeFiles.Add((relPath, entry.Name, fileBytes));
         }
 
         // Create per-skin CSS files for templates that do not already have
@@ -3490,7 +3561,12 @@ public static class BundleWriter
                     byte[] content;
                     if (portalFilesByName.TryGetValue(fileName, out DnnPortalFile? match))
                     {
-                        content = match.Content;
+                        // Rewrite DNN portal-relative url() references so
+                        // that CSS background-image paths resolve correctly
+                        // after migration.
+                        string cssText = Encoding.UTF8.GetString(match.Content);
+                        string rewritten = RewriteCssPortalUrls(cssText);
+                        content = Encoding.UTF8.GetBytes(rewritten);
                         // Mark the portal file as consumed so it is not also
                         // written at the site root.
                         consumedPortalFileIds?.Add(match.UniqueId);
@@ -3710,6 +3786,30 @@ public static class BundleWriter
     // ------------------------------------------------------------------
     // Utility helpers
     // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Regex matching DNN portal-relative <c>url()</c> values inside CSS.
+    /// Captures the optional quote character and the path after
+    /// <c>/Portals/{PortalName}/</c> so the replacement drops the
+    /// <c>/Portals/{name}</c> prefix and keeps the rest as a root-relative
+    /// path (e.g. <c>/images/bg.jpg</c>).
+    /// </summary>
+    private static readonly Regex CssPortalUrlRegex = new(
+        @"url\(\s*(['""]?)/Portals/[^/]+/",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>
+    /// Rewrite DNN <c>/Portals/{PortalName}/…</c> paths inside CSS
+    /// <c>url()</c> references to root-relative <c>/…</c> paths so that
+    /// images, fonts, and other assets referenced from CSS files resolve
+    /// correctly after migration to DotCMS.
+    /// </summary>
+    internal static string RewriteCssPortalUrls(string css)
+    {
+        if (string.IsNullOrEmpty(css))
+            return css;
+        return CssPortalUrlRegex.Replace(css, "url($1/");
+    }
 
     private static void WriteTextEntry(TarWriter tar, string path, string content)
     {
