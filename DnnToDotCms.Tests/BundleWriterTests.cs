@@ -5673,18 +5673,75 @@ public class BundleWriterTests
         Assert.Contains("slide.link", velocity);
         Assert.Contains("slide.linkText", velocity);
 
-        // Inline slideshow JavaScript must be present to wire prev/next, dots, and auto-advance.
-        Assert.Contains("<script>", velocity);
-        Assert.Contains("showSlide", velocity);
-        Assert.Contains("nextSlide", velocity);
-        Assert.Contains("prevSlide", velocity);
-        Assert.Contains("startAutoPlay", velocity);
-        Assert.Contains("addEventListener", velocity);
+        // External CSS and JS must be linked (no inline <style>/<script> for CSP compliance).
+        Assert.Contains("<link rel=\"stylesheet\" href=\"/slider.css\"", velocity);
+        Assert.Contains("<script src=\"/slider.js\"", velocity);
+        Assert.DoesNotContain("<style>", velocity);
+        Assert.DoesNotContain("<script>", velocity);
 
-        // Text overlay CSS must position .slide-text-container absolutely over the slide image.
-        Assert.Contains("<style>", velocity);
+        // Text overlay must use slide-text-container class.
         Assert.Contains("slide-text-container", velocity);
-        Assert.Contains("position: absolute", velocity);
+
+        // data-slider-id attribute is used by external JS to initialise each instance.
+        Assert.Contains("data-slider-id", velocity);
+    }
+
+    [Fact]
+    public void BuildSliderCss_ContainsSmoothTransitionAndNavStyles()
+    {
+        string css = BundleWriter.BuildSliderCss();
+
+        // Smooth fade transition (not display:none/block).
+        Assert.Contains("transition: opacity", css);
+        Assert.Contains("opacity: 0", css);
+        Assert.Contains("opacity: 1", css);
+        Assert.DoesNotContain("display: none", css);
+
+        // No overlay background color.
+        Assert.DoesNotContain("background-color", css);
+
+        // Navigation arrows must be styled and visible.
+        Assert.Contains(".slide-arrows", css);
+        Assert.Contains("z-index", css);
+        Assert.Contains(".slide-arrows button", css);
+
+        // Navigation dots must be styled and visible.
+        Assert.Contains(".slide-nav", css);
+        Assert.Contains(".slide-nav .dot", css);
+        Assert.Contains(".dot.active", css);
+    }
+
+    [Fact]
+    public void BuildSliderJs_SelfInitialisesViaDataAttribute()
+    {
+        string js = BundleWriter.BuildSliderJs();
+
+        // Must self-discover sliders via data-slider-id attribute.
+        Assert.Contains("data-slider-id", js);
+        Assert.Contains("data-slider-init", js);
+
+        // Core slide logic must be present.
+        Assert.Contains("showSlide", js);
+        Assert.Contains("nextSlide", js);
+        Assert.Contains("prevSlide", js);
+        Assert.Contains("startAutoPlay", js);
+        Assert.Contains("addEventListener", js);
+
+        // Must use class-based queries, not ID-based lookups.
+        Assert.Contains("querySelectorAll", js);
+        Assert.DoesNotContain("getElementById", js);
+    }
+
+    [Theory]
+    [InlineData("url('/Portals/MyPortal/images/bg.jpg')", "url('/images/bg.jpg')")]
+    [InlineData("url(\"/Portals/FidelityBankTexas/images/Gray.jpg\")", "url(\"/images/Gray.jpg\")")]
+    [InlineData("url(/Portals/VastBank/images/purplebg.jpg)", "url(/images/purplebg.jpg)")]
+    [InlineData("url('/Portals/Acme/Css/font.woff')", "url('/Css/font.woff')")]
+    [InlineData("color: red; /* no url */", "color: red; /* no url */")]
+    public void RewriteCssPortalUrls_RewritesDnnPortalPaths(string input, string expected)
+    {
+        string result = BundleWriter.RewriteCssPortalUrls(input);
+        Assert.Equal(expected, result);
     }
 
     [Fact]
