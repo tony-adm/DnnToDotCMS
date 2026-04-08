@@ -6007,10 +6007,10 @@ public class BundleWriterTests
     }
 
     [Fact]
-    public void Write_WithSliderSlides_TemplateHeaderContainsJqueryCdnLinks()
+    public void Write_WithSliderSlides_TemplateBodyContainsJqueryCdnLinks()
     {
         // Templates that contain slider panes must include jQuery, jQuery
-        // Migrate, and jQuery UI CDN script tags in the header so the
+        // Migrate, and jQuery UI CDN script tags in the body so the
         // slider JavaScript works (DNN ships jQuery by default but the
         // exported bundle doesn't include it).
         var slideCt = new DotCmsContentType
@@ -6063,7 +6063,7 @@ public class BundleWriterTests
         Assert.NotNull(templateEntry.Content);
         string templateXml = Encoding.UTF8.GetString(templateEntry.Content);
 
-        // The <header> element must contain CDN links for jQuery 3.5.1,
+        // The <body> element must contain CDN links for jQuery 3.5.1,
         // jQuery Migrate 3.4.0, and jQuery UI 1.12.2.
         Assert.Contains("jquery-3.5.1.min.js", templateXml);
         Assert.Contains("jquery-migrate-3.4.0.min.js", templateXml);
@@ -6072,10 +6072,10 @@ public class BundleWriterTests
     }
 
     [Fact]
-    public void Write_WithoutSliderSlides_TemplateHeaderStillContainsJquery()
+    public void Write_WithoutSliderSlides_TemplateBodyStillContainsJquery()
     {
-        // All templates must include jQuery CDN links because DNN ships
-        // jQuery by default and migrated pages may depend on it.
+        // All templates must include jQuery CDN links in the body because
+        // DNN ships jQuery by default and migrated pages may depend on it.
         var pages = new[]
         {
             new DnnPortalPage("tab1", "About", "About", "", "//About", 0, true, ""),

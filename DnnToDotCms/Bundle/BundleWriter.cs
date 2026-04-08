@@ -518,9 +518,9 @@ public static class BundleWriter
             // pane where sliders are placed.  This creates a second
             // container slot in the template so DotCMS knows to render
             // slider content in that pane alongside normal HTML content.
-            // Also inject jQuery CDN links into the template header
-            // because DNN includes jQuery by default but it is not
-            // present in the exported bundle.
+            // jQuery CDN links are injected into the template body below
+            // (after this slider loop) so DNN's default jQuery libraries
+            // are available on every page.
             if (sliderContainerId is not null && sliderPaneNames.Count > 0 && paneMap.Count > 0)
             {
                 int maxUuid = paneMap.Values.DefaultIfEmpty(0).Max();
@@ -556,18 +556,19 @@ public static class BundleWriter
             }
 
             // DNN ships jQuery, jQuery Migrate, and jQuery UI by default
-            // but the exported bundle doesn't include them.  Add CDN
-            // script tags to <head> for every template so that pages
-            // relying on jQuery continue to work after migration.
+            // but the exported bundle doesn't include them.  Prepend CDN
+            // script tags to the template body for every template so that
+            // pages relying on jQuery continue to work after migration.
+            // These go into the body (not the <header> field) because
+            // DotCMS push-publish does not reliably render the header
+            // field for code-based templates.
             const string jqueryCdn =
                 "<script src=\"https://code.jquery.com/jquery-3.5.1.min.js\"></script>\n"
                 + "<script src=\"https://code.jquery.com/jquery-migrate-3.4.0.min.js\"></script>\n"
                 + "<script src=\"https://code.jquery.com/ui/1.12.2/jquery-ui.min.js\"></script>";
-            string finalHeader = string.IsNullOrWhiteSpace(header)
-                ? jqueryCdn
-                : header + "\n" + jqueryCdn;
+            finalHtml = jqueryCdn + "\n" + finalHtml;
 
-            string xml = BuildTemplateXml(id, inode, name, finalHtml, contentHostId, themeName, finalHeader);
+            string xml = BuildTemplateXml(id, inode, name, finalHtml, contentHostId, themeName, header);
             WriteTextEntry(tar, $"live/{contentWorkDir}/{id}.template.template.xml", xml);
             manifestEntries.Add(("template", id, inode, name, "", ""));
         }
