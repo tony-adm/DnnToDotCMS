@@ -1691,26 +1691,31 @@ public static class BundleWriter
     /// </summary>
     internal static string BuildSliderContainerVelocity()
     {
-        // The Velocity code accesses the Slider contentlet via
-        // $dotContentMap.get("slider") and then iterates over its
-        // related slides.  FisSlider-specific classes and IDs are
-        // preserved: .Mvc-FisSliderModule-Container, .slideshow,
+        // This code is evaluated PER CONTENTLET by DotCMS's
+        // ContainerLoader.  Inside the container rendering loop,
+        // $dotContentMap is set to the CURRENT Slider contentlet via
+        // $dotcontent.load($contentletId).  Therefore:
+        //   • $dotContentMap.title  → the Slider's title field
+        //   • $dotContentMap.slides → related Slide contentlets
+        //     (resolved via the relationship field)
+        //
+        // FisSlider-specific classes and IDs are preserved:
+        // .Mvc-FisSliderModule-Container, .slideshow,
         // .slide-container, .slide-item, .slide-title, .slide-desc,
         // .slide-arrows, .slide-nav, .dot, etc.
         //
-        // The module ID placeholder $velocityCount provides unique IDs
-        // per container instance, mirroring the DNN module ID pattern.
+        // $velocityCount provides unique IDs per container instance,
+        // mirroring the DNN module ID pattern.
         return """
             #set($modId = ${velocityCount})
-            #foreach($slider in $dotContentMap.get("slider"))
             <div id="mvcContainer-${modId}" class="Mvc-FisSliderModule-Container">
               <div id="Items-${modId}">
-                <section id="slideshow${modId}" class="slideshow" aria-roledescription="carousel" aria-label="$!{slider.title}">
+                <section id="slideshow${modId}" class="slideshow" aria-roledescription="carousel" aria-label="$!{dotContentMap.title}">
                   <div id="slideshowContent${modId}" class="slideshowContent">
                     <div id="slideContainer${modId}" class="slide-container" aria-live="off">
                       #set($slideIdx = 0)
-                      #set($slideTotal = $slider.slides.size())
-                      #foreach($slide in $slider.slides)
+                      #set($slideTotal = $dotContentMap.slides.size())
+                      #foreach($slide in $dotContentMap.slides)
                         #if($slideIdx == 0)
                           #set($activeClass = "active")
                           #set($ariaHidden = "false")
@@ -1749,7 +1754,7 @@ public static class BundleWriter
                     </div>
                     <ul class="slide-nav slide-navStyle">
                       #set($dotIdx = 1)
-                      #foreach($slide in $slider.slides)
+                      #foreach($slide in $dotContentMap.slides)
                         #if($dotIdx == 1)
                           #set($dotActive = "active")
                           #set($ariaCurrent = "true")
@@ -1765,7 +1770,6 @@ public static class BundleWriter
                 </section>
               </div>
             </div>
-            #end
             """;
     }
 
