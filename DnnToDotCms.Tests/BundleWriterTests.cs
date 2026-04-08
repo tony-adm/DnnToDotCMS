@@ -5825,6 +5825,47 @@ public class BundleWriterTests
     }
 
     [Fact]
+    public void BuildSliderCss_SelectorsAreScopedUnderSlideshow()
+    {
+        string css = BundleWriter.BuildSliderCss();
+
+        // All selectors must be scoped under ".slideshow" to prevent
+        // imported DNN skin CSS (e.g. #LoginSlideshow .slideshow .slide-item
+        // { position: relative }) from overriding position: absolute and
+        // making slides disappear.
+        Assert.Contains(".slideshow .slide-item", css);
+        Assert.Contains(".slideshow .slideshowContent", css);
+        Assert.Contains(".slideshow .slide-text-container", css);
+        Assert.Contains(".slideshow .slide-arrows", css);
+        Assert.Contains(".slideshow .slide-nav", css);
+
+        // position: absolute on .slide-item must be !important to beat
+        // ID-level selectors from DNN skin CSS.
+        Assert.Contains("position: absolute !important", css);
+    }
+
+    [Fact]
+    public void BuildNavSnippet_ResetsChildrenEachIteration()
+    {
+        // The Velocity snippet must reset $children to an empty list []
+        // at the start of each #foreach iteration to work around the
+        // Velocity quirk where #set does not clear a variable when the
+        // RHS evaluates to null.  Without this, a previous iteration's
+        // children could leak into the current one.
+        string snippet = BundleWriter.BuildNavSnippet(
+            @"<dnn:MENU runat=""server"" />");
+
+        // The reset must appear inside the loop before reading $navItem.children.
+        int foreachIdx = snippet.IndexOf("#foreach($navItem in $navItems)");
+        int resetIdx   = snippet.IndexOf("#set($children = [])", foreachIdx);
+        int readIdx    = snippet.IndexOf("#set($children = $navItem.children)", foreachIdx);
+
+        Assert.True(foreachIdx > 0, "#foreach not found");
+        Assert.True(resetIdx > foreachIdx, "#set($children = []) reset not found after #foreach");
+        Assert.True(readIdx > resetIdx, "$navItem.children read should come after the reset");
+    }
+
+    [Fact]
     public void BuildSliderJs_SelfInitialisesViaDataAttribute()
     {
         string js = BundleWriter.BuildSliderJs();
