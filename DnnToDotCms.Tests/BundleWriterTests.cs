@@ -5700,8 +5700,8 @@ public class BundleWriterTests
     public void Write_WithSliderSlides_SliderContentletHasRelationshipField()
     {
         // Verify the parent Slider contentlet stores related slide identifiers
-        // in the "slides" map field (comma-separated) rather than using
-        // <com.dotmarketing.beans.Tree> objects in the <tree> element.
+        // in the "slides" map field as a <list> of <string> elements rather
+        // than a comma-separated string or <com.dotmarketing.beans.Tree> objects.
         var slideCt = new DotCmsContentType
         {
             Name     = "Slide",
@@ -5756,8 +5756,13 @@ public class BundleWriterTests
         // Must use <tree/> (empty), not <tree> with children.
         Assert.Contains("<tree/>", sliderXml);
 
-        // The "slides" field in the map must contain slide identifiers.
+        // The "slides" field in the map must contain slide identifiers in <list> format.
         Assert.Contains("slides", sliderXml);
+        Assert.Contains("<list>", sliderXml);
+
+        // Must NOT use a comma-separated string for the slides field — DotCMS
+        // expects java.util.List, not String.
+        Assert.DoesNotMatch(@"<string>slides</string><string>[^<]*,[^<]*</string>", sliderXml);
 
         // Extract the Slide contentlet identifiers from their content.xml entries.
         var slideXmls = contentXmlEntries

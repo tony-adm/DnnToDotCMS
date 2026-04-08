@@ -1179,6 +1179,23 @@ public static class BundleWriter
     private static string EFile(string key, string path)
         => E(key, $"<file>{path}</file>");
 
+    /// <summary>
+    /// Serializes a list of strings as an XStream <c>&lt;list&gt;</c> element
+    /// inside a map entry.  DotCMS relationship field values must be lists,
+    /// not comma-separated strings, because <c>Contentlet(Map)</c> copies
+    /// the map via <c>putAll()</c> (bypassing <c>setProperty()</c>), and
+    /// downstream code casts the value to <c>List</c>.
+    /// </summary>
+    private static string EList(string key, IEnumerable<string> items)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.Append("<list>");
+        foreach (string item in items)
+            sb.Append($"<string>{System.Security.SecurityElement.Escape(item)}</string>");
+        sb.Append("</list>");
+        return E(key, sb.ToString());
+    }
+
     private static string BuildHostXml(string hostId, string hostInode, string hostname)
     {
         string now         = DateTime.UtcNow.ToString(XmlTimestampFormat);
@@ -1440,15 +1457,16 @@ public static class BundleWriter
         string now      = DateTime.UtcNow.ToString(XmlTimestampFormat);
         string xmlTitle = System.Security.SecurityElement.Escape(Truncate(title, MaxVarcharLength)) ?? string.Empty;
 
-        // Store the related slide identifiers as a comma-separated string
-        // in the "slides" relationship field of the contentlet map.  This
-        // is how DotCMS conveys relationship data in push-publish bundles:
-        // the field variable name maps to a list of related identifiers.
+        // Store the related slide identifiers as an XStream <list> in the
+        // "slides" relationship field of the contentlet map.  DotCMS
+        // expects relationship field values to be java.util.List, not a
+        // comma-separated string, because the Contentlet(Map) constructor
+        // copies the map via putAll() (bypassing setProperty()), and
+        // downstream code casts the value to List.
         // NOTE: The <tree> element must remain empty (<tree/>) because
         // PushContentWrapper.tree is typed List<Map<String,Object>> and
         // putting <com.dotmarketing.beans.Tree> objects there causes a
         // ClassCastException on import.
-        string slidesValue = string.Join(",", slideIdentifiers);
 
         return $"""
             <com.dotcms.publisher.pusher.wrapper.PushContentWrapper>
@@ -1470,7 +1488,7 @@ public static class BundleWriter
                   {EStr("host", hostId)}
                   {EStr("stInode", contentTypeId)}
                   {EStr("title", xmlTitle)}
-                  {EStr("slides", slidesValue)}
+                  {EList("slides", slideIdentifiers)}
                   {EStr("owner", "dotcms.org.1")}
                   {EStr("identifier", identifier)}
                   {ELong("languageId", 1)}
