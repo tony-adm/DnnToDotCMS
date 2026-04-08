@@ -1725,6 +1725,7 @@ public static class BundleWriter
         return """
             #set($modId = ${velocityCount})
             <style>
+              /* 569px matches the original FisSlider module inline style height */
               #Items-${modId} .slideshowContent { position: relative; height: 569px; width: 100%; }
               #Items-${modId} .slide-item { background-size: cover !important; background-position: 50% 50% !important; background-repeat: no-repeat !important; position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: none; }
               #Items-${modId} .slide-item.active { display: block; }
@@ -1802,6 +1803,7 @@ public static class BundleWriter
               var dots = document.getElementsByClassName('dot-' + modId);
               var slideIndex = 0;
               var timer = null;
+              var interval = 5000; /* ms between auto-advance slides */
               var autoPlay = true;
               var mouseOver = false;
 
@@ -1835,8 +1837,8 @@ public static class BundleWriter
                 if (autoPlay && !mouseOver) {
                   timer = setTimeout(function tick() {
                     nextSlide();
-                    timer = setTimeout(tick, 5000);
-                  }, 5000);
+                    timer = setTimeout(tick, interval);
+                  }, interval);
                 }
               }
 
