@@ -5804,6 +5804,90 @@ public class BundleWriterTests
     }
 
     [Fact]
+    public void Write_WithSliderSlides_SlideContentletsContainTreeEntries()
+    {
+        // DotCMS ContentHandler.cleanTrees() deletes ALL tree entries for every
+        // contentlet during push-publish import (both parent and child sides),
+        // then regenerateTree() recreates them from the contentlet's <tree>
+        // element.  Without a tree entry on the child slide, importing the
+        // slide AFTER the slider would remove the relationship record that
+        // the slider's tree created, leaving $dotContentMap.slides empty.
+        var slideCt = new DotCmsContentType
+        {
+            Name     = "Slide",
+            Variable = "slide",
+            Fields   =
+            [
+                new DotCmsField { Name = "Title", Variable = "title", DataType = "TEXT",
+                    Clazz = "com.dotcms.contenttype.model.field.TextField" },
+                new DotCmsField { Name = "Image", Variable = "image", DataType = "TEXT",
+                    Clazz = "com.dotcms.contenttype.model.field.TextField" },
+            ]
+        };
+        var sliderCt = new DotCmsContentType
+        {
+            Name     = "Slider",
+            Variable = "slider",
+            Fields   =
+            [
+                new DotCmsField { Name = "Title",  Variable = "title",  DataType = "TEXT",
+                    Clazz = "com.dotcms.contenttype.model.field.TextField" },
+                new DotCmsField { Name = "Slides", Variable = "slides", DataType = "SYSTEM",
+                    Clazz = "com.dotcms.contenttype.model.field.RelationshipField",
+                    RelationType = "slide" },
+            ]
+        };
+
+        var slides = new[]
+        {
+            new DnnSliderSlide("Slide A", "", "/img/a.jpg", "#",
+                TabUniqueId: "tab-1", PaneName: "BannerPane", SortOrder: 0),
+            new DnnSliderSlide("Slide B", "", "/img/b.jpg", "#",
+                TabUniqueId: "tab-1", PaneName: "BannerPane", SortOrder: 1),
+        };
+
+        using var ms = new MemoryStream();
+        BundleWriter.Write([slideCt, sliderCt], ms, siteName: "test-site", sliderSlides: slides);
+        ms.Position = 0;
+
+        var entries = ReadAllTarEntries(ms);
+        var contentXmlEntries = entries.Where(e =>
+            e.Name.Contains(".content.xml") && !e.Name.Contains("host")).ToList();
+
+        // Find the Slider parent identifier.
+        string sliderXml = contentXmlEntries
+            .Select(e => Encoding.UTF8.GetString(e.Content))
+            .First(xml => xml.Contains("<assetSubType>slider</assetSubType>"));
+        var sliderIdMatch = System.Text.RegularExpressions.Regex.Match(sliderXml,
+            @"<id>\s*<id>([^<]+)</id>");
+        Assert.True(sliderIdMatch.Success, "Could not extract slider identifier");
+        string sliderId = sliderIdMatch.Groups[1].Value;
+
+        // Each Slide contentlet must have a <tree> entry referencing its parent Slider.
+        var slideXmls = contentXmlEntries
+            .Select(e => Encoding.UTF8.GetString(e.Content))
+            .Where(xml => xml.Contains("<assetSubType>slide</assetSubType>"))
+            .ToList();
+        Assert.Equal(2, slideXmls.Count);
+
+        foreach (string slideXml in slideXmls)
+        {
+            // The tree must NOT be empty.
+            Assert.DoesNotContain("<tree/>", slideXml);
+            Assert.Contains("<tree>", slideXml);
+
+            // Must contain the parent slider's identifier.
+            Assert.Contains(sliderId, slideXml);
+
+            // Must reference the relationship type.
+            Assert.Contains("slider.slides", slideXml);
+
+            // Must contain the relation_type key.
+            Assert.Contains("relation_type", slideXml);
+        }
+    }
+
+    [Fact]
     public void Write_WithSliderSlides_BundleContainsRelationshipXml()
     {
         // Verify the bundle contains a .relationship.xml file that defines

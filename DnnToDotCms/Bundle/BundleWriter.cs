@@ -403,6 +403,14 @@ public static class BundleWriter
                 var slidesInGroup = group.OrderBy(s => s.SortOrder).ToList();
                 sliderPaneNames.Add(paneName);
 
+                // Pre-generate the Slider identifier so each child Slide
+                // can include a tree entry referencing its parent.
+                string sliderTitle = slidesInGroup.Count > 0
+                    ? $"Slider – {slidesInGroup[0].Title}" : "Slider";
+                string sliderId    = Guid.NewGuid().ToString();
+                string sliderInode = Guid.NewGuid().ToString();
+                string sliderRelationType = $"{sliderContentTypeVariable}.slides";
+
                 // Write each Slide contentlet.
                 var slideIdentifiers = new List<string>();
                 foreach (DnnSliderSlide slide in slidesInGroup)
@@ -415,7 +423,7 @@ public static class BundleWriter
                         slideId, slideInode, slide.Title, slide.Description,
                         slide.ImageUrl, slide.LinkUrl, slide.LinkText,
                         contentHostId, slideContentTypeId, slideContentTypeVariable,
-                        slide.SortOrder);
+                        slide.SortOrder, sliderId, sliderRelationType);
                     WriteTextEntry(tar,
                         $"live/{contentWorkDir}/1/{slideId}.content.xml",
                         slideXml);
@@ -430,10 +438,6 @@ public static class BundleWriter
                 }
 
                 // Write one Slider (parent) contentlet that references all its slides.
-                string sliderTitle = slidesInGroup.Count > 0
-                    ? $"Slider – {slidesInGroup[0].Title}" : "Slider";
-                string sliderId    = Guid.NewGuid().ToString();
-                string sliderInode = Guid.NewGuid().ToString();
 
                 string sliderXml = BuildSliderContentletXml(
                     sliderId, sliderInode, sliderTitle, slideIdentifiers,
@@ -1472,7 +1476,9 @@ public static class BundleWriter
         string hostId,
         string contentTypeId,
         string contentTypeVariable,
-        int sortOrder = 0)
+        int sortOrder = 0,
+        string parentSliderIdentifier = "",
+        string relationTypeValue = "")
     {
         string now             = DateTime.UtcNow.ToString(XmlTimestampFormat);
         string xmlTitle        = System.Security.SecurityElement.Escape(Truncate(title, MaxVarcharLength)) ?? string.Empty;
@@ -1480,6 +1486,30 @@ public static class BundleWriter
         string xmlImage        = System.Security.SecurityElement.Escape(imageUrl ?? string.Empty) ?? string.Empty;
         string xmlLink         = System.Security.SecurityElement.Escape(linkUrl ?? string.Empty) ?? string.Empty;
         string xmlLinkText     = System.Security.SecurityElement.Escape(linkText ?? string.Empty) ?? string.Empty;
+
+        // DotCMS ContentHandler.cleanTrees() deletes ALL tree entries for
+        // every contentlet during push-publish import (both parent and child
+        // sides), then regenerateTree() recreates them from the <tree>
+        // element.  DotCMS's own ContentBundler populates tree entries on
+        // BOTH the parent AND child contentlets (via TREE_QUERY: "select *
+        // from tree where child=? or parent=?").  Without a tree entry on
+        // the child slide, importing the slide AFTER the slider would remove
+        // the relationship record created by the slider's tree, leaving
+        // $dotContentMap.slides empty at render time.
+        string treeXml;
+        if (!string.IsNullOrEmpty(parentSliderIdentifier) && !string.IsNullOrEmpty(relationTypeValue))
+        {
+            treeXml = $"<tree><map>"
+                + $"<entry><string>parent</string><string>{parentSliderIdentifier}</string></entry>"
+                + $"<entry><string>child</string><string>{identifier}</string></entry>"
+                + $"<entry><string>relation_type</string><string>{relationTypeValue}</string></entry>"
+                + $"<entry><string>tree_order</string><int>{sortOrder}</int></entry>"
+                + "</map></tree>";
+        }
+        else
+        {
+            treeXml = "<tree/>";
+        }
 
         return $"""
             <com.dotcms.publisher.pusher.wrapper.PushContentWrapper>
@@ -1526,7 +1556,7 @@ public static class BundleWriter
                 <assetSubType>{contentTypeVariable}</assetSubType>
               </id>
               <multiTree/>
-              <tree/>
+              {treeXml}
               <categories/>
               <tags class="java.util.ArrayList"/>
               <operation>PUBLISH</operation>
