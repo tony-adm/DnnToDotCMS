@@ -5683,12 +5683,14 @@ public class BundleWriterTests
             "slide-ct-id",
             "slider",
             "slides",
+            "slider",
             cardinality: 1);
 
         Assert.Contains("com.dotcms.publisher.pusher.wrapper.RelationshipWrapper", xml);
         Assert.Contains("<inode>rel-inode-123</inode>", xml);
         Assert.Contains("<parentStructureInode>slider-ct-id</parentStructureInode>", xml);
         Assert.Contains("<childStructureInode>slide-ct-id</childStructureInode>", xml);
+        Assert.Contains("<parentRelationName>slider</parentRelationName>", xml);
         Assert.Contains("<childRelationName>slides</childRelationName>", xml);
         Assert.Contains("<relationTypeValue>slider.slides</relationTypeValue>", xml);
         Assert.Contains("<cardinality>1</cardinality>", xml);

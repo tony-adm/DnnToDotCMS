@@ -339,6 +339,14 @@ public static class ModuleMappings
                 hint: "Destination URL when the slide is clicked"),
             TextField("Link Text",   "linkText",
                 hint: "Button label (e.g. 'Learn More')"),
+            // Child-side relationship field pointing back to the parent
+            // Slider content type.  DotCMS requires a field on BOTH sides
+            // of a relationship.  The relationType uses the full
+            // "parentVar.fieldVar" format to reference the parent-side
+            // RelationshipField on the Slider content type.
+            RelationshipField("Slider", "slider",
+                relationType: "slider.slides",
+                hint: "Parent slider that owns this slide"),
         ]
     };
 

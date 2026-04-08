@@ -464,7 +464,8 @@ public static class BundleWriter
                 sliderContentTypeId,
                 slideContentTypeId,
                 sliderContentTypeVariable,
-                "slides");
+                "slides",
+                "slider");
             WriteTextEntry(tar,
                 $"live/{contentWorkDir}/{relInode}.relationship.xml",
                 relXml);
@@ -1574,6 +1575,7 @@ public static class BundleWriter
         string childContentTypeId,
         string parentContentTypeVariable,
         string fieldVariable,
+        string childFieldVariable,
         int cardinality = 1)
     {
         string now = DateTime.UtcNow.ToString(XmlTimestampFormat);
@@ -1593,7 +1595,7 @@ public static class BundleWriter
                 <inode>{relationshipInode}</inode>
                 <parentStructureInode>{parentContentTypeId}</parentStructureInode>
                 <childStructureInode>{childContentTypeId}</childStructureInode>
-                <parentRelationName/>
+                <parentRelationName>{childFieldVariable}</parentRelationName>
                 <childRelationName>{fieldVariable}</childRelationName>
                 <relationTypeValue>{relationTypeValue}</relationTypeValue>
                 <cardinality>{cardinality}</cardinality>
