@@ -1980,21 +1980,26 @@ public static class BundleWriter
     /// </summary>
     internal static string BuildSliderCss()
     {
+        // All selectors are scoped under ".slideshow" to raise specificity
+        // above imported DNN skin rules such as
+        //   #LoginSlideshow .slideshow .slide-item { position: relative }
+        // which would otherwise override our position: absolute and make
+        // slides disappear.
         return """
             /* FisSlider — external stylesheet for CSP compliance */
-            .slideshowContent { position: relative; height: 569px; width: 100%; overflow: hidden; }
-            .slide-item { background-size: cover !important; background-position: 50% 50% !important; background-repeat: no-repeat !important; position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; transition: opacity 0.8s ease-in-out; }
-            .slide-item.active { opacity: 1; }
-            .slide-text-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; padding: 5% 4% 3% 15%; }
-            .slide-arrows { position: absolute; top: 50%; width: 100%; display: flex; justify-content: space-between; transform: translateY(-50%); z-index: 10; pointer-events: none; padding: 0 10px; box-sizing: border-box; }
-            .slide-arrows button { pointer-events: auto; background: rgba(0,0,0,0.4); color: #fff; border: none; font-size: 2rem; width: 44px; height: 44px; cursor: pointer; border-radius: 50%; display: flex; align-items: center; justify-content: center; transition: background 0.3s; }
-            .slide-arrows button:hover { background: rgba(0,0,0,0.7); }
-            .slide-nav { position: absolute; bottom: 15px; left: 50%; transform: translateX(-50%); z-index: 10; display: flex; list-style: none; margin: 0; padding: 0; gap: 8px; }
-            .slide-nav li { list-style: none; }
-            .slide-nav .dot { background: rgba(255,255,255,0.5); border: none; width: 14px; height: 14px; border-radius: 50%; cursor: pointer; padding: 0; transition: background 0.3s; }
-            .slide-nav .dot.active { background: #fff; }
+            .slideshow .slideshowContent { position: relative; height: 569px; width: 100%; overflow: hidden; }
+            .slideshow .slide-item { background-size: cover !important; background-position: 50% 50% !important; background-repeat: no-repeat !important; position: absolute !important; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; transition: opacity 0.8s ease-in-out; }
+            .slideshow .slide-item.active { opacity: 1; }
+            .slideshow .slide-text-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; padding: 5% 4% 3% 15%; }
+            .slideshow .slide-arrows { position: absolute; top: 50%; width: 100%; display: flex; justify-content: space-between; transform: translateY(-50%); z-index: 10; pointer-events: none; padding: 0 10px; box-sizing: border-box; }
+            .slideshow .slide-arrows button { pointer-events: auto; background: rgba(0,0,0,0.4); color: #fff; border: none; font-size: 2rem; width: 44px; height: 44px; cursor: pointer; border-radius: 50%; display: flex; align-items: center; justify-content: center; transition: background 0.3s; }
+            .slideshow .slide-arrows button:hover { background: rgba(0,0,0,0.7); }
+            .slideshow .slide-nav { position: absolute; bottom: 15px; left: 50%; transform: translateX(-50%); z-index: 10; display: flex; list-style: none; margin: 0; padding: 0; gap: 8px; }
+            .slideshow .slide-nav li { list-style: none; }
+            .slideshow .slide-nav .dot { background: rgba(255,255,255,0.5); border: none; width: 14px; height: 14px; border-radius: 50%; cursor: pointer; padding: 0; transition: background 0.3s; }
+            .slideshow .slide-nav .dot.active { background: #fff; }
             @media (max-width: 990px) {
-              .slide-text-container { padding: 7% 3% 7% 3%; }
+              .slideshow .slide-text-container { padding: 7% 3% 7% 3%; }
             }
             """;
     }
@@ -3026,11 +3031,17 @@ public static class BundleWriter
         #set($navItems = $navtool.getNav("/"))
         #foreach($navItem in $navItems)
           #if($navItem.showOnMenu)
+            ## Reset $children each iteration — Velocity #set does NOT
+            ## clear a variable when the RHS evaluates to null, so without
+            ## this reset the previous iteration's children would leak
+            ## into the current one, causing incorrect dropdowns or
+            ## preventing child items from appearing.
+            #set($children = [])
             ## Attempt to get children from the nav item directly.
             #set($children = $navItem.children)
             ## Fallback: if children is empty and the item looks like a folder
             ## (href ending with "/"), explicitly load items from that path.
-            #if((!$children || $children.size() == 0) && $navItem.href && $navItem.href.endsWith("/"))
+            #if($children.size() == 0 && $navItem.href && $navItem.href.endsWith("/"))
               #set($children = $navtool.getNav($navItem.href))
             #end
             #if($children && $children.size() > 0)
