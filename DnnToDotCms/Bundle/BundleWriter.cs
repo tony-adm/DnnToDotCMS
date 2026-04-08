@@ -521,7 +521,6 @@ public static class BundleWriter
             // Also inject jQuery CDN links into the template header
             // because DNN includes jQuery by default but it is not
             // present in the exported bundle.
-            bool templateHasSlider = false;
             if (sliderContainerId is not null && sliderPaneNames.Count > 0 && paneMap.Count > 0)
             {
                 int maxUuid = paneMap.Values.DefaultIfEmpty(0).Max();
@@ -530,7 +529,6 @@ public static class BundleWriter
                     if (!sliderPaneNames.Contains(paneName))
                         continue;
 
-                    templateHasSlider = true;
                     int sliderUuid = ++maxUuid;
                     sliderPaneUuids[(id, paneName)] = sliderUuid;
 
@@ -559,18 +557,15 @@ public static class BundleWriter
 
             // DNN ships jQuery, jQuery Migrate, and jQuery UI by default
             // but the exported bundle doesn't include them.  Add CDN
-            // script tags to <head> for templates that contain a slider.
-            string finalHeader = header;
-            if (templateHasSlider)
-            {
-                const string jqueryCdn =
-                    "<script src=\"https://code.jquery.com/jquery-3.5.1.min.js\"></script>\n"
-                    + "<script src=\"https://code.jquery.com/jquery-migrate-3.4.0.min.js\"></script>\n"
-                    + "<script src=\"https://code.jquery.com/ui/1.12.2/jquery-ui.min.js\"></script>";
-                finalHeader = string.IsNullOrWhiteSpace(finalHeader)
-                    ? jqueryCdn
-                    : finalHeader + "\n" + jqueryCdn;
-            }
+            // script tags to <head> for every template so that pages
+            // relying on jQuery continue to work after migration.
+            const string jqueryCdn =
+                "<script src=\"https://code.jquery.com/jquery-3.5.1.min.js\"></script>\n"
+                + "<script src=\"https://code.jquery.com/jquery-migrate-3.4.0.min.js\"></script>\n"
+                + "<script src=\"https://code.jquery.com/ui/1.12.2/jquery-ui.min.js\"></script>";
+            string finalHeader = string.IsNullOrWhiteSpace(header)
+                ? jqueryCdn
+                : header + "\n" + jqueryCdn;
 
             string xml = BuildTemplateXml(id, inode, name, finalHtml, contentHostId, themeName, finalHeader);
             WriteTextEntry(tar, $"live/{contentWorkDir}/{id}.template.template.xml", xml);
