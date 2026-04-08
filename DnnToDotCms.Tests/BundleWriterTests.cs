@@ -5677,7 +5677,9 @@ public class BundleWriterTests
         Assert.Contains("<link rel=\"stylesheet\" href=\"/slider.css\"", velocity);
         Assert.Contains("<script src=\"/slider.js\"", velocity);
         Assert.DoesNotContain("<style>", velocity);
-        Assert.DoesNotContain("<script>", velocity);
+        // No inline script blocks — only <script src="…"> tags.
+        Assert.DoesNotContain("<script>\n", velocity);
+        Assert.DoesNotContain("<script>\r", velocity);
 
         // Text overlay must use slide-text-container class.
         Assert.Contains("slide-text-container", velocity);

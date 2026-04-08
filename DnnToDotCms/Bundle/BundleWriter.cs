@@ -1796,7 +1796,7 @@ public static class BundleWriter
                         #set($activeClass = "")
                         #set($ariaHidden = "true")
                       #end
-                      <div class="slide-item slide-left ${activeClass}" style="background-image: url('$!{slide.image}');" role="group" aria-roledescription="slide" aria-label="$math.add($slideIdx, 1) of ${slideTotal}" aria-hidden="${ariaHidden}">
+                      <div class="slide-item ${activeClass}" style="background-image: url('$!{slide.image}');" role="group" aria-roledescription="slide" aria-label="$math.add($slideIdx, 1) of ${slideTotal}" aria-hidden="${ariaHidden}">
                         <div class="sr-only"><span aria-label="Slide description">$!{slide.title}</span></div>
                         <div class="slide-text-container">
                           <div class="slide-title">
