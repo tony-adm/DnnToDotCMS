@@ -1724,6 +1724,16 @@ public static class BundleWriter
         // mirroring the DNN module ID pattern.
         return """
             #set($modId = ${velocityCount})
+            <style>
+              /* 569px matches the original FisSlider module inline style height */
+              #Items-${modId} .slideshowContent { position: relative; height: 569px; width: 100%; }
+              #Items-${modId} .slide-item { background-size: cover !important; background-position: 50% 50% !important; background-repeat: no-repeat !important; position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: none; }
+              #Items-${modId} .slide-item.active { display: block; }
+              #Items-${modId} .slide-text-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; padding: 5% 4% 3% 15%; background-color: rgba(0,0,0,.15); }
+              @media (max-width: 990px) {
+                #Items-${modId} .slide-text-container { padding: 7% 3% 7% 3%; }
+              }
+            </style>
             <div id="mvcContainer-${modId}" class="Mvc-FisSliderModule-Container">
               <div id="Items-${modId}">
                 <section id="slideshow${modId}" class="slideshow" aria-roledescription="carousel" aria-label="$!{dotContentMap.title}">
@@ -1786,6 +1796,84 @@ public static class BundleWriter
                 </section>
               </div>
             </div>
+            <script>
+            (function(){
+              var modId = '${modId}';
+              var slides = document.getElementsByClassName('slide-item-' + modId);
+              var dots = document.getElementsByClassName('dot-' + modId);
+              var slideIndex = 0;
+              var timer = null;
+              var interval = 5000; /* ms between auto-advance slides */
+              var autoPlay = true;
+              var mouseOver = false;
+
+              function showSlide(n) {
+                if (slides.length === 0) return;
+                slideIndex = ((n % slides.length) + slides.length) % slides.length;
+                for (var i = 0; i < slides.length; i++) {
+                  slides[i].style.display = 'none';
+                  slides[i].className = slides[i].className.replace(/ ?active/g, '');
+                  slides[i].setAttribute('aria-hidden', 'true');
+                }
+                slides[slideIndex].style.display = 'block';
+                slides[slideIndex].className += ' active';
+                slides[slideIndex].setAttribute('aria-hidden', 'false');
+                for (var j = 0; j < dots.length; j++) {
+                  dots[j].className = dots[j].className.replace(/ ?active/g, '');
+                  dots[j].setAttribute('aria-current', 'false');
+                }
+                if (dots.length > slideIndex) {
+                  dots[slideIndex].className += ' active';
+                  dots[slideIndex].setAttribute('aria-current', 'true');
+                }
+              }
+
+              function nextSlide() { showSlide(slideIndex + 1); }
+              function prevSlide() { showSlide(slideIndex - 1); }
+              function goToSlide(n) { showSlide(n); }
+
+              function startAutoPlay() {
+                stopAutoPlay();
+                if (autoPlay && !mouseOver) {
+                  timer = setTimeout(function tick() {
+                    nextSlide();
+                    timer = setTimeout(tick, interval);
+                  }, interval);
+                }
+              }
+
+              function stopAutoPlay() {
+                if (timer) { clearTimeout(timer); timer = null; }
+              }
+
+              /* Wire prev / next buttons */
+              var container = document.getElementById('slideshowContent' + modId);
+              if (container) {
+                var prevBtn = container.querySelector('.prev');
+                var nextBtn = container.querySelector('.next');
+                if (prevBtn) prevBtn.addEventListener('click', function() { prevSlide(); stopAutoPlay(); startAutoPlay(); });
+                if (nextBtn) nextBtn.addEventListener('click', function() { nextSlide(); stopAutoPlay(); startAutoPlay(); });
+              }
+
+              /* Wire nav dots */
+              for (var d = 0; d < dots.length; d++) {
+                (function(idx) {
+                  dots[idx].addEventListener('click', function() { goToSlide(idx); stopAutoPlay(); startAutoPlay(); });
+                })(d);
+              }
+
+              /* Pause on hover */
+              var section = document.getElementById('slideshow' + modId);
+              if (section) {
+                section.addEventListener('mouseenter', function() { mouseOver = true; stopAutoPlay(); });
+                section.addEventListener('mouseleave', function() { mouseOver = false; startAutoPlay(); });
+              }
+
+              /* Initialise */
+              showSlide(0);
+              startAutoPlay();
+            })();
+            </script>
             """;
     }
 

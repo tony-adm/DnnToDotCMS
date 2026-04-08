@@ -5672,6 +5672,19 @@ public class BundleWriterTests
         Assert.Contains("slide.image", velocity);
         Assert.Contains("slide.link", velocity);
         Assert.Contains("slide.linkText", velocity);
+
+        // Inline slideshow JavaScript must be present to wire prev/next, dots, and auto-advance.
+        Assert.Contains("<script>", velocity);
+        Assert.Contains("showSlide", velocity);
+        Assert.Contains("nextSlide", velocity);
+        Assert.Contains("prevSlide", velocity);
+        Assert.Contains("startAutoPlay", velocity);
+        Assert.Contains("addEventListener", velocity);
+
+        // Text overlay CSS must position .slide-text-container absolutely over the slide image.
+        Assert.Contains("<style>", velocity);
+        Assert.Contains("slide-text-container", velocity);
+        Assert.Contains("position: absolute", velocity);
     }
 
     [Fact]
