@@ -1180,20 +1180,40 @@ public static class BundleWriter
         => E(key, $"<file>{path}</file>");
 
     /// <summary>
-    /// Serializes a list of strings as an XStream <c>&lt;list&gt;</c> element
-    /// inside a map entry.  DotCMS relationship field values must be lists,
-    /// not comma-separated strings, because <c>Contentlet(Map)</c> copies
-    /// the map via <c>putAll()</c> (bypassing <c>setProperty()</c>), and
-    /// downstream code casts the value to <c>List</c>.
+    /// Builds an XStream <c>&lt;tree&gt;</c> element containing relationship
+    /// <c>Map&lt;String,Object&gt;</c> entries for each related child.
+    /// DotCMS <c>ContentHandler.regenerateTree()</c> processes these entries
+    /// and calls <c>TreeFactory.saveTree()</c> to create the relationship
+    /// records in the <c>tree</c> table.
+    /// <para/>
+    /// The content map must <b>not</b> contain the relationship field value
+    /// because <c>Contentlet(Map)</c> copies the map via <c>putAll()</c>
+    /// (bypassing <c>setProperty()</c>).  During <c>checkin()</c>, the engine
+    /// tries to cast each element to <c>Contentlet</c>, which fails when the
+    /// elements are <c>String</c> identifiers.  Relationship data goes
+    /// exclusively through the tree entries.
     /// </summary>
-    private static string EList(string key, IEnumerable<string> items)
+    private static string BuildTreeXml(
+        string parentIdentifier,
+        IReadOnlyList<string> childIdentifiers,
+        string relationTypeValue)
     {
+        if (childIdentifiers.Count == 0)
+            return "<tree/>";
+
         var sb = new System.Text.StringBuilder();
-        sb.Append("<list>");
-        foreach (string item in items)
-            sb.Append($"<string>{System.Security.SecurityElement.Escape(item)}</string>");
-        sb.Append("</list>");
-        return E(key, sb.ToString());
+        sb.Append("<tree>");
+        for (int i = 0; i < childIdentifiers.Count; i++)
+        {
+            sb.Append("<map>");
+            sb.Append($"<entry><string>parent</string><string>{parentIdentifier}</string></entry>");
+            sb.Append($"<entry><string>child</string><string>{childIdentifiers[i]}</string></entry>");
+            sb.Append($"<entry><string>relation_type</string><string>{relationTypeValue}</string></entry>");
+            sb.Append($"<entry><string>tree_order</string><int>{i}</int></entry>");
+            sb.Append("</map>");
+        }
+        sb.Append("</tree>");
+        return sb.ToString();
     }
 
     private static string BuildHostXml(string hostId, string hostInode, string hostname)
@@ -1457,16 +1477,23 @@ public static class BundleWriter
         string now      = DateTime.UtcNow.ToString(XmlTimestampFormat);
         string xmlTitle = System.Security.SecurityElement.Escape(Truncate(title, MaxVarcharLength)) ?? string.Empty;
 
-        // Store the related slide identifiers as an XStream <list> in the
-        // "slides" relationship field of the contentlet map.  DotCMS
-        // expects relationship field values to be java.util.List, not a
-        // comma-separated string, because the Contentlet(Map) constructor
-        // copies the map via putAll() (bypassing setProperty()), and
-        // downstream code casts the value to List.
-        // NOTE: The <tree> element must remain empty (<tree/>) because
-        // PushContentWrapper.tree is typed List<Map<String,Object>> and
-        // putting <com.dotmarketing.beans.Tree> objects there causes a
-        // ClassCastException on import.
+        // The relationship data (which slides belong to this slider) is
+        // conveyed via <tree> entries, NOT via the contentlet map.  The
+        // map must NOT contain the "slides" field because:
+        //   1. Contentlet(Map) copies the map via putAll() (bypasses setProperty())
+        //   2. checkin() reads the field and casts each element to Contentlet
+        //   3. If the element is a String (identifier), the cast fails with
+        //      "String cannot be cast to Contentlet"
+        //
+        // DotCMS ContentHandler.regenerateTree() reads <tree> entries
+        // (List<Map<String,Object>> with parent/child/relation_type/tree_order)
+        // and calls TreeFactory.saveTree() to create the relationship
+        // records in the tree table.  This is the same mechanism DotCMS's
+        // own ContentBundler uses (via PublisherAPI.getContentTreeMatrix()).
+        string treeXml = BuildTreeXml(
+            identifier,
+            slideIdentifiers,
+            $"{contentTypeVariable}.slides");
 
         return $"""
             <com.dotcms.publisher.pusher.wrapper.PushContentWrapper>
@@ -1488,7 +1515,6 @@ public static class BundleWriter
                   {EStr("host", hostId)}
                   {EStr("stInode", contentTypeId)}
                   {EStr("title", xmlTitle)}
-                  {EList("slides", slideIdentifiers)}
                   {EStr("owner", "dotcms.org.1")}
                   {EStr("identifier", identifier)}
                   {ELong("languageId", 1)}
@@ -1510,7 +1536,7 @@ public static class BundleWriter
                 <assetSubType>{contentTypeVariable}</assetSubType>
               </id>
               <multiTree/>
-              <tree/>
+              {treeXml}
               <categories/>
               <tags class="java.util.ArrayList"/>
               <operation>PUBLISH</operation>

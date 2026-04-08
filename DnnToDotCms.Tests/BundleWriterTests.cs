@@ -5699,9 +5699,11 @@ public class BundleWriterTests
     [Fact]
     public void Write_WithSliderSlides_SliderContentletHasRelationshipField()
     {
-        // Verify the parent Slider contentlet stores related slide identifiers
-        // in the "slides" map field as a <list> of <string> elements rather
-        // than a comma-separated string or <com.dotmarketing.beans.Tree> objects.
+        // Verify the parent Slider contentlet conveys relationship data via
+        // <tree> entries (Map<String,Object> with parent/child/relation_type/
+        // tree_order) rather than putting identifiers in the content map.
+        // DotCMS ContentHandler.regenerateTree() processes these entries and
+        // calls TreeFactory.saveTree() to create the relationship records.
         var slideCt = new DotCmsContentType
         {
             Name     = "Slide",
@@ -5753,16 +5755,19 @@ public class BundleWriterTests
         // Must NOT contain Tree objects (they cause ClassCastException on import).
         Assert.DoesNotContain("com.dotmarketing.beans.Tree", sliderXml);
 
-        // Must use <tree/> (empty), not <tree> with children.
-        Assert.Contains("<tree/>", sliderXml);
+        // Must NOT contain the "slides" field in the content map — the
+        // Contentlet(Map) constructor copies via putAll(), and checkin()
+        // then tries to cast each element to Contentlet (fails for strings).
+        Assert.DoesNotMatch(@"<string>slides</string>", sliderXml);
 
-        // The "slides" field in the map must contain slide identifiers in <list> format.
-        Assert.Contains("slides", sliderXml);
-        Assert.Contains("<list>", sliderXml);
+        // Must NOT use a <list> of <string> in the content map — DotCMS casts
+        // the list elements to Contentlet, not String.
+        Assert.DoesNotContain("<list>", sliderXml);
 
-        // Must NOT use a comma-separated string for the slides field — DotCMS
-        // expects java.util.List, not String.
-        Assert.DoesNotMatch(@"<string>slides</string><string>[^<]*,[^<]*</string>", sliderXml);
+        // The <tree> element must contain Map entries with parent/child/relation_type/tree_order.
+        Assert.Contains("<tree>", sliderXml);
+        Assert.Contains("relation_type", sliderXml);
+        Assert.Contains("slider.slides", sliderXml);
 
         // Extract the Slide contentlet identifiers from their content.xml entries.
         var slideXmls = contentXmlEntries
@@ -5771,7 +5776,7 @@ public class BundleWriterTests
             .ToList();
         Assert.Equal(2, slideXmls.Count);
 
-        // Each slide identifier should appear in the Slider's map XML.
+        // Each slide identifier should appear as a "child" in the Slider's <tree>.
         foreach (string slideXml in slideXmls)
         {
             // Extract the identifier from the slide XML.
