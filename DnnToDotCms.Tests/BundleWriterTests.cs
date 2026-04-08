@@ -5572,14 +5572,14 @@ public class BundleWriterTests
         Assert.True(foundSlide1, "Slide 'Banner 1' not found in content entries");
         Assert.True(foundSlide2, "Slide 'Banner 2' not found in content entries");
 
-        // Verify the Slider (parent) contentlet exists and has tree entries
-        // linking it to its child slides.
+        // Verify the Slider (parent) contentlet exists and stores slide
+        // identifiers in the "slides" map field.
         bool foundSliderParent = contentXmlEntries.Any(e =>
         {
             string xml = Encoding.UTF8.GetString(e.Content);
-            return xml.Contains("slider") && xml.Contains("slider-slides");
+            return xml.Contains("<assetSubType>slider</assetSubType>") && xml.Contains("slides");
         });
-        Assert.True(foundSliderParent, "Slider parent contentlet with relationship tree not found");
+        Assert.True(foundSliderParent, "Slider parent contentlet with slides relationship field not found");
     }
 
     [Fact]
@@ -5675,10 +5675,11 @@ public class BundleWriterTests
     }
 
     [Fact]
-    public void Write_WithSliderSlides_SliderContentletHasRelationshipTree()
+    public void Write_WithSliderSlides_SliderContentletHasRelationshipField()
     {
-        // Verify the parent Slider contentlet has tree entries linking
-        // it to its child Slide contentlets.
+        // Verify the parent Slider contentlet stores related slide identifiers
+        // in the "slides" map field (comma-separated) rather than using
+        // <com.dotmarketing.beans.Tree> objects in the <tree> element.
         var slideCt = new DotCmsContentType
         {
             Name     = "Slide",
@@ -5721,20 +5722,38 @@ public class BundleWriterTests
         var contentXmlEntries = entries.Where(e =>
             e.Name.Contains(".content.xml") && !e.Name.Contains("host")).ToList();
 
-        // Find the Slider parent contentlet (the one with tree entries).
+        // Find the Slider parent contentlet (the one with assetSubType "slider").
         string? sliderXml = contentXmlEntries
             .Select(e => Encoding.UTF8.GetString(e.Content))
-            .FirstOrDefault(xml => xml.Contains("slider-slides"));
+            .FirstOrDefault(xml => xml.Contains("<assetSubType>slider</assetSubType>"));
         Assert.NotNull(sliderXml);
 
-        // Should have relationType and two child references.
-        Assert.Contains("<relationType>slider-slides</relationType>", sliderXml);
+        // Must NOT contain Tree objects (they cause ClassCastException on import).
+        Assert.DoesNotContain("com.dotmarketing.beans.Tree", sliderXml);
 
-        // Count the number of Tree entries (each child slide).
-        int treeCount = sliderXml.Split("com.dotmarketing.beans.Tree").Length - 1;
-        // Each Tree element has an opening and closing tag, so divide by 2.
-        Assert.True(treeCount / 2 >= 2,
-            $"Expected at least 2 Tree entries for 2 slides, got {treeCount / 2}");
+        // Must use <tree/> (empty), not <tree> with children.
+        Assert.Contains("<tree/>", sliderXml);
+
+        // The "slides" field in the map must contain slide identifiers.
+        Assert.Contains("slides", sliderXml);
+
+        // Extract the Slide contentlet identifiers from their content.xml entries.
+        var slideXmls = contentXmlEntries
+            .Select(e => Encoding.UTF8.GetString(e.Content))
+            .Where(xml => xml.Contains("<assetSubType>slide</assetSubType>"))
+            .ToList();
+        Assert.Equal(2, slideXmls.Count);
+
+        // Each slide identifier should appear in the Slider's map XML.
+        foreach (string slideXml in slideXmls)
+        {
+            // Extract the identifier from the slide XML.
+            var match = System.Text.RegularExpressions.Regex.Match(slideXml,
+                @"<id>\s*<id>([^<]+)</id>");
+            Assert.True(match.Success, "Could not extract slide identifier");
+            string slideId = match.Groups[1].Value;
+            Assert.Contains(slideId, sliderXml);
+        }
     }
 
     [Fact]

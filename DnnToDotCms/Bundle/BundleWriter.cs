@@ -1423,23 +1423,15 @@ public static class BundleWriter
         string now      = DateTime.UtcNow.ToString(XmlTimestampFormat);
         string xmlTitle = System.Security.SecurityElement.Escape(Truncate(title, MaxVarcharLength)) ?? string.Empty;
 
-        // Build <tree> entries that encode the relationship between this
-        // Slider and its child Slide contentlets.  DotCMS uses these
-        // Tree records to recreate relationship links on push-publish
-        // import.
-        var treeSb = new StringBuilder();
-        for (int i = 0; i < slideIdentifiers.Count; i++)
-        {
-            treeSb.AppendLine($"""
-                  <com.dotmarketing.beans.Tree>
-                    <parent>{identifier}</parent>
-                    <child>{slideIdentifiers[i]}</child>
-                    <relationType>slider-slides</relationType>
-                    <treeOrder>{i}</treeOrder>
-                  </com.dotmarketing.beans.Tree>
-                """);
-        }
-        string treeXml = treeSb.Length > 0 ? treeSb.ToString() : string.Empty;
+        // Store the related slide identifiers as a comma-separated string
+        // in the "slides" relationship field of the contentlet map.  This
+        // is how DotCMS conveys relationship data in push-publish bundles:
+        // the field variable name maps to a list of related identifiers.
+        // NOTE: The <tree> element must remain empty (<tree/>) because
+        // PushContentWrapper.tree is typed List<Map<String,Object>> and
+        // putting <com.dotmarketing.beans.Tree> objects there causes a
+        // ClassCastException on import.
+        string slidesValue = string.Join(",", slideIdentifiers);
 
         return $"""
             <com.dotcms.publisher.pusher.wrapper.PushContentWrapper>
@@ -1461,6 +1453,7 @@ public static class BundleWriter
                   {EStr("host", hostId)}
                   {EStr("stInode", contentTypeId)}
                   {EStr("title", xmlTitle)}
+                  {EStr("slides", slidesValue)}
                   {EStr("owner", "dotcms.org.1")}
                   {EStr("identifier", identifier)}
                   {ELong("languageId", 1)}
@@ -1482,9 +1475,7 @@ public static class BundleWriter
                 <assetSubType>{contentTypeVariable}</assetSubType>
               </id>
               <multiTree/>
-              <tree>
-            {treeXml}
-              </tree>
+              <tree/>
               <categories/>
               <tags class="java.util.ArrayList"/>
               <operation>PUBLISH</operation>
