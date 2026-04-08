@@ -5556,7 +5556,7 @@ public class BundleWriterTests
         var containerEntry = entries.First(e => e.Name.Contains(".containers.container.xml"));
         string containerXml = Encoding.UTF8.GetString(containerEntry.Content);
         Assert.Contains("Slider", containerXml);
-        Assert.Contains("slider", containerXml);
+        Assert.Contains("dotContentMap.slides", containerXml);
 
         // At least 3 content.xml entries: 2 slides + 1 slider.
         var contentXmlEntries = entries.Where(e =>
@@ -5664,9 +5664,9 @@ public class BundleWriterTests
         Assert.Contains("slide-link", velocity);
         Assert.Contains("dot", velocity);
 
-        // Must reference the slider and slide content types.
-        Assert.Contains("slider", velocity);
-        Assert.Contains("$slider.slides", velocity);
+        // Must reference the slider content fields via $dotContentMap (per-contentlet context).
+        Assert.Contains("dotContentMap.title", velocity);
+        Assert.Contains("$dotContentMap.slides", velocity);
         Assert.Contains("slide.title", velocity);
         Assert.Contains("slide.description", velocity);
         Assert.Contains("slide.image", velocity);
