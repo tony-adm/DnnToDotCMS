@@ -6072,10 +6072,10 @@ public class BundleWriterTests
     }
 
     [Fact]
-    public void Write_WithoutSliderSlides_TemplateHeaderDoesNotContainJquery()
+    public void Write_WithoutSliderSlides_TemplateHeaderStillContainsJquery()
     {
-        // Templates for pages without sliders must NOT include jQuery CDN
-        // links so we don't add unnecessary overhead.
+        // All templates must include jQuery CDN links because DNN ships
+        // jQuery by default and migrated pages may depend on it.
         var pages = new[]
         {
             new DnnPortalPage("tab1", "About", "About", "", "//About", 0, true, ""),
@@ -6095,8 +6095,8 @@ public class BundleWriterTests
         Assert.NotNull(templateEntry.Content);
         string templateXml = Encoding.UTF8.GetString(templateEntry.Content);
 
-        Assert.DoesNotContain("jquery-3.5.1.min.js", templateXml);
-        Assert.DoesNotContain("jquery-migrate-3.4.0.min.js", templateXml);
+        Assert.Contains("jquery-3.5.1.min.js", templateXml);
+        Assert.Contains("jquery-migrate-3.4.0.min.js", templateXml);
     }
 
     private static List<(string Name, byte[] Content)> ReadAllTarEntries(Stream gzStream)
