@@ -453,6 +453,23 @@ public static class BundleWriter
                     items.Add((sliderId, paneName, sliderContainerId));
                 }
             }
+
+            // Write a Relationship definition so DotCMS knows about the
+            // Slider→Slide one-to-many link.  The ContentTypeHandler sets
+            // skipRelationshipCreation=true during push-publish import, so
+            // the .relationship.xml file is the only way to create it.
+            string relInode = DeterministicId("Relationship:slider.slides");
+            string relXml = BuildRelationshipXml(
+                relInode,
+                sliderContentTypeId,
+                slideContentTypeId,
+                sliderContentTypeVariable,
+                "slides");
+            WriteTextEntry(tar,
+                $"live/{contentWorkDir}/{relInode}.relationship.xml",
+                relXml);
+            manifestEntries.Add(("relationship", relInode, relInode,
+                $"{sliderContentTypeVariable}.slides", contentWorkDir, "/"));
         }
 
         // --- templates (from DNN skins) --------------------------------------
@@ -1490,6 +1507,55 @@ public static class BundleWriter
               <contentTags/>
               <contentletMetadata/>
             </com.dotcms.publisher.pusher.wrapper.PushContentWrapper>
+            """;
+    }
+
+    // ------------------------------------------------------------------
+    // Relationship XML builder (for Slider→Slide relationship)
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Builds a DotCMS <c>RelationshipWrapper</c> XML that defines a
+    /// one-to-many relationship between the <c>slider</c> and <c>slide</c>
+    /// content types.  DotCMS <c>ContentTypeHandler</c> sets
+    /// <c>skipRelationshipCreation=true</c> during push-publish import, so
+    /// the Relationship object is <b>not</b> auto-created from the content
+    /// type's field definition.  Without an explicit <c>.relationship.xml</c>
+    /// file, the Slider contentlet's checkin fails with a NPE when
+    /// <c>getRelationshipFromField()</c> returns null.
+    /// </summary>
+    internal static string BuildRelationshipXml(
+        string relationshipInode,
+        string parentContentTypeId,
+        string childContentTypeId,
+        string parentContentTypeVariable,
+        string fieldVariable,
+        int cardinality = 1)
+    {
+        string now = DateTime.UtcNow.ToString(XmlTimestampFormat);
+        // relationTypeValue follows the new-style format: parentVariable.fieldVariable
+        string relationTypeValue = $"{parentContentTypeVariable}.{fieldVariable}";
+
+        return $"""
+            <com.dotcms.publisher.pusher.wrapper.RelationshipWrapper>
+              <relationship>
+                <iDate class="sql-timestamp">{now}</iDate>
+                <type>relationship</type>
+                <owner/>
+                <inode>{relationshipInode}</inode>
+                <parentStructureInode>{parentContentTypeId}</parentStructureInode>
+                <childStructureInode>{childContentTypeId}</childStructureInode>
+                <parentRelationName/>
+                <childRelationName>{fieldVariable}</childRelationName>
+                <relationTypeValue>{relationTypeValue}</relationTypeValue>
+                <cardinality>{cardinality}</cardinality>
+                <parentRequired>false</parentRequired>
+                <childRequired>false</childRequired>
+                <fixed>false</fixed>
+                <modDate class="sql-timestamp">{now}</modDate>
+              </relationship>
+              <operation>PUBLISH</operation>
+            </com.dotcms.publisher.pusher.wrapper.RelationshipWrapper>
             """;
     }
 

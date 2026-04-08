@@ -5675,6 +5675,28 @@ public class BundleWriterTests
     }
 
     [Fact]
+    public void BuildRelationshipXml_ContainsExpectedStructure()
+    {
+        string xml = BundleWriter.BuildRelationshipXml(
+            "rel-inode-123",
+            "slider-ct-id",
+            "slide-ct-id",
+            "slider",
+            "slides",
+            cardinality: 1);
+
+        Assert.Contains("com.dotcms.publisher.pusher.wrapper.RelationshipWrapper", xml);
+        Assert.Contains("<inode>rel-inode-123</inode>", xml);
+        Assert.Contains("<parentStructureInode>slider-ct-id</parentStructureInode>", xml);
+        Assert.Contains("<childStructureInode>slide-ct-id</childStructureInode>", xml);
+        Assert.Contains("<childRelationName>slides</childRelationName>", xml);
+        Assert.Contains("<relationTypeValue>slider.slides</relationTypeValue>", xml);
+        Assert.Contains("<cardinality>1</cardinality>", xml);
+        Assert.Contains("<operation>PUBLISH</operation>", xml);
+        Assert.Contains("<type>relationship</type>", xml);
+    }
+
+    [Fact]
     public void Write_WithSliderSlides_SliderContentletHasRelationshipField()
     {
         // Verify the parent Slider contentlet stores related slide identifiers
@@ -5754,6 +5776,77 @@ public class BundleWriterTests
             string slideId = match.Groups[1].Value;
             Assert.Contains(slideId, sliderXml);
         }
+    }
+
+    [Fact]
+    public void Write_WithSliderSlides_BundleContainsRelationshipXml()
+    {
+        // Verify the bundle contains a .relationship.xml file that defines
+        // the Slider→Slide relationship.  DotCMS ContentTypeHandler sets
+        // skipRelationshipCreation=true during push-publish import, so
+        // the relationship must be explicitly included.
+        var slideCt = new DotCmsContentType
+        {
+            Name     = "Slide",
+            Variable = "slide",
+            Fields   =
+            [
+                new DotCmsField { Name = "Title", Variable = "title", DataType = "TEXT",
+                    Clazz = "com.dotcms.contenttype.model.field.TextField" },
+                new DotCmsField { Name = "Image", Variable = "image", DataType = "TEXT",
+                    Clazz = "com.dotcms.contenttype.model.field.TextField" },
+            ]
+        };
+        var sliderCt = new DotCmsContentType
+        {
+            Name     = "Slider",
+            Variable = "slider",
+            Fields   =
+            [
+                new DotCmsField { Name = "Title",  Variable = "title",  DataType = "TEXT",
+                    Clazz = "com.dotcms.contenttype.model.field.TextField" },
+                new DotCmsField { Name = "Slides", Variable = "slides", DataType = "SYSTEM",
+                    Clazz = "com.dotcms.contenttype.model.field.RelationshipField",
+                    RelationType = "slide" },
+            ]
+        };
+
+        var slides = new[]
+        {
+            new DnnSliderSlide("Slide A", "", "/img/a.jpg", "#",
+                TabUniqueId: "tab-1", PaneName: "BannerPane", SortOrder: 0),
+        };
+
+        using var ms = new MemoryStream();
+        BundleWriter.Write([slideCt, sliderCt], ms, siteName: "test-site", sliderSlides: slides);
+        ms.Position = 0;
+
+        var entries = ReadAllTarEntries(ms);
+
+        // Find the .relationship.xml entry.
+        var relEntries = entries.Where(e => e.Name.Contains(".relationship.xml")).ToList();
+        Assert.Single(relEntries);
+
+        string relXml = Encoding.UTF8.GetString(relEntries[0].Content);
+
+        // Must be a RelationshipWrapper.
+        Assert.Contains("com.dotcms.publisher.pusher.wrapper.RelationshipWrapper", relXml);
+
+        // The relationTypeValue must follow new-style format: parentVariable.fieldVariable.
+        Assert.Contains("<relationTypeValue>slider.slides</relationTypeValue>", relXml);
+
+        // Must reference the Slider as parent and Slide as child.
+        Assert.Contains("<childRelationName>slides</childRelationName>", relXml);
+
+        // Cardinality 1 = ONE_TO_MANY.
+        Assert.Contains("<cardinality>1</cardinality>", relXml);
+
+        // Operation must be PUBLISH.
+        Assert.Contains("<operation>PUBLISH</operation>", relXml);
+
+        // Must contain parent and child content type IDs (non-empty).
+        Assert.Contains("<parentStructureInode>", relXml);
+        Assert.Contains("<childStructureInode>", relXml);
     }
 
     [Fact]
