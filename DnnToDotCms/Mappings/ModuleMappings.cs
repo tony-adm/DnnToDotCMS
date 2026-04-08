@@ -109,6 +109,9 @@ public static class ModuleMappings
 
         // Feedback
         ["feedback"] = Feedback,
+
+        // FisSlider
+        ["fisslider"] = Slide,
     };
 
     // ------------------------------------------------------------------
@@ -318,6 +321,57 @@ public static class ModuleMappings
         ]
     };
 
+    private static DotCmsContentType Slide() => new()
+    {
+        Name        = "Slide",
+        Variable    = "slide",
+        Description = "Individual slide for a carousel/slider widget. Each slide has a title, description, background image, and link.",
+        Icon        = "fa fa-picture-o",
+        Fields      =
+        [
+            TextField("Title",       "title",       required: true, listed: true,
+                hint: "Heading text displayed over the slide image"),
+            TextField("Description", "description",
+                hint: "Short description or call-to-action text"),
+            TextField("Image",       "image",       required: true,
+                hint: "Background image URL (portal-relative or absolute)"),
+            TextField("Link",        "link",
+                hint: "Destination URL when the slide is clicked"),
+            TextField("Link Text",   "linkText",
+                hint: "Button label (e.g. 'Learn More')"),
+            // Child-side relationship field pointing back to the parent
+            // Slider content type.  DotCMS requires a field on BOTH sides
+            // of a relationship.  The relationType uses the full
+            // "parentVar.fieldVar" format to reference the parent-side
+            // RelationshipField on the Slider content type.
+            RelationshipField("Slider", "slider",
+                relationType: "slider.slides",
+                hint: "Parent slider that owns this slide"),
+        ]
+    };
+
+    /// <summary>
+    /// Returns the <c>Slider</c> content type definition.  This is the
+    /// parent content type that holds a one-to-many relationship to
+    /// <see cref="Slide"/>.  A Slider contentlet is placed on the page
+    /// in place of the original DNN FisSlider module.
+    /// </summary>
+    public static DotCmsContentType GetSliderContentType() => new()
+    {
+        Name        = "Slider",
+        Variable    = "slider",
+        Description = "Carousel/slider widget with a one-to-many relationship to Slide content items.",
+        Icon        = "fa fa-play-circle",
+        Fields      =
+        [
+            TextField("Title", "title", required: true, listed: true,
+                hint: "Name of this slider instance"),
+            RelationshipField("Slides", "slides",
+                relationType: "slide",
+                hint: "Slide content items belonging to this slider"),
+        ]
+    };
+
 
     // ------------------------------------------------------------------
     // Field builder helpers
@@ -431,6 +485,23 @@ public static class ModuleMappings
         Indexed        = true,
         Searchable     = true,
         Values         = "true|true",
+    };
+
+    private static DotCmsField RelationshipField(
+        string name, string variable,
+        string relationType,
+        string? hint = null) => new()
+    {
+        Clazz          = "com.dotcms.contenttype.model.field.RelationshipField",
+        Name           = name,
+        Variable       = variable,
+        DataType       = "SYSTEM",
+        FieldTypeLabel = "Relationship",
+        Indexed        = true,
+        Searchable     = false,
+        RelationType   = relationType,
+        Hint           = hint,
+        Values         = "1", // cardinality: one-to-many (parent side)
     };
 
     // ------------------------------------------------------------------

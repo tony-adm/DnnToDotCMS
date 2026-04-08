@@ -5488,4 +5488,537 @@ public class BundleWriterTests
         return path;
     }
 
+    // ------------------------------------------------------------------
+    // ------------------------------------------------------------------
+    // Slider + Slide widget tests
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Write_WithSliderSlides_WritesSlideAndSliderContentTypesAndContainer()
+    {
+        // When slider slides are provided, the bundle must contain:
+        // 1. A Slide content type and a Slider content type
+        // 2. A Slider container with Velocity rendering code
+        // 3. Individual Slide contentlets
+        // 4. A Slider (parent) contentlet referencing the slides
+        var slideCt = new DotCmsContentType
+        {
+            Name     = "Slide",
+            Variable = "slide",
+            Fields   =
+            [
+                new DotCmsField { Name = "Title",       Variable = "title",       DataType = "TEXT",
+                    Clazz = "com.dotcms.contenttype.model.field.TextField" },
+                new DotCmsField { Name = "Description", Variable = "description", DataType = "TEXT",
+                    Clazz = "com.dotcms.contenttype.model.field.TextField" },
+                new DotCmsField { Name = "Image",       Variable = "image",       DataType = "TEXT",
+                    Clazz = "com.dotcms.contenttype.model.field.TextField" },
+                new DotCmsField { Name = "Link",        Variable = "link",        DataType = "TEXT",
+                    Clazz = "com.dotcms.contenttype.model.field.TextField" },
+                new DotCmsField { Name = "Link Text",   Variable = "linkText",    DataType = "TEXT",
+                    Clazz = "com.dotcms.contenttype.model.field.TextField" },
+            ]
+        };
+        var sliderCt = new DotCmsContentType
+        {
+            Name     = "Slider",
+            Variable = "slider",
+            Fields   =
+            [
+                new DotCmsField { Name = "Title",  Variable = "title",  DataType = "TEXT",
+                    Clazz = "com.dotcms.contenttype.model.field.TextField" },
+                new DotCmsField { Name = "Slides", Variable = "slides", DataType = "SYSTEM",
+                    Clazz = "com.dotcms.contenttype.model.field.RelationshipField",
+                    RelationType = "slide" },
+            ]
+        };
+
+        var slides = new[]
+        {
+            new DnnSliderSlide("Banner 1", "Welcome text", "/images/slide1.jpg", "/about",
+                TabUniqueId: "tab-1", PaneName: "ContentPane", SortOrder: 0),
+            new DnnSliderSlide("Banner 2", "More info", "/images/slide2.jpg", "/services",
+                TabUniqueId: "tab-1", PaneName: "ContentPane", SortOrder: 1),
+        };
+
+        using var ms = new MemoryStream();
+        BundleWriter.Write([slideCt, sliderCt], ms, siteName: "test-site", sliderSlides: slides);
+        ms.Position = 0;
+
+        var entries = ReadAllTarEntries(ms);
+        var names   = entries.Select(e => e.Name).ToList();
+
+        // Both content types must be written.
+        Assert.Contains(names, n => n.Contains("contentType.json"));
+
+        // Slider container must be present.
+        Assert.Contains(names, n => n.Contains(".containers.container.xml"));
+        var containerEntry = entries.First(e => e.Name.Contains(".containers.container.xml"));
+        string containerXml = Encoding.UTF8.GetString(containerEntry.Content);
+        Assert.Contains("Slider", containerXml);
+        Assert.Contains("slider", containerXml);
+
+        // At least 3 content.xml entries: 2 slides + 1 slider.
+        var contentXmlEntries = entries.Where(e =>
+            e.Name.Contains(".content.xml") && !e.Name.Contains("host")).ToList();
+        Assert.True(contentXmlEntries.Count >= 3,
+            $"Expected at least 3 content.xml entries (2 slides + 1 slider), got {contentXmlEntries.Count}");
+
+        // Verify slide data is in the contentlet XML.
+        bool foundSlide1 = contentXmlEntries.Any(e =>
+            Encoding.UTF8.GetString(e.Content).Contains("Banner 1"));
+        bool foundSlide2 = contentXmlEntries.Any(e =>
+            Encoding.UTF8.GetString(e.Content).Contains("Banner 2"));
+        Assert.True(foundSlide1, "Slide 'Banner 1' not found in content entries");
+        Assert.True(foundSlide2, "Slide 'Banner 2' not found in content entries");
+
+        // Verify the Slider (parent) contentlet exists and stores slide
+        // identifiers in the "slides" map field.
+        bool foundSliderParent = contentXmlEntries.Any(e =>
+        {
+            string xml = Encoding.UTF8.GetString(e.Content);
+            return xml.Contains("<assetSubType>slider</assetSubType>") && xml.Contains("slides");
+        });
+        Assert.True(foundSliderParent, "Slider parent contentlet with slides relationship field not found");
+    }
+
+    [Fact]
+    public void Write_WithSliderSlides_SlideContentletContainsAllFields()
+    {
+        var slideCt = new DotCmsContentType
+        {
+            Name     = "Slide",
+            Variable = "slide",
+            Fields   =
+            [
+                new DotCmsField { Name = "Title",       Variable = "title",       DataType = "TEXT",
+                    Clazz = "com.dotcms.contenttype.model.field.TextField" },
+                new DotCmsField { Name = "Description", Variable = "description", DataType = "TEXT",
+                    Clazz = "com.dotcms.contenttype.model.field.TextField" },
+                new DotCmsField { Name = "Image",       Variable = "image",       DataType = "TEXT",
+                    Clazz = "com.dotcms.contenttype.model.field.TextField" },
+                new DotCmsField { Name = "Link",        Variable = "link",        DataType = "TEXT",
+                    Clazz = "com.dotcms.contenttype.model.field.TextField" },
+                new DotCmsField { Name = "Link Text",   Variable = "linkText",    DataType = "TEXT",
+                    Clazz = "com.dotcms.contenttype.model.field.TextField" },
+            ]
+        };
+        var sliderCt = new DotCmsContentType
+        {
+            Name     = "Slider",
+            Variable = "slider",
+            Fields   =
+            [
+                new DotCmsField { Name = "Title",  Variable = "title",  DataType = "TEXT",
+                    Clazz = "com.dotcms.contenttype.model.field.TextField" },
+                new DotCmsField { Name = "Slides", Variable = "slides", DataType = "SYSTEM",
+                    Clazz = "com.dotcms.contenttype.model.field.RelationshipField",
+                    RelationType = "slide" },
+            ]
+        };
+
+        var slides = new[]
+        {
+            new DnnSliderSlide("My Slide", "Description text", "/img/hero.jpg", "/contact",
+                LinkText: "Contact Us",
+                TabUniqueId: "t1", PaneName: "BannerPane", SortOrder: 0),
+        };
+
+        using var ms = new MemoryStream();
+        BundleWriter.Write([slideCt, sliderCt], ms, siteName: "test-site", sliderSlides: slides);
+        ms.Position = 0;
+
+        var entries = ReadAllTarEntries(ms);
+        var slideEntries = entries.Where(e =>
+            e.Name.Contains(".content.xml") && !e.Name.Contains("host")).ToList();
+
+        // Find the slide contentlet XML (contains the field data, not the parent slider).
+        string? slideXml = slideEntries
+            .Select(e => Encoding.UTF8.GetString(e.Content))
+            .FirstOrDefault(xml => xml.Contains("My Slide") && xml.Contains("slide"));
+        Assert.NotNull(slideXml);
+
+        // All slide fields must be present in the XML.
+        Assert.Contains("My Slide", slideXml);
+        Assert.Contains("Description text", slideXml);
+        Assert.Contains("/img/hero.jpg", slideXml);
+        Assert.Contains("/contact", slideXml);
+        Assert.Contains("Contact Us", slideXml);
+        Assert.Contains("slide", slideXml);
+    }
+
+    [Fact]
+    public void BuildSliderContainerVelocity_ContainsFisSliderStructure()
+    {
+        string velocity = BundleWriter.BuildSliderContainerVelocity();
+
+        // The Velocity template must include FisSlider CSS classes and IDs.
+        Assert.Contains("Mvc-FisSliderModule-Container", velocity);
+        Assert.Contains("slideshow", velocity);
+        Assert.Contains("slide-container", velocity);
+        Assert.Contains("slide-item", velocity);
+        Assert.Contains("slide-title", velocity);
+        Assert.Contains("slide-desc", velocity);
+        Assert.Contains("slide-arrows", velocity);
+        Assert.Contains("slide-nav", velocity);
+        Assert.Contains("slide-link", velocity);
+        Assert.Contains("dot", velocity);
+
+        // Must reference the slider and slide content types.
+        Assert.Contains("slider", velocity);
+        Assert.Contains("$slider.slides", velocity);
+        Assert.Contains("slide.title", velocity);
+        Assert.Contains("slide.description", velocity);
+        Assert.Contains("slide.image", velocity);
+        Assert.Contains("slide.link", velocity);
+        Assert.Contains("slide.linkText", velocity);
+    }
+
+    [Fact]
+    public void BuildRelationshipXml_ContainsExpectedStructure()
+    {
+        string xml = BundleWriter.BuildRelationshipXml(
+            "rel-inode-123",
+            "slider-ct-id",
+            "slide-ct-id",
+            "slider",
+            "slides",
+            "slider",
+            cardinality: 1);
+
+        Assert.Contains("com.dotcms.publisher.pusher.wrapper.RelationshipWrapper", xml);
+        Assert.Contains("<inode>rel-inode-123</inode>", xml);
+        Assert.Contains("<parentStructureInode>slider-ct-id</parentStructureInode>", xml);
+        Assert.Contains("<childStructureInode>slide-ct-id</childStructureInode>", xml);
+        Assert.Contains("<parentRelationName>slider</parentRelationName>", xml);
+        Assert.Contains("<childRelationName>slides</childRelationName>", xml);
+        Assert.Contains("<relationTypeValue>slider.slides</relationTypeValue>", xml);
+        Assert.Contains("<cardinality>1</cardinality>", xml);
+        Assert.Contains("<operation>PUBLISH</operation>", xml);
+        Assert.Contains("<type>relationship</type>", xml);
+    }
+
+    [Fact]
+    public void Write_WithSliderSlides_SliderContentletHasRelationshipField()
+    {
+        // Verify the parent Slider contentlet conveys relationship data via
+        // <tree> entries (Map<String,Object> with parent/child/relation_type/
+        // tree_order) rather than putting identifiers in the content map.
+        // DotCMS ContentHandler.regenerateTree() processes these entries and
+        // calls TreeFactory.saveTree() to create the relationship records.
+        var slideCt = new DotCmsContentType
+        {
+            Name     = "Slide",
+            Variable = "slide",
+            Fields   =
+            [
+                new DotCmsField { Name = "Title", Variable = "title", DataType = "TEXT",
+                    Clazz = "com.dotcms.contenttype.model.field.TextField" },
+                new DotCmsField { Name = "Image", Variable = "image", DataType = "TEXT",
+                    Clazz = "com.dotcms.contenttype.model.field.TextField" },
+            ]
+        };
+        var sliderCt = new DotCmsContentType
+        {
+            Name     = "Slider",
+            Variable = "slider",
+            Fields   =
+            [
+                new DotCmsField { Name = "Title",  Variable = "title",  DataType = "TEXT",
+                    Clazz = "com.dotcms.contenttype.model.field.TextField" },
+                new DotCmsField { Name = "Slides", Variable = "slides", DataType = "SYSTEM",
+                    Clazz = "com.dotcms.contenttype.model.field.RelationshipField",
+                    RelationType = "slide" },
+            ]
+        };
+
+        var slides = new[]
+        {
+            new DnnSliderSlide("Slide A", "", "/img/a.jpg", "#",
+                TabUniqueId: "tab-1", PaneName: "BannerPane", SortOrder: 0),
+            new DnnSliderSlide("Slide B", "", "/img/b.jpg", "#",
+                TabUniqueId: "tab-1", PaneName: "BannerPane", SortOrder: 1),
+        };
+
+        using var ms = new MemoryStream();
+        BundleWriter.Write([slideCt, sliderCt], ms, siteName: "test-site", sliderSlides: slides);
+        ms.Position = 0;
+
+        var entries = ReadAllTarEntries(ms);
+        var contentXmlEntries = entries.Where(e =>
+            e.Name.Contains(".content.xml") && !e.Name.Contains("host")).ToList();
+
+        // Find the Slider parent contentlet (the one with assetSubType "slider").
+        string? sliderXml = contentXmlEntries
+            .Select(e => Encoding.UTF8.GetString(e.Content))
+            .FirstOrDefault(xml => xml.Contains("<assetSubType>slider</assetSubType>"));
+        Assert.NotNull(sliderXml);
+
+        // Must NOT contain Tree objects (they cause ClassCastException on import).
+        Assert.DoesNotContain("com.dotmarketing.beans.Tree", sliderXml);
+
+        // Must NOT contain the "slides" field in the content map — the
+        // Contentlet(Map) constructor copies via putAll(), and checkin()
+        // then tries to cast each element to Contentlet (fails for strings).
+        Assert.DoesNotMatch(@"<string>slides</string>", sliderXml);
+
+        // Must NOT use a <list> of <string> in the content map — DotCMS casts
+        // the list elements to Contentlet, not String.
+        Assert.DoesNotContain("<list>", sliderXml);
+
+        // The <tree> element must contain Map entries with parent/child/relation_type/tree_order.
+        Assert.Contains("<tree>", sliderXml);
+        Assert.Contains("relation_type", sliderXml);
+        Assert.Contains("slider.slides", sliderXml);
+
+        // Extract the Slide contentlet identifiers from their content.xml entries.
+        var slideXmls = contentXmlEntries
+            .Select(e => Encoding.UTF8.GetString(e.Content))
+            .Where(xml => xml.Contains("<assetSubType>slide</assetSubType>"))
+            .ToList();
+        Assert.Equal(2, slideXmls.Count);
+
+        // Each slide identifier should appear as a "child" in the Slider's <tree>.
+        foreach (string slideXml in slideXmls)
+        {
+            // Extract the identifier from the slide XML.
+            var match = System.Text.RegularExpressions.Regex.Match(slideXml,
+                @"<id>\s*<id>([^<]+)</id>");
+            Assert.True(match.Success, "Could not extract slide identifier");
+            string slideId = match.Groups[1].Value;
+            Assert.Contains(slideId, sliderXml);
+        }
+    }
+
+    [Fact]
+    public void Write_WithSliderSlides_BundleContainsRelationshipXml()
+    {
+        // Verify the bundle contains a .relationship.xml file that defines
+        // the Slider→Slide relationship.  DotCMS ContentTypeHandler sets
+        // skipRelationshipCreation=true during push-publish import, so
+        // the relationship must be explicitly included.
+        var slideCt = new DotCmsContentType
+        {
+            Name     = "Slide",
+            Variable = "slide",
+            Fields   =
+            [
+                new DotCmsField { Name = "Title", Variable = "title", DataType = "TEXT",
+                    Clazz = "com.dotcms.contenttype.model.field.TextField" },
+                new DotCmsField { Name = "Image", Variable = "image", DataType = "TEXT",
+                    Clazz = "com.dotcms.contenttype.model.field.TextField" },
+            ]
+        };
+        var sliderCt = new DotCmsContentType
+        {
+            Name     = "Slider",
+            Variable = "slider",
+            Fields   =
+            [
+                new DotCmsField { Name = "Title",  Variable = "title",  DataType = "TEXT",
+                    Clazz = "com.dotcms.contenttype.model.field.TextField" },
+                new DotCmsField { Name = "Slides", Variable = "slides", DataType = "SYSTEM",
+                    Clazz = "com.dotcms.contenttype.model.field.RelationshipField",
+                    RelationType = "slide" },
+            ]
+        };
+
+        var slides = new[]
+        {
+            new DnnSliderSlide("Slide A", "", "/img/a.jpg", "#",
+                TabUniqueId: "tab-1", PaneName: "BannerPane", SortOrder: 0),
+        };
+
+        using var ms = new MemoryStream();
+        BundleWriter.Write([slideCt, sliderCt], ms, siteName: "test-site", sliderSlides: slides);
+        ms.Position = 0;
+
+        var entries = ReadAllTarEntries(ms);
+
+        // Find the .relationship.xml entry.
+        var relEntries = entries.Where(e => e.Name.Contains(".relationship.xml")).ToList();
+        Assert.Single(relEntries);
+
+        string relXml = Encoding.UTF8.GetString(relEntries[0].Content);
+
+        // Must be a RelationshipWrapper.
+        Assert.Contains("com.dotcms.publisher.pusher.wrapper.RelationshipWrapper", relXml);
+
+        // The relationTypeValue must follow new-style format: parentVariable.fieldVariable.
+        Assert.Contains("<relationTypeValue>slider.slides</relationTypeValue>", relXml);
+
+        // Must reference the Slider as parent and Slide as child.
+        Assert.Contains("<childRelationName>slides</childRelationName>", relXml);
+
+        // Cardinality 1 = ONE_TO_MANY.
+        Assert.Contains("<cardinality>1</cardinality>", relXml);
+
+        // Operation must be PUBLISH.
+        Assert.Contains("<operation>PUBLISH</operation>", relXml);
+
+        // Must contain parent and child content type IDs (non-empty).
+        Assert.Contains("<parentStructureInode>", relXml);
+        Assert.Contains("<childStructureInode>", relXml);
+    }
+
+    [Fact]
+    public void Write_RelationshipFieldUsesSystemFieldDbColumn()
+    {
+        // A RelationshipField should get dbColumn "system_field", not "binaryN".
+        var ct = new DotCmsContentType
+        {
+            Name     = "Slider",
+            Variable = "slider",
+            Fields   =
+            [
+                new DotCmsField { Name = "Title",  Variable = "title",  DataType = "TEXT",
+                    Clazz = "com.dotcms.contenttype.model.field.TextField" },
+                new DotCmsField { Name = "Slides", Variable = "slides", DataType = "SYSTEM",
+                    Clazz = "com.dotcms.contenttype.model.field.RelationshipField",
+                    RelationType = "slide" },
+            ]
+        };
+
+        using var ms = new MemoryStream();
+        BundleWriter.Write([ct], ms, siteName: "test-site");
+        ms.Position = 0;
+
+        var entries = ReadAllTarEntries(ms);
+        var ctJsonEntry = entries.First(e => e.Name.Contains("contentType.json"));
+        string ctJson = Encoding.UTF8.GetString(ctJsonEntry.Content);
+
+        // The Slides field must use "system_field" as dbColumn.
+        Assert.Contains("system_field", ctJson);
+        // And should reference the relationType.
+        Assert.Contains("slide", ctJson);
+        // It must NOT use "binary1" for the relationship field.
+        Assert.DoesNotContain("binary1", ctJson);
+    }
+
+    [Fact]
+    public void Write_WithSliderSlides_TemplateContainsSliderParseContainer()
+    {
+        // When slider slides are placed on a page, the template must include
+        // a #parseContainer for the slider container so DotCMS renders it.
+        // The page's multiTree must reference the slider container with the
+        // UUID matching the template's #parseContainer directive.
+        var slideCt = new DotCmsContentType
+        {
+            Name     = "Slide",
+            Variable = "slide",
+            Fields   =
+            [
+                new DotCmsField { Name = "Title", Variable = "title", DataType = "TEXT",
+                    Clazz = "com.dotcms.contenttype.model.field.TextField" },
+            ]
+        };
+        var sliderCt = new DotCmsContentType
+        {
+            Name     = "Slider",
+            Variable = "slider",
+            Fields   =
+            [
+                new DotCmsField { Name = "Title",  Variable = "title",  DataType = "TEXT",
+                    Clazz = "com.dotcms.contenttype.model.field.TextField" },
+                new DotCmsField { Name = "Slides", Variable = "slides", DataType = "SYSTEM",
+                    Clazz = "com.dotcms.contenttype.model.field.RelationshipField",
+                    RelationType = "slide" },
+            ]
+        };
+
+        string tabId = "tab-slider-parse";
+        var pages = new[]
+        {
+            new DnnPortalPage(tabId, "Home", "Home", "", "//Home", 0, true, ""),
+        };
+        var contents = new[]
+        {
+            new DnnHtmlContent("Welcome", "<h1>Hello</h1>", TabUniqueId: tabId, PaneName: "ContentPane"),
+        };
+        var slides = new[]
+        {
+            new DnnSliderSlide("Slide 1", "", "/img/1.jpg", "#",
+                TabUniqueId: tabId, PaneName: "ContentPane", SortOrder: 0),
+        };
+
+        using var ms = new MemoryStream();
+        BundleWriter.Write([MakeHtmlContentType(), slideCt, sliderCt], ms,
+            siteName: "test-site", htmlContents: contents, pages: pages,
+            sliderSlides: slides);
+        ms.Position = 0;
+
+        var entries = ReadAllTarEntries(ms);
+
+        // The template XML must contain a #parseContainer for the slider container.
+        var templateEntry = entries.FirstOrDefault(e => e.Name.Contains(".template.template.xml"));
+        Assert.NotNull(templateEntry.Content);
+        string templateXml = Encoding.UTF8.GetString(templateEntry.Content);
+
+        // Count #parseContainer directives — should be at least 2:
+        // one for the default HTML container and one for the slider container.
+        int parseContainerCount = System.Text.RegularExpressions.Regex.Matches(
+            templateXml, @"#parseContainer\(").Count;
+        Assert.True(parseContainerCount >= 2,
+            $"Expected at least 2 #parseContainer directives in template, got {parseContainerCount}");
+
+        // The page multiTree must reference the slider container with
+        // the same UUID used in the template's #parseContainer.
+        // Find the Slider container ID from the container XML entry.
+        var sliderContainerEntry = entries.First(e =>
+            e.Name.Contains(".containers.container.xml")
+            && Encoding.UTF8.GetString(e.Content).Contains("Slider"));
+        string sliderContainerXml = Encoding.UTF8.GetString(sliderContainerEntry.Content);
+        var containerIdMatch = System.Text.RegularExpressions.Regex.Match(
+            sliderContainerXml, @"<containerId>\s*<id>([^<]+)</id>");
+        Assert.True(containerIdMatch.Success, "Could not extract slider container ID from container XML");
+        string sliderContainerId = containerIdMatch.Groups[1].Value;
+
+        // The template must have #parseContainer(sliderContainerId, uuid).
+        Assert.Contains(sliderContainerId, templateXml);
+
+        // Extract the UUID used for the slider container in the template.
+        // Note: the template body is XML-escaped, so apostrophes become &apos;
+        string escapedSliderId = System.Text.RegularExpressions.Regex.Escape(
+            System.Security.SecurityElement.Escape(sliderContainerId)!);
+        var uuidMatch = System.Text.RegularExpressions.Regex.Match(
+            templateXml, $@"#parseContainer\(&apos;{escapedSliderId}&apos;,\s*&apos;(\d+)&apos;\)");
+        Assert.True(uuidMatch.Success,
+            $"Template must have #parseContainer for slider container '{sliderContainerId}'");
+        string sliderUuid = uuidMatch.Groups[1].Value;
+
+        // The page's multiTree must reference the slider container
+        // with this UUID as the relation_type.
+        string pageEntryName = entries
+            .Select(e => e.Name)
+            .First(n => n.Contains("/1/") && n.EndsWith(".content.xml")
+                && !n.Contains("host.xml")
+                && Encoding.UTF8.GetString(
+                    entries.First(e2 => e2.Name == n).Content)
+                    .Contains("htmlpageasset"));
+        string pageXml = Encoding.UTF8.GetString(
+            entries.First(e => e.Name == pageEntryName).Content);
+
+        // Page multiTree must contain the slider container ID.
+        Assert.Contains(sliderContainerId, pageXml);
+
+        // Page multiTree must use the slider UUID as relation_type for
+        // the slider container entries.
+        Assert.Contains(sliderUuid, pageXml);
+    }
+
+    private static List<(string Name, byte[] Content)> ReadAllTarEntries(Stream gzStream)
+    {
+        gzStream.Position = 0;
+        using var gz = new GZipStream(gzStream, CompressionMode.Decompress, leaveOpen: true);
+        using var tar = new TarReader(gz);
+        var result = new List<(string Name, byte[] Content)>();
+        while (tar.GetNextEntry() is TarEntry entry)
+        {
+            using var ms2 = new MemoryStream();
+            entry.DataStream?.CopyTo(ms2);
+            result.Add((entry.Name, ms2.ToArray()));
+        }
+        return result;
+    }
+
 }

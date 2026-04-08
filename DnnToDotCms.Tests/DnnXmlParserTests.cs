@@ -687,11 +687,10 @@ public class DnnXmlParserTests
     }
 
     [Fact]
-    public void ParseHtmlContents_FisSliderWithNoImagesCreatesEmptyCarousel()
+    public void ParseHtmlContents_FisSliderWithNoImagesSkippedByParseHtmlContents()
     {
-        // A FisSlider module with no images in ExportFile should produce a
-        // Bootstrap carousel contentlet (empty shell ready to be configured
-        // in DotCMS) rather than a "needs to be recreated" placeholder.
+        // FisSlider modules are now handled by ParseSliderSlides, not
+        // ParseHtmlContents.  Verify that ParseHtmlContents skips them.
         string tempDir = BuildExportDbFolder(db =>
         {
             var tabs = db.GetCollection("ExportTab");
@@ -718,8 +717,6 @@ public class DnnXmlParserTests
                 ["ModuleID"]     = 42,
                 ["FriendlyName"] = "FisSlider",
             });
-
-            // No ExportModuleContent entry and no ExportFile entries for ModuleID=42.
         });
 
         try
@@ -727,20 +724,8 @@ public class DnnXmlParserTests
             IReadOnlyList<DnnHtmlContent> result =
                 DnnXmlParser.ParseHtmlContents(tempDir);
 
-            Assert.Single(result);
-            DnnHtmlContent hc = result[0];
-            Assert.Equal("Banner Slideshow", hc.Title);
-            // FisSlider must produce a Bootstrap carousel, not a "recreate" notice.
-            Assert.Contains("carousel", hc.HtmlBody);
-            Assert.Contains("dnn-slider-", hc.HtmlBody);
-            // The empty shell has no slides, so there must be no slide-level elements.
-            Assert.DoesNotContain("Slide Title", hc.HtmlBody);
-            Assert.DoesNotContain("btn btn-primary", hc.HtmlBody);
-            Assert.DoesNotContain("recreated in DotCMS", hc.HtmlBody);
-            Assert.DoesNotContain("dnn-module-placeholder", hc.HtmlBody);
-            Assert.Equal("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", hc.TabUniqueId);
-            Assert.Equal("ContentPane", hc.PaneName);
-            Assert.Equal("[L]Containers/FBOT/slider.ascx", hc.ContainerSrc);
+            // FisSlider modules are no longer returned by ParseHtmlContents.
+            Assert.Empty(result);
         }
         finally
         {
@@ -749,11 +734,65 @@ public class DnnXmlParserTests
     }
 
     [Fact]
-    public void ParseHtmlContents_FisSliderCarouselIncludesImagesFromSliderFolder()
+    public void ParseSliderSlides_FisSliderWithNoImagesCreatesPlaceholderSlide()
+    {
+        // A FisSlider module with no images should produce a single
+        // placeholder slide so that the slider container is still placed
+        // on the page.
+        string tempDir = BuildExportDbFolder(db =>
+        {
+            var tabs = db.GetCollection("ExportTab");
+            tabs.Insert(new BsonDocument
+            {
+                ["TabID"]    = 1,
+                ["UniqueId"] = new BsonValue(Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")),
+            });
+
+            var tabModules = db.GetCollection("ExportTabModule");
+            tabModules.Insert(new BsonDocument
+            {
+                ["ModuleID"]     = 42,
+                ["TabID"]        = 1,
+                ["ModuleTitle"]  = "Banner Slideshow",
+                ["PaneName"]     = "ContentPane",
+                ["ContainerSrc"] = "[L]Containers/FBOT/slider.ascx",
+                ["IconFile"]     = "",
+            });
+
+            var modules = db.GetCollection("ExportModule");
+            modules.Insert(new BsonDocument
+            {
+                ["ModuleID"]     = 42,
+                ["FriendlyName"] = "FisSlider",
+            });
+        });
+
+        try
+        {
+            IReadOnlyList<DnnSliderSlide> slides =
+                DnnXmlParser.ParseSliderSlides(tempDir);
+
+            Assert.Single(slides);
+            DnnSliderSlide slide = slides[0];
+            Assert.Equal("Slide 1", slide.Title);
+            Assert.Equal(string.Empty, slide.ImageUrl);
+            Assert.Equal("#", slide.LinkUrl);
+            Assert.Equal("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", slide.TabUniqueId);
+            Assert.Equal("ContentPane", slide.PaneName);
+            Assert.Equal("[L]Containers/FBOT/slider.ascx", slide.ContainerSrc);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ParseSliderSlides_FisSliderIncludesImagesFromSliderFolder()
     {
         // When ExportFile contains images in a folder whose name includes
         // "slider" (e.g. "FisSlider-Images/"), those images must appear as
-        // <img> tags inside the generated Bootstrap carousel.
+        // individual DnnSliderSlide entries.
         string tempDir = BuildExportDbFolder(db =>
         {
             var tabs = db.GetCollection("ExportTab");
@@ -781,7 +820,7 @@ public class DnnXmlParserTests
                 ["FriendlyName"] = "FisSlider",
             });
 
-            // Add slider images to ExportFile — these should appear in the carousel.
+            // Add slider images to ExportFile — these should appear as slides.
             var exportFiles = db.GetCollection("ExportFile");
             exportFiles.Insert(new BsonDocument
             {
@@ -801,28 +840,28 @@ public class DnnXmlParserTests
 
         try
         {
-            IReadOnlyList<DnnHtmlContent> result =
-                DnnXmlParser.ParseHtmlContents(tempDir);
+            IReadOnlyList<DnnSliderSlide> slides =
+                DnnXmlParser.ParseSliderSlides(tempDir);
 
-            Assert.Single(result);
-            DnnHtmlContent hc = result[0];
-            Assert.Equal("Banner Slideshow", hc.Title);
-            Assert.Contains("carousel", hc.HtmlBody);
-            Assert.Contains("/FisSlider-Images/slide1.jpg", hc.HtmlBody);
-            Assert.Contains("/FisSlider-Images/slide2.jpg", hc.HtmlBody);
-            // Each slide must include a caption with the image filename as title.
-            Assert.Contains("carousel-caption", hc.HtmlBody);
-            Assert.Contains("<h5>slide1</h5>", hc.HtmlBody);
-            Assert.Contains("<h5>slide2</h5>", hc.HtmlBody);
-            // Each slide must include a placeholder "Learn More" link button so
-            // content editors know to supply the actual slide destination URL.
-            // FisSlider stores per-slide link URLs in a SQL table that is not
-            // included in DNN exports; the placeholder preserves the structure.
-            Assert.Contains("btn btn-primary", hc.HtmlBody);
-            Assert.Contains("Learn More", hc.HtmlBody);
-            Assert.DoesNotContain("Slide description text", hc.HtmlBody);
-            Assert.DoesNotContain("recreated in DotCMS", hc.HtmlBody);
-            Assert.DoesNotContain("dnn-module-placeholder", hc.HtmlBody);
+            Assert.Equal(2, slides.Count);
+            // Slides should be sorted alphabetically by image path.
+            Assert.Equal("slide1", slides[0].Title);
+            Assert.Equal("/FisSlider-Images/slide1.jpg", slides[0].ImageUrl);
+            Assert.Equal("#", slides[0].LinkUrl);
+            Assert.Equal(0, slides[0].SortOrder);
+
+            Assert.Equal("slide2", slides[1].Title);
+            Assert.Equal("/FisSlider-Images/slide2.jpg", slides[1].ImageUrl);
+            Assert.Equal("#", slides[1].LinkUrl);
+            Assert.Equal(1, slides[1].SortOrder);
+
+            // Both slides should reference the same tab and pane.
+            Assert.All(slides, s =>
+            {
+                Assert.Equal("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", s.TabUniqueId);
+                Assert.Equal("ContentPane", s.PaneName);
+                Assert.Equal("[L]Containers/FBOT/slider.ascx", s.ContainerSrc);
+            });
         }
         finally
         {
@@ -943,10 +982,10 @@ public class DnnXmlParserTests
     }
 
     [Fact]
-    public void ParseHtmlContents_FisSliderCarouselPerTabForSharedModule()
+    public void ParseSliderSlides_FisSliderPerTabForSharedModule()
     {
-        // A FisSlider module shared across two tabs should produce a
-        // carousel entry for each tab (not a generic placeholder).
+        // A FisSlider module shared across two tabs should produce slide
+        // entries for each tab.
         string tempDir = BuildExportDbFolder(db =>
         {
             var tabs = db.GetCollection("ExportTab");
@@ -987,17 +1026,13 @@ public class DnnXmlParserTests
 
         try
         {
-            IReadOnlyList<DnnHtmlContent> result =
-                DnnXmlParser.ParseHtmlContents(tempDir);
+            IReadOnlyList<DnnSliderSlide> slides =
+                DnnXmlParser.ParseSliderSlides(tempDir);
 
-            Assert.Equal(2, result.Count);
-            Assert.All(result, r =>
-            {
-                Assert.Contains("carousel", r.HtmlBody);
-                Assert.DoesNotContain("dnn-module-placeholder", r.HtmlBody);
-            });
+            // No images → one placeholder slide per tab = 2 slides.
+            Assert.Equal(2, slides.Count);
 
-            var tabIds = result.Select(r => r.TabUniqueId).ToHashSet();
+            var tabIds = slides.Select(s => s.TabUniqueId).ToHashSet();
             Assert.Contains("aaaa0001-0000-0000-0000-000000000000", tabIds);
             Assert.Contains("aaaa0002-0000-0000-0000-000000000000", tabIds);
         }

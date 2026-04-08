@@ -110,6 +110,40 @@ public sealed record DnnPortalPage(
     int ParentId = -1);
 
 /// <summary>
+/// Represents a single slide extracted from a DNN FisSlider module.
+/// Each slide becomes its own DotCMS contentlet with editable fields
+/// (title, description, image, link) instead of being baked into a
+/// monolithic HTML carousel.
+/// </summary>
+public sealed record DnnSliderSlide(
+    /// <summary>Slide title / caption heading.</summary>
+    string Title,
+    /// <summary>Optional description text.</summary>
+    string Description,
+    /// <summary>Image URL (absolute or portal-root-relative).</summary>
+    string ImageUrl,
+    /// <summary>Destination link URL (or "#" if unknown).</summary>
+    string LinkUrl,
+    /// <summary>Button label (e.g. "Learn More", "About Us").</summary>
+    string LinkText = "",
+    /// <summary>
+    /// The UniqueId GUID of the DNN tab (page) that the slider lives on.
+    /// </summary>
+    string TabUniqueId = "",
+    /// <summary>
+    /// The DNN pane name that the slider module occupies.
+    /// </summary>
+    string PaneName = "",
+    /// <summary>
+    /// DNN container source path for the slider pane.
+    /// </summary>
+    string ContainerSrc = "",
+    /// <summary>
+    /// Zero-based position of this slide within its slider instance.
+    /// </summary>
+    int SortOrder = 0);
+
+/// <summary>
 /// Represents a DNN portal file extracted from the <c>ExportFile</c>
 /// collection in <c>export_db.zip</c> together with its binary content
 /// from <c>export_files.zip</c>.

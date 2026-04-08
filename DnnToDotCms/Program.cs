@@ -1,6 +1,7 @@
 ﻿using DnnToDotCms.Bundle;
 using DnnToDotCms.Converter;
 using DnnToDotCms.Crawler;
+using DnnToDotCms.Mappings;
 using DnnToDotCms.Models;
 using DnnToDotCms.Parser;
 
@@ -173,6 +174,31 @@ try
         ? DnnXmlParser.ParseHtmlContents(exportDir, scrapedSlides)
         : [];
 
+    // Extract individual slider slides from FisSlider modules so they
+    // become separate editable contentlets in DotCMS.
+    IReadOnlyList<DnnSliderSlide> sliderSlides = exportDir is not null
+        ? DnnXmlParser.ParseSliderSlides(exportDir, scrapedSlides)
+        : [];
+
+    // If slider slides were found, ensure both the Slide and Slider content
+    // types are present in the content type list.  The Slide type is already
+    // added by ConvertAll (it maps from FisSlider), but the Slider parent
+    // type must be added explicitly because it is not a direct DNN module.
+    IReadOnlyList<DotCmsContentType> finalContentTypes = contentTypes;
+    if (sliderSlides.Count > 0)
+    {
+        bool hasSlider = contentTypes.Any(ct =>
+            string.Equals(ct.Variable, "slider", StringComparison.Ordinal));
+        if (!hasSlider)
+        {
+            var extended = new List<DotCmsContentType>(contentTypes)
+            {
+                ModuleMappings.GetSliderContentType()
+            };
+            finalContentTypes = extended;
+        }
+    }
+
     // Extract portal pages (tabs) from the LiteDB database.
     IReadOnlyList<DnnPortalPage> portalPages = exportDir is not null
         ? DnnXmlParser.ParsePortalPages(exportDir)
@@ -196,8 +222,8 @@ try
 
     // Write the DotCMS site bundle.
     using (var outStream = File.Create(outputPath))
-        BundleWriter.Write(contentTypes, outStream, themesZip, portalName, htmlContents,
-            portalPages, portalFiles, defaultSkinSrc);
+        BundleWriter.Write(finalContentTypes, outStream, themesZip, portalName, htmlContents,
+            portalPages, portalFiles, defaultSkinSrc, sliderSlides: sliderSlides);
 
     string themeNote = themesZip is not null
         ? " Containers, templates, and static theme assets included from export_themes.zip."
@@ -209,6 +235,10 @@ try
 
     string contentNote = htmlContents.Count > 0
         ? $" {htmlContents.Count} HTML content item(s) included."
+        : string.Empty;
+
+    string slideNote = sliderSlides.Count > 0
+        ? $" {sliderSlides.Count} slider slide(s) included."
         : string.Empty;
 
     // Count all non-Admin pages that are actually written to the bundle.
@@ -224,8 +254,8 @@ try
         : string.Empty;
 
     Console.WriteLine(
-        $"Converted {modules.Count} module(s) to {contentTypes.Count} content type(s)." +
-        $"{themeNote}{siteNote}{contentNote}{pageNote}{fileNote} Bundle written to: {outputPath}");
+        $"Converted {modules.Count} module(s) to {finalContentTypes.Count} content type(s)." +
+        $"{themeNote}{siteNote}{contentNote}{slideNote}{pageNote}{fileNote} Bundle written to: {outputPath}");
 
     return 0;
 }

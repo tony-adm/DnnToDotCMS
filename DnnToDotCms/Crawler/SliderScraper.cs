@@ -14,7 +14,9 @@ public sealed record ScrapedSlide(
     /// <summary>Optional caption or heading text.</summary>
     string? Caption,
     /// <summary>Optional description text.</summary>
-    string? Description);
+    string? Description,
+    /// <summary>Optional link button label (e.g. "Learn More").</summary>
+    string? LinkText = null);
 
 /// <summary>
 /// Scrapes slider/carousel data from a live DNN website.  This supplements
@@ -244,6 +246,7 @@ public static class SliderScraper
 
         // Find the slide link.
         string? linkUrl = null;
+        string? linkText = null;
         var link = node.SelectSingleNode(".//a[@href]")
                 ?? (node.ParentNode?.Name == "a" ? node.ParentNode : null);
         if (link is not null)
@@ -253,6 +256,9 @@ public static class SliderScraper
             {
                 linkUrl = ResolveUrl(href, authority);
             }
+            string rawLinkText = WebUtility.HtmlDecode(link.InnerText.Trim());
+            if (!string.IsNullOrWhiteSpace(rawLinkText))
+                linkText = rawLinkText;
         }
 
         // Find caption/heading text.
@@ -278,7 +284,7 @@ public static class SliderScraper
                 description = text;
         }
 
-        return new ScrapedSlide(imgSrc, linkUrl, caption, description);
+        return new ScrapedSlide(imgSrc, linkUrl, caption, description, linkText);
     }
 
     /// <summary>
