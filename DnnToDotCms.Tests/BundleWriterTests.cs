@@ -5674,6 +5674,7 @@ public class BundleWriterTests
         Assert.Contains("slide.linkText", velocity);
 
         // External CSS and JS must be linked (no inline <style>/<script> for CSP compliance).
+        // When no theme prefix is provided, paths fall back to the site root.
         Assert.Contains("<link rel=\"stylesheet\" href=\"/slider.css\"", velocity);
         Assert.Contains("<script src=\"/slider.js\"", velocity);
         Assert.DoesNotContain("<style>", velocity);
@@ -5686,6 +5687,16 @@ public class BundleWriterTests
 
         // data-slider-id attribute is used by external JS to initialise each instance.
         Assert.Contains("data-slider-id", velocity);
+    }
+
+    [Fact]
+    public void BuildSliderContainerVelocity_WithThemePrefix_UsesThemePaths()
+    {
+        string velocity = BundleWriter.BuildSliderContainerVelocity("/application/themes/Xcillion");
+
+        // CSS and JS must reference the theme directory, not the site root.
+        Assert.Contains("<link rel=\"stylesheet\" href=\"/application/themes/Xcillion/slider.css\"", velocity);
+        Assert.Contains("<script src=\"/application/themes/Xcillion/slider.js\"", velocity);
     }
 
     [Fact]
