@@ -1990,7 +1990,7 @@ public static class BundleWriter
             .slideshow .slideshowContent { position: relative; height: 569px; width: 100%; overflow: hidden; }
             .slideshow .slide-item { background-size: cover !important; background-position: 50% 50% !important; background-repeat: no-repeat !important; position: absolute !important; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; transition: opacity 0.8s ease-in-out; }
             .slideshow .slide-item.active { opacity: 1; }
-            .slideshow .slide-text-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; padding: 5% 4% 3% max(15%, 100px); box-sizing: border-box; }
+            .slideshow .slide-text-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; padding: 2% 0 0 5%; box-sizing: border-box; }
             .slideshow .slide-arrows { position: absolute; top: 50%; width: 100%; display: flex; justify-content: space-between; transform: translateY(-50%); z-index: 10; pointer-events: none; padding: 0 10px; box-sizing: border-box; }
             .slideshow .slide-arrows button { pointer-events: auto; background: rgba(0,0,0,0.4); color: #fff; border: none; font-size: 2rem; width: 44px; height: 44px; cursor: pointer; border-radius: 50%; display: flex; align-items: center; justify-content: center; transition: background 0.3s; }
             .slideshow .slide-arrows button:hover { background: rgba(0,0,0,0.7); }
@@ -1999,7 +1999,7 @@ public static class BundleWriter
             .slideshow .slide-nav .dot { background: rgba(255,255,255,0.5); border: none; width: 14px; height: 14px; border-radius: 50%; cursor: pointer; padding: 0; transition: background 0.3s; }
             .slideshow .slide-nav .dot.active { background: #fff; }
             @media (max-width: 990px) {
-              .slideshow .slide-text-container { padding: 7% 3% 7% 100px; }
+              .slideshow .slide-text-container { padding: 2% 0 0 5%; }
             }
             """;
     }
@@ -2210,7 +2210,7 @@ public static class BundleWriter
                   {EStr("stInode", HtmlPageAssetContentTypeId)}
                   {EStr("title", xmlTitle)}
                   {EStr("friendlyName", xmlTitle)}
-                  {E("showOnMenu", $"<boolean>{showOnMenuStr}</boolean>")}
+                  {EStr("showOnMenu", showOnMenuStr)}
                   {EStr("template", templateId)}
                   {EStr("url", xmlUrl)}
                   {EStr("owner", "dotcms.org.1")}
@@ -3059,11 +3059,9 @@ public static class BundleWriter
                 <a href="#" class="nav-link text-expanded dropdown-toggle" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">$navItem.title<b class="caret"></b></a>
                 <ul class="dropdown-menu py-0 my-0">
                 #foreach($childItem in $children)
-                  #if($childItem.showOnMenu)
                     <li class="nav-item #if($childItem.active) active #end py-0 my-0">
                       <a href="$childItem.href" class="nav-link text-expanded">$childItem.title</a>
                     </li>
-                  #end
                 #end
                 </ul>
               </li>
