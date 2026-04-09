@@ -969,10 +969,10 @@ public class DnnXmlParserTests
             Assert.Equal("<p>Hello!</p>", htmlItem.HtmlBody);
             Assert.Equal("ContentPane", htmlItem.PaneName);
 
-            // The custom module should have a placeholder.
+            // The custom module should have converted content.
             DnnHtmlContent placeholder = result.First(r => r.Title == "Image Carousel");
-            Assert.Contains("dnn-module-placeholder", placeholder.HtmlBody);
-            Assert.Contains("ImageCarousel", placeholder.HtmlBody);
+            Assert.Contains("dnn-module dnn-module-custom", placeholder.HtmlBody);
+            Assert.Contains("Image Carousel", placeholder.HtmlBody);
             Assert.Equal("BannerPane", placeholder.PaneName);
         }
         finally
@@ -1189,5 +1189,49 @@ public class DnnXmlParserTests
         {
             Directory.Delete(tempDir, recursive: true);
         }
+    }
+
+    // ------------------------------------------------------------------
+    // BuildModuleBody tests
+    // ------------------------------------------------------------------
+
+    [Theory]
+    [InlineData("ViewProfile",      "dnn-module-profile",           "h2")]
+    [InlineData("Member Directory", "dnn-module-member-directory",  "member-list")]
+    [InlineData("Console",          "dnn-module-console",           "console-nav")]
+    [InlineData("Journal",          "dnn-module-journal",           "journal-feed")]
+    [InlineData("Message Center",   "dnn-module-messages",          "message-inbox")]
+    [InlineData("Search Results",   "dnn-module-search",            "search-form")]
+    [InlineData("ResourceManager",  "dnn-module-files",             "file-browser")]
+    [InlineData("User Accounts",    "dnn-module-accounts",          "accounts-admin")]
+    [InlineData("Account Login",    "dnn-module-login",             "login-form")]
+    public void BuildModuleBody_KnownModuleTypes_GenerateSemanticHtml(
+        string moduleType, string expectedClass, string expectedElement)
+    {
+        string body = DnnXmlParser.BuildModuleBody(moduleType, "Test Title");
+
+        Assert.Contains(expectedClass, body);
+        Assert.Contains(expectedElement, body);
+        Assert.Contains("Test Title", body);
+        Assert.DoesNotContain("recreated in DotCMS", body);
+    }
+
+    [Fact]
+    public void BuildModuleBody_UnknownModuleType_GeneratesCustomDiv()
+    {
+        string body = DnnXmlParser.BuildModuleBody("SomeWidget", "My Widget");
+
+        Assert.Contains("dnn-module-custom", body);
+        Assert.Contains("My Widget", body);
+        Assert.DoesNotContain("recreated in DotCMS", body);
+    }
+
+    [Fact]
+    public void BuildModuleBody_EscapesHtmlInTitle()
+    {
+        string body = DnnXmlParser.BuildModuleBody("Console", "Nav <script>alert(1)</script>");
+
+        Assert.Contains("Nav &lt;script&gt;alert(1)&lt;/script&gt;", body);
+        Assert.DoesNotContain("<script>alert", body);
     }
 }
