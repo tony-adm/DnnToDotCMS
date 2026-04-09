@@ -455,8 +455,8 @@ public static class DnnXmlParser
         // Create entries for modules that have page/pane associations but no
         // content in ExportModuleContent (e.g. custom modules like FisSlider
         // that store data in their own SQL tables).  FisSlider modules are
-        // now handled separately as individual slide contentlets; other custom
-        // modules get a generic placeholder.
+        // now handled separately as individual slide contentlets; other modules
+        // get HTML content appropriate to their module type.
         foreach (var (moduleId, tabPanes) in moduleTabPanes)
         {
             if (modulesWithContent.Contains(moduleId))
@@ -473,20 +473,7 @@ public static class DnnXmlParser
             if (string.Equals(moduleType, "FisSlider", StringComparison.OrdinalIgnoreCase))
                 continue;
 
-            string body;
-            {
-                // Generic placeholder for other custom modules so that content
-                // editors know what needs to be recreated in DotCMS.
-                string escapedType  = System.Security.SecurityElement.Escape(moduleType) ?? moduleType;
-                string escapedTitle = System.Security.SecurityElement.Escape(displayTitle) ?? displayTitle;
-                body =
-                    $"""
-                    <div class="dnn-module-placeholder" data-module-type="{escapedType}">
-                      <p><strong>{escapedType}</strong>: {escapedTitle}</p>
-                      <p><em>This content was managed by a custom DNN module and needs to be recreated in DotCMS.</em></p>
-                    </div>
-                    """;
-            }
+            string body = BuildModuleBody(moduleType, displayTitle);
 
             foreach (var (tabUniqueId, paneName, containerSrc, iconFile) in tabPanes)
             {
@@ -501,6 +488,138 @@ public static class DnnXmlParser
         }
 
         return results;
+    }
+
+    // ------------------------------------------------------------------
+    // Module body generation for known DNN module types
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Generates converted HTML content for a known DNN module type.
+    /// Each standard DNN module is rendered as semantic HTML that
+    /// represents the module's functionality in a static CMS context.
+    /// Unknown module types receive a minimal placeholder.
+    /// </summary>
+    internal static string BuildModuleBody(string moduleType, string displayTitle)
+    {
+        string escapedTitle = System.Security.SecurityElement.Escape(displayTitle) ?? displayTitle;
+
+        return moduleType.ToUpperInvariant() switch
+        {
+            "VIEWPROFILE" =>
+                $"""
+                <div class="dnn-module dnn-module-profile">
+                  <h2>{escapedTitle}</h2>
+                  <div class="profile-info">
+                    <p class="profile-name"><strong>Display Name</strong></p>
+                    <p class="profile-bio">User biography and profile details.</p>
+                  </div>
+                </div>
+                """,
+
+            "MEMBER DIRECTORY" =>
+                $"""
+                <div class="dnn-module dnn-module-member-directory">
+                  <h2>{escapedTitle}</h2>
+                  <ul class="member-list">
+                    <li>Member listing</li>
+                  </ul>
+                </div>
+                """,
+
+            "CONSOLE" =>
+                $"""
+                <div class="dnn-module dnn-module-console">
+                  <nav aria-label="{escapedTitle}">
+                    <h2>{escapedTitle}</h2>
+                    <ul class="console-nav">
+                      <li><a href="#">Activity Feed</a></li>
+                      <li><a href="#">My Profile</a></li>
+                      <li><a href="#">Friends</a></li>
+                      <li><a href="#">Messages</a></li>
+                    </ul>
+                  </nav>
+                </div>
+                """,
+
+            "JOURNAL" =>
+                $"""
+                <div class="dnn-module dnn-module-journal">
+                  <h2>{escapedTitle}</h2>
+                  <div class="journal-feed">
+                    <p>Activity feed content.</p>
+                  </div>
+                </div>
+                """,
+
+            "MESSAGE CENTER" =>
+                $"""
+                <div class="dnn-module dnn-module-messages">
+                  <h2>{escapedTitle}</h2>
+                  <div class="message-inbox">
+                    <p>Messages and notifications.</p>
+                  </div>
+                </div>
+                """,
+
+            "SEARCH RESULTS" =>
+                $"""
+                <div class="dnn-module dnn-module-search">
+                  <h2>{escapedTitle}</h2>
+                  <form class="search-form" action="#" method="get">
+                    <label for="search-input">Search</label>
+                    <input id="search-input" type="text" name="q" placeholder="Search…" />
+                    <button type="submit">Search</button>
+                  </form>
+                  <div class="search-results"></div>
+                </div>
+                """,
+
+            "RESOURCEMANAGER" =>
+                $"""
+                <div class="dnn-module dnn-module-files">
+                  <h2>{escapedTitle}</h2>
+                  <div class="file-browser">
+                    <p>File and document management.</p>
+                  </div>
+                </div>
+                """,
+
+            "USER ACCOUNTS" =>
+                $"""
+                <div class="dnn-module dnn-module-accounts">
+                  <h2>{escapedTitle}</h2>
+                  <div class="accounts-admin">
+                    <p>User account management.</p>
+                  </div>
+                </div>
+                """,
+
+            "ACCOUNT LOGIN" =>
+                $"""
+                <div class="dnn-module dnn-module-login">
+                  <h2>{escapedTitle}</h2>
+                  <form class="login-form" action="#" method="post">
+                    <div class="form-group">
+                      <label for="login-user">Username</label>
+                      <input id="login-user" type="text" name="username" />
+                    </div>
+                    <div class="form-group">
+                      <label for="login-pass">Password</label>
+                      <input id="login-pass" type="password" name="password" />
+                    </div>
+                    <button type="submit">Log In</button>
+                  </form>
+                </div>
+                """,
+
+            _ =>
+                $"""
+                <div class="dnn-module dnn-module-custom" data-module-type="{System.Security.SecurityElement.Escape(moduleType) ?? moduleType}">
+                  <h2>{escapedTitle}</h2>
+                </div>
+                """,
+        };
     }
 
     // ------------------------------------------------------------------
