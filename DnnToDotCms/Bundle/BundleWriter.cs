@@ -1037,12 +1037,13 @@ public static class BundleWriter
                 string assetPath = BuildAssetPath(inode, pf.FileName);
 
                 // Rewrite DNN portal-relative url() references inside CSS
-                // files so that /Portals/{PortalName}/path → /path.
+                // files so that /Portals/{PortalName}/path → /path, and
+                // adjust slide-text-container padding for DotCMS layout.
                 byte[] portalFileContent = pf.Content;
                 if (pf.FileName.EndsWith(".css", StringComparison.OrdinalIgnoreCase))
                 {
                     string cssText = Encoding.UTF8.GetString(pf.Content);
-                    string rewritten = RewriteCssPortalUrls(cssText);
+                    string rewritten = RewriteSkinCssPadding(RewriteCssPortalUrls(cssText));
                     if (!ReferenceEquals(rewritten, cssText))
                         portalFileContent = Encoding.UTF8.GetBytes(rewritten);
                 }
@@ -3030,7 +3031,10 @@ public static class BundleWriter
         <ul{attrs}>
         #set($navItems = $navtool.getNav("/"))
         #foreach($navItem in $navItems)
-          #if($navItem.showOnMenu)
+          ## Only show folder items at the root level (href ends with "/").
+          ## Standalone pages at the root are skipped — they should be
+          ## nested inside a folder to appear in the nav.
+          #if($navItem.showOnMenu && $navItem.href && $navItem.href.endsWith("/"))
             ## Reset $children each iteration — Velocity #set does NOT
             ## clear a variable when the RHS evaluates to null, so without
             ## this reset the previous iteration's children would leak
@@ -3040,19 +3044,9 @@ public static class BundleWriter
             ## Attempt to get children from the nav item directly.
             #set($children = $navItem.children)
             ## Fallback: if children is empty, try to load them from the
-            ## folder path.  Folder items have href ending with "/"; page
-            ## items that live inside a folder (e.g. /personal/index) need
-            ## the parent folder path extracted first.
-            #if($children.size() == 0 && $navItem.href)
-              #if($navItem.href.endsWith("/"))
-                #set($children = $navtool.getNav($navItem.href))
-              #else
-                #set($hrefSlashPos = $navItem.href.lastIndexOf("/"))
-                #if($hrefSlashPos > 0)
-                  #set($folderPath = $navItem.href.substring(0, $hrefSlashPos))
-                  #set($children = $navtool.getNav("$folderPath/"))
-                #end
-              #end
+            ## folder path.
+            #if($children.size() == 0)
+              #set($children = $navtool.getNav($navItem.href))
             #end
             #if($children && $children.size() > 0)
               <li class="nav-item dropdown #if($navItem.active) active #end py-0 my-0">
@@ -3663,7 +3657,7 @@ public static class BundleWriter
             if (entry.Name.EndsWith(".css", StringComparison.OrdinalIgnoreCase))
             {
                 string cssText = Encoding.UTF8.GetString(fileBytes);
-                string rewritten = RewriteCssPortalUrls(cssText);
+                string rewritten = RewriteSkinCssPadding(RewriteCssPortalUrls(cssText));
                 if (!ReferenceEquals(rewritten, cssText))
                     fileBytes = Encoding.UTF8.GetBytes(rewritten);
             }
@@ -3727,7 +3721,7 @@ public static class BundleWriter
                         // that CSS background-image paths resolve correctly
                         // after migration.
                         string cssText = Encoding.UTF8.GetString(match.Content);
-                        string rewritten = RewriteCssPortalUrls(cssText);
+                        string rewritten = RewriteSkinCssPadding(RewriteCssPortalUrls(cssText));
                         content = Encoding.UTF8.GetBytes(rewritten);
                         // Mark the portal file as consumed so it is not also
                         // written at the site root.
@@ -3971,6 +3965,29 @@ public static class BundleWriter
         if (string.IsNullOrEmpty(css))
             return css;
         return CssPortalUrlRegex.Replace(css, "url($1/");
+    }
+
+    /// <summary>
+    /// Regex matching the <c>padding</c> declaration inside the
+    /// <c>#LoginSlideshow .slideshow .slide-text-container</c> rule in the
+    /// DNN skin CSS.  The DNN original uses <c>padding: 2% 0 0 1%</c> which
+    /// doesn't suit the DotCMS layout; this is rewritten to
+    /// <c>padding: 2% 0 0 5%</c> during migration.
+    /// </summary>
+    private static readonly Regex SlideTextContainerPaddingRegex = new(
+        @"(#LoginSlideshow\s+\.slideshow\s+\.slide-text-container\s*\{[^}]*?)padding:\s*2%\s+0\s+0\s+1%",
+        RegexOptions.Compiled | RegexOptions.Singleline);
+
+    /// <summary>
+    /// Rewrite the <c>.slide-text-container</c> padding inside the DNN skin
+    /// CSS from <c>2% 0 0 1%</c> to <c>2% 0 0 5%</c> so that text
+    /// overlay positioning matches the desired layout after migration.
+    /// </summary>
+    internal static string RewriteSkinCssPadding(string css)
+    {
+        if (string.IsNullOrEmpty(css))
+            return css;
+        return SlideTextContainerPaddingRegex.Replace(css, "${1}padding: 2% 0 0 5%");
     }
 
     private static void WriteTextEntry(TarWriter tar, string path, string content)

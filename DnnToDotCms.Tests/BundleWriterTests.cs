@@ -5871,19 +5871,20 @@ public class BundleWriterTests
     }
 
     [Fact]
-    public void BuildNavSnippet_FallsBackToParentFolderPath()
+    public void BuildNavSnippet_OnlyShowsFoldersAtRootLevel()
     {
-        // When a nav item's href does not end with "/" (e.g. an index page
-        // inside a folder), the snippet should extract the parent folder
-        // path and load children from there.
+        // Root-level items should be filtered to only folders (href ending
+        // with "/").  Pages at the root level should be skipped — they must
+        // be nested inside a folder to appear in the nav.
         string snippet = BundleWriter.BuildNavSnippet(
             @"<dnn:MENU runat=""server"" />");
 
-        // Must contain the folder-path extraction using lastIndexOf/substring.
-        Assert.Contains("lastIndexOf(\"/\")", snippet);
-        Assert.Contains("substring(0,", snippet);
-        // The extracted folder path is passed to $navtool.getNav with a trailing slash.
-        Assert.Contains("$navtool.getNav(\"$folderPath/\")", snippet);
+        // The condition must check both showOnMenu and that href ends with "/"
+        Assert.Contains("$navItem.href.endsWith(\"/\")", snippet);
+        // There should NOT be any fallback for page items (lastIndexOf/substring)
+        // since root-level pages are now excluded entirely.
+        Assert.DoesNotContain("lastIndexOf", snippet);
+        Assert.DoesNotContain("substring(0,", snippet);
     }
 
     [Fact]
@@ -5928,6 +5929,38 @@ public class BundleWriterTests
     {
         string result = BundleWriter.RewriteCssPortalUrls(input);
         Assert.Equal(expected, result);
+    }
+
+    [Fact]
+    public void RewriteSkinCssPadding_ChangesSlideTextContainerPadding()
+    {
+        // The DNN skin.css has padding: 2% 0 0 1% inside the
+        // #LoginSlideshow .slideshow .slide-text-container rule.
+        // RewriteSkinCssPadding should change it to 2% 0 0 5%.
+        const string input = """
+            #LoginSlideshow .slideshow .slide-text-container {
+              max-width: 800px;
+              padding: 2% 0 0 1%;
+              text-align: left;
+            }
+            """;
+
+        string result = BundleWriter.RewriteSkinCssPadding(input);
+
+        Assert.Contains("padding: 2% 0 0 5%", result);
+        Assert.DoesNotContain("padding: 2% 0 0 1%", result);
+    }
+
+    [Fact]
+    public void RewriteSkinCssPadding_LeavesUnrelatedCssUnchanged()
+    {
+        // CSS that doesn't match the #LoginSlideshow selector should be
+        // returned unchanged.
+        const string input = ".other-container { padding: 2% 0 0 1%; }";
+
+        string result = BundleWriter.RewriteSkinCssPadding(input);
+
+        Assert.Equal(input, result);
     }
 
     [Fact]
