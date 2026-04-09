@@ -4718,8 +4718,12 @@ public class BundleWriterTests
     }
 
     [Fact]
-    public void Write_WithHiddenPage_PageXmlHasShowOnMenuFalse()
+    public void Write_WithHiddenPage_PageXmlHasShowOnMenuTrue()
     {
+        // Even when a DNN page has IsVisible=false, the DotCMS page must
+        // have showOnMenu=true so that it appears in $navtool navigation.
+        // DNN sub-pages often have IsVisible=false but still need to be
+        // reachable through the menu after migration.
         string tabId = "hidden-page-test";
         var pages = new[]
         {
@@ -4750,7 +4754,7 @@ public class BundleWriterTests
 
             Assert.NotNull(pageXml);
             Assert.Contains("<string>showOnMenu</string>", pageXml);
-            Assert.Contains("<boolean>false</boolean>", pageXml);
+            Assert.Contains("<boolean>true</boolean>", pageXml);
         }
         finally { File.Delete(zipPath); }
     }
@@ -5886,11 +5890,11 @@ public class BundleWriterTests
     {
         // The slide text left padding must be large enough to clear the
         // 44px + 10px arrow at all viewport widths.  The desktop rule uses
-        // max(15%, 70px) and the mobile rule uses a fixed 70px minimum.
+        // max(15%, 100px) and the mobile rule uses a fixed 100px minimum.
         string css = BundleWriter.BuildSliderCss();
 
-        Assert.Contains("max(15%, 70px)", css);
-        Assert.Contains("padding: 7% 3% 7% 70px", css);
+        Assert.Contains("max(15%, 100px)", css);
+        Assert.Contains("padding: 7% 3% 7% 100px", css);
     }
 
     [Fact]
