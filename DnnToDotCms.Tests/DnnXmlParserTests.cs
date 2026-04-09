@@ -1231,7 +1231,7 @@ public class DnnXmlParserTests
     {
         string body = DnnXmlParser.BuildModuleBody("Console", "Nav <script>alert(1)</script>");
 
-        Assert.Contains("Nav &lt;script&gt;", body);
+        Assert.Contains("Nav &lt;script&gt;alert(1)&lt;/script&gt;", body);
         Assert.DoesNotContain("<script>alert", body);
     }
 }
