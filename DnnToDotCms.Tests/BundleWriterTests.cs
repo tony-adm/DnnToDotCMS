@@ -5866,6 +5866,34 @@ public class BundleWriterTests
     }
 
     [Fact]
+    public void BuildNavSnippet_FallsBackToParentFolderPath()
+    {
+        // When a nav item's href does not end with "/" (e.g. an index page
+        // inside a folder), the snippet should extract the parent folder
+        // path and load children from there.
+        string snippet = BundleWriter.BuildNavSnippet(
+            @"<dnn:MENU runat=""server"" />");
+
+        // Must contain the folder-path extraction using lastIndexOf/substring.
+        Assert.Contains("lastIndexOf(\"/\")", snippet);
+        Assert.Contains("substring(0,", snippet);
+        // The extracted folder path is passed to $navtool.getNav with a trailing slash.
+        Assert.Contains("$navtool.getNav(\"$folderPath/\")", snippet);
+    }
+
+    [Fact]
+    public void BuildSliderCss_TextContainerClearsArrow()
+    {
+        // The slide text left padding must be large enough to clear the
+        // 44px + 10px arrow at all viewport widths.  The desktop rule uses
+        // max(15%, 70px) and the mobile rule uses a fixed 70px minimum.
+        string css = BundleWriter.BuildSliderCss();
+
+        Assert.Contains("max(15%, 70px)", css);
+        Assert.Contains("padding: 7% 3% 7% 70px", css);
+    }
+
+    [Fact]
     public void BuildSliderJs_SelfInitialisesViaDataAttribute()
     {
         string js = BundleWriter.BuildSliderJs();
