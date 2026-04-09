@@ -637,6 +637,46 @@ public class DnnXmlParserTests
     }
 
     [Fact]
+    public void ExtractHtmlBodyFromDnnXml_SkipsAddContentPlaceholder()
+    {
+        // DNN HTML modules that only contain the placeholder text "Add Content..."
+        // should be skipped (return null) to avoid migrating empty modules.
+        const string xmlContent = """
+            <htmltext><content><![CDATA[Add Content...]]></content></htmltext>
+            """;
+
+        string? result = DnnXmlParser.ExtractHtmlBodyFromDnnXml(xmlContent);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void ExtractHtmlBodyFromDnnXml_SkipsAddContentPlaceholder_CaseInsensitive()
+    {
+        const string xmlContent = """
+            <htmltext><content><![CDATA[add content...]]></content></htmltext>
+            """;
+
+        string? result = DnnXmlParser.ExtractHtmlBodyFromDnnXml(xmlContent);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void ExtractHtmlBodyFromDnnXml_DoesNotSkipRealContent()
+    {
+        // Content that is NOT just the placeholder should still be returned.
+        const string xmlContent = """
+            <htmltext><content><![CDATA[&lt;p&gt;Welcome to our site!&lt;/p&gt;]]></content></htmltext>
+            """;
+
+        string? result = DnnXmlParser.ExtractHtmlBodyFromDnnXml(xmlContent);
+
+        Assert.NotNull(result);
+        Assert.Contains("Welcome to our site!", result);
+    }
+
+    [Fact]
     public void ParseHtmlContents_ReturnsEmptyWhenNoExportDb()
     {
         string tempDir = Path.GetTempFileName();

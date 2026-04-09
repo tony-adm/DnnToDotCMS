@@ -2777,6 +2777,7 @@ public static class BundleWriter
             string containerTheme = cSlash >= 0 ? rest[..cSlash] : string.Empty;
             using var reader = new StreamReader(entry.Open(), Encoding.UTF8);
             string html = ConvertAscxToContainerHtml(reader.ReadToEnd());
+            html = RewritePortalThemeUrls(html, containerTheme);
             containerDefs.Add((Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), name, html, containerTheme));
         }
 
@@ -2851,6 +2852,7 @@ public static class BundleWriter
             }
 
             var (html, header, paneUuidMap) = ConvertAscxToTemplateHtml(ascx, firstContainerId, themeName, name, availableThemeFiles);
+            html = RewritePortalThemeUrls(html, themeName);
             templateDefs.Add((Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), name, html, header, themeName, paneUuidMap));
         }
     }
@@ -3979,6 +3981,56 @@ public static class BundleWriter
         if (string.IsNullOrEmpty(css))
             return css;
         return CssPortalUrlRegex.Replace(css, "url($1/");
+    }
+
+    /// <summary>
+    /// Regex matching DNN portal-relative paths that reference files inside
+    /// the <c>Containers</c> directory (e.g.
+    /// <c>/Portals/FidelityBankTexas/Containers/FBOT/login.html</c>).
+    /// Captures the theme name so it can be mapped to the DotCMS
+    /// <c>/application/themes/{theme}/Containers/</c> path.
+    /// </summary>
+    private static readonly Regex PortalContainerUrlRegex = new(
+        @"/Portals/[^/]+/Containers/([^/]+)/",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>
+    /// Regex matching DNN portal-relative paths that reference files inside
+    /// the <c>Skins</c> directory (e.g.
+    /// <c>/Portals/FidelityBankTexas/Skins/FBOT/css/bootstrap.min.css</c>).
+    /// Captures the theme name so it can be mapped to the DotCMS
+    /// <c>/application/themes/{theme}/</c> path.
+    /// </summary>
+    private static readonly Regex PortalSkinUrlRegex = new(
+        @"/Portals/[^/]+/Skins/([^/]+)/",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>
+    /// Rewrites DNN <c>/Portals/{PortalName}/Containers/{ThemeName}/</c>
+    /// and <c>/Portals/{PortalName}/Skins/{ThemeName}/</c> paths in HTML to
+    /// their DotCMS equivalents under <c>/application/themes/</c>.
+    /// When <paramref name="themeName"/> is provided it overrides the theme
+    /// name captured from the URL (which may differ in casing from the
+    /// actual theme folder in the bundle).
+    /// </summary>
+    internal static string RewritePortalThemeUrls(string html, string themeName = "")
+    {
+        if (string.IsNullOrEmpty(html))
+            return html;
+
+        if (!string.IsNullOrEmpty(themeName))
+        {
+            html = PortalContainerUrlRegex.Replace(html, $"/application/themes/{themeName}/Containers/");
+            html = PortalSkinUrlRegex.Replace(html, $"/application/themes/{themeName}/");
+        }
+        else
+        {
+            // No override: use the theme name captured from the URL as-is.
+            html = PortalContainerUrlRegex.Replace(html, "/application/themes/$1/Containers/");
+            html = PortalSkinUrlRegex.Replace(html, "/application/themes/$1/");
+        }
+
+        return html;
     }
 
     /// <summary>

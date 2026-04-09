@@ -5932,6 +5932,54 @@ public class BundleWriterTests
         Assert.Equal(expected, result);
     }
 
+    [Theory]
+    [InlineData(
+        @"<iframe src=""/Portals/FidelityBankTexas/Containers/FBOT/login.html"" />",
+        "fbot",
+        @"<iframe src=""/application/themes/fbot/Containers/login.html"" />")]
+    [InlineData(
+        @"<link href=""/Portals/MyPortal/Skins/MyTheme/css/bootstrap.min.css"" />",
+        "mytheme",
+        @"<link href=""/application/themes/mytheme/css/bootstrap.min.css"" />")]
+    [InlineData(
+        @"<div>No portal URLs here</div>",
+        "fbot",
+        @"<div>No portal URLs here</div>")]
+    public void RewritePortalThemeUrls_RewritesContainerAndSkinPaths(
+        string input, string theme, string expected)
+    {
+        string result = BundleWriter.RewritePortalThemeUrls(input, theme);
+        Assert.Equal(expected, result);
+    }
+
+    [Fact]
+    public void RewritePortalThemeUrls_WithoutThemeName_UsesUrlThemeName()
+    {
+        const string input = @"<iframe src=""/Portals/FidelityBankTexas/Containers/FBOT/login.html"" />";
+        string result = BundleWriter.RewritePortalThemeUrls(input);
+        Assert.Equal(@"<iframe src=""/application/themes/FBOT/Containers/login.html"" />", result);
+    }
+
+    [Fact]
+    public void ConvertAscxToContainerHtml_LoginContainerIframeSrcRewrittenByCallerPipeline()
+    {
+        // Verifies the full pipeline: ConvertAscxToContainerHtml + RewritePortalThemeUrls
+        // rewrites the iframe src from a DNN portal path to the DotCMS theme path.
+        const string ascx = """
+            <%@ Control Language="C#" Inherits="DotNetNuke.UI.Containers.Container" %>
+            <div class="dropdown">
+              <button class="btn">Login</button>
+              <div class="dropdown-menu"><iframe src="/Portals/FidelityBankTexas/Containers/FBOT/login.html" style="width:248px; height:250px;" title="Online Banking"></iframe></div>
+            </div>
+            <div runat="server" id="ContentPane"></div>
+            """;
+        string html = BundleWriter.ConvertAscxToContainerHtml(ascx);
+        html = BundleWriter.RewritePortalThemeUrls(html, "fbot");
+
+        Assert.Contains(@"src=""/application/themes/fbot/Containers/login.html""", html);
+        Assert.DoesNotContain("/Portals/", html);
+    }
+
     [Fact]
     public void RewriteSkinCssPadding_ChangesSlideTextContainerPadding()
     {

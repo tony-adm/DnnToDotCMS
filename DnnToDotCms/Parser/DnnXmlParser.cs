@@ -1095,7 +1095,15 @@ public static class DnnXmlParser
             //      "{{PortalRoot}}home.css"         → "/home.css"
             decoded = decoded.Replace("{{PortalRoot}}", "/", StringComparison.OrdinalIgnoreCase);
 
-            return decoded.Trim();
+            string trimmed = decoded.Trim();
+
+            // Skip the DNN placeholder text that appears when a content
+            // editor has not yet entered any real content into an HTML
+            // module.  This avoids migrating empty placeholder modules.
+            if (trimmed.Equals("Add Content...", StringComparison.OrdinalIgnoreCase))
+                return null;
+
+            return trimmed;
         }
         catch
         {
