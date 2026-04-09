@@ -4711,8 +4711,9 @@ public class BundleWriterTests
             }
 
             Assert.NotNull(pageXml);
-            Assert.Contains("<string>showOnMenu</string>", pageXml);
-            Assert.Contains("<boolean>true</boolean>", pageXml);
+            // showOnMenu must use <string> type (not <boolean>) so
+            // DotCMS push-publish reliably persists the value.
+            Assert.Contains("<string>showOnMenu</string><string>true</string>", pageXml);
         }
         finally { File.Delete(zipPath); }
     }
@@ -4753,8 +4754,7 @@ public class BundleWriterTests
             }
 
             Assert.NotNull(pageXml);
-            Assert.Contains("<string>showOnMenu</string>", pageXml);
-            Assert.Contains("<boolean>true</boolean>", pageXml);
+            Assert.Contains("<string>showOnMenu</string><string>true</string>", pageXml);
         }
         finally { File.Delete(zipPath); }
     }
@@ -4958,9 +4958,10 @@ public class BundleWriterTests
             }
 
             Assert.NotNull(childPageXml);
-            // The child page must have showOnMenu=true.
-            Assert.Contains("<string>showOnMenu</string>", childPageXml);
-            Assert.Contains("<boolean>true</boolean>", childPageXml);
+            // The child page must have showOnMenu=true individually (not
+            // inherited from the folder) using <string> type for reliable
+            // push-publish import.
+            Assert.Contains("<string>showOnMenu</string><string>true</string>", childPageXml);
         }
         finally { File.Delete(zipPath); }
     }
@@ -5886,15 +5887,14 @@ public class BundleWriterTests
     }
 
     [Fact]
-    public void BuildSliderCss_TextContainerClearsArrow()
+    public void BuildSliderCss_TextContainerPadding()
     {
-        // The slide text left padding must be large enough to clear the
-        // 44px + 10px arrow at all viewport widths.  The desktop rule uses
-        // max(15%, 100px) and the mobile rule uses a fixed 100px minimum.
+        // The slide text container padding must match the DNN skin's
+        // "#LoginSlideshow .slideshow .slide-text-container" values to
+        // ensure text overlay positioning is consistent after migration.
         string css = BundleWriter.BuildSliderCss();
 
-        Assert.Contains("max(15%, 100px)", css);
-        Assert.Contains("padding: 7% 3% 7% 100px", css);
+        Assert.Contains("padding: 2% 0 0 5%", css);
     }
 
     [Fact]
