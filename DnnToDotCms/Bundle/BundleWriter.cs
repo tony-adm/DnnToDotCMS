@@ -1990,7 +1990,7 @@ public static class BundleWriter
             .slideshow .slideshowContent { position: relative; height: 569px; width: 100%; overflow: hidden; }
             .slideshow .slide-item { background-size: cover !important; background-position: 50% 50% !important; background-repeat: no-repeat !important; position: absolute !important; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; transition: opacity 0.8s ease-in-out; }
             .slideshow .slide-item.active { opacity: 1; }
-            .slideshow .slide-text-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; padding: 5% 4% 3% 15%; }
+            .slideshow .slide-text-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; padding: 5% 4% 3% max(15%, 70px); }
             .slideshow .slide-arrows { position: absolute; top: 50%; width: 100%; display: flex; justify-content: space-between; transform: translateY(-50%); z-index: 10; pointer-events: none; padding: 0 10px; box-sizing: border-box; }
             .slideshow .slide-arrows button { pointer-events: auto; background: rgba(0,0,0,0.4); color: #fff; border: none; font-size: 2rem; width: 44px; height: 44px; cursor: pointer; border-radius: 50%; display: flex; align-items: center; justify-content: center; transition: background 0.3s; }
             .slideshow .slide-arrows button:hover { background: rgba(0,0,0,0.7); }
@@ -1999,7 +1999,7 @@ public static class BundleWriter
             .slideshow .slide-nav .dot { background: rgba(255,255,255,0.5); border: none; width: 14px; height: 14px; border-radius: 50%; cursor: pointer; padding: 0; transition: background 0.3s; }
             .slideshow .slide-nav .dot.active { background: #fff; }
             @media (max-width: 990px) {
-              .slideshow .slide-text-container { padding: 7% 3% 7% 3%; }
+              .slideshow .slide-text-container { padding: 7% 3% 7% 70px; }
             }
             """;
     }
@@ -3039,10 +3039,20 @@ public static class BundleWriter
             #set($children = [])
             ## Attempt to get children from the nav item directly.
             #set($children = $navItem.children)
-            ## Fallback: if children is empty and the item looks like a folder
-            ## (href ending with "/"), explicitly load items from that path.
-            #if($children.size() == 0 && $navItem.href && $navItem.href.endsWith("/"))
-              #set($children = $navtool.getNav($navItem.href))
+            ## Fallback: if children is empty, try to load them from the
+            ## folder path.  Folder items have href ending with "/"; page
+            ## items that live inside a folder (e.g. /personal/index) need
+            ## the parent folder path extracted first.
+            #if($children.size() == 0 && $navItem.href)
+              #if($navItem.href.endsWith("/"))
+                #set($children = $navtool.getNav($navItem.href))
+              #else
+                #set($hrefSlashPos = $navItem.href.lastIndexOf("/"))
+                #if($hrefSlashPos > 0)
+                  #set($folderPath = $navItem.href.substring(0, $hrefSlashPos))
+                  #set($children = $navtool.getNav("$folderPath/"))
+                #end
+              #end
             #end
             #if($children && $children.size() > 0)
               <li class="nav-item dropdown #if($navItem.active) active #end py-0 my-0">
