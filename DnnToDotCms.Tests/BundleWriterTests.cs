@@ -4680,8 +4680,10 @@ public class BundleWriterTests
     // ------------------------------------------------------------------
 
     [Fact]
-    public void Write_WithVisiblePage_PageXmlHasShowOnMenuTrue()
+    public void Write_WithVisiblePage_RootLevelPageHasShowOnMenuFalse()
     {
+        // A Level-0 page that stays at the site root should have
+        // showOnMenu=false so it does not pollute the navigation menu.
         string tabId = "visible-page-test";
         var pages = new[]
         {
@@ -4711,20 +4713,20 @@ public class BundleWriterTests
             }
 
             Assert.NotNull(pageXml);
-            // showOnMenu must use <string> type (not <boolean>) so
-            // DotCMS push-publish reliably persists the value.
-            Assert.Contains("<string>showOnMenu</string><string>true</string>", pageXml);
+            // Root-level content pages must have showOnMenu=false to stay
+            // out of the nav menu.  The value must use <string> type (not
+            // <boolean>) for reliable DotCMS push-publish import.
+            Assert.Contains("<string>showOnMenu</string><string>false</string>", pageXml);
         }
         finally { File.Delete(zipPath); }
     }
 
     [Fact]
-    public void Write_WithHiddenPage_PageXmlHasShowOnMenuTrue()
+    public void Write_WithHiddenPage_RootLevelPageHasShowOnMenuFalse()
     {
-        // Even when a DNN page has IsVisible=false, the DotCMS page must
-        // have showOnMenu=true so that it appears in $navtool navigation.
-        // DNN sub-pages often have IsVisible=false but still need to be
-        // reachable through the menu after migration.
+        // Even when a DNN page has IsVisible=false, the behaviour for
+        // root-level pages is the same: showOnMenu=false to keep them
+        // out of the navigation menu.
         string tabId = "hidden-page-test";
         var pages = new[]
         {
@@ -4754,7 +4756,7 @@ public class BundleWriterTests
             }
 
             Assert.NotNull(pageXml);
-            Assert.Contains("<string>showOnMenu</string><string>true</string>", pageXml);
+            Assert.Contains("<string>showOnMenu</string><string>false</string>", pageXml);
         }
         finally { File.Delete(zipPath); }
     }
@@ -5871,20 +5873,19 @@ public class BundleWriterTests
     }
 
     [Fact]
-    public void BuildNavSnippet_OnlyShowsFoldersAtRootLevel()
+    public void BuildNavSnippet_FallsBackToParentFolderPath()
     {
-        // Root-level items should be filtered to only folders (href ending
-        // with "/").  Pages at the root level should be skipped — they must
-        // be nested inside a folder to appear in the nav.
+        // When a nav item's href does not end with "/" (e.g. an index page
+        // inside a folder), the snippet should extract the parent folder
+        // path and load children from there.
         string snippet = BundleWriter.BuildNavSnippet(
             @"<dnn:MENU runat=""server"" />");
 
-        // The condition must check both showOnMenu and that href ends with "/"
-        Assert.Contains("$navItem.href.endsWith(\"/\")", snippet);
-        // There should NOT be any fallback for page items (lastIndexOf/substring)
-        // since root-level pages are now excluded entirely.
-        Assert.DoesNotContain("lastIndexOf", snippet);
-        Assert.DoesNotContain("substring(0,", snippet);
+        // Must contain the folder-path extraction using lastIndexOf/substring.
+        Assert.Contains("lastIndexOf(\"/\")", snippet);
+        Assert.Contains("substring(0,", snippet);
+        // The extracted folder path is passed to $navtool.getNav with a trailing slash.
+        Assert.Contains("$navtool.getNav(\"$folderPath/\")", snippet);
     }
 
     [Fact]

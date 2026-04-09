@@ -803,12 +803,19 @@ public static class BundleWriter
                     url             = "index";
                 }
 
+                // Root-level pages that stay at the site root (not moved into
+                // a folder) are content-only pages and should be hidden from
+                // the navigation menu.  Pages nested inside folders (Level > 0
+                // or Level 0 pages moved into a conflicting folder) remain
+                // visible so the nav tree is populated correctly.
+                bool pageShowOnMenu = !(page.Level == 0 && pageParentPath == "/");
+
                 string pageXml = BuildPageXml(
                     identifier, inode, page.Name, url,
                     contentHostId, templateId,
                     defaultContainerId, pageContentItems ?? [], paneUuidMap,
                     paneContainerIds, pageSliderPaneUuids,
-                    showOnMenu: true, page.TabOrder,
+                    showOnMenu: pageShowOnMenu, page.TabOrder,
                     pageFolderInode, pageParentPath);
                 WriteTextEntry(
                     tar,
@@ -3031,10 +3038,7 @@ public static class BundleWriter
         <ul{attrs}>
         #set($navItems = $navtool.getNav("/"))
         #foreach($navItem in $navItems)
-          ## Only show folder items at the root level (href ends with "/").
-          ## Standalone pages at the root are skipped — they should be
-          ## nested inside a folder to appear in the nav.
-          #if($navItem.showOnMenu && $navItem.href && $navItem.href.endsWith("/"))
+          #if($navItem.showOnMenu)
             ## Reset $children each iteration — Velocity #set does NOT
             ## clear a variable when the RHS evaluates to null, so without
             ## this reset the previous iteration's children would leak
@@ -3044,9 +3048,19 @@ public static class BundleWriter
             ## Attempt to get children from the nav item directly.
             #set($children = $navItem.children)
             ## Fallback: if children is empty, try to load them from the
-            ## folder path.
-            #if($children.size() == 0)
-              #set($children = $navtool.getNav($navItem.href))
+            ## folder path.  Folder items have href ending with "/"; page
+            ## items that live inside a folder (e.g. /personal/index) need
+            ## the parent folder path extracted first.
+            #if($children.size() == 0 && $navItem.href)
+              #if($navItem.href.endsWith("/"))
+                #set($children = $navtool.getNav($navItem.href))
+              #else
+                #set($hrefSlashPos = $navItem.href.lastIndexOf("/"))
+                #if($hrefSlashPos > 0)
+                  #set($folderPath = $navItem.href.substring(0, $hrefSlashPos))
+                  #set($children = $navtool.getNav("$folderPath/"))
+                #end
+              #end
             #end
             #if($children && $children.size() > 0)
               <li class="nav-item dropdown #if($navItem.active) active #end py-0 my-0">
