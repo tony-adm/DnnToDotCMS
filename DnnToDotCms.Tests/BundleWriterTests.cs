@@ -4718,7 +4718,7 @@ public class BundleWriterTests
     }
 
     [Fact]
-    public void Write_WithHiddenPage_PageXmlStillHasShowOnMenuTrue()
+    public void Write_WithHiddenPage_PageXmlHasShowOnMenuTrue()
     {
         // Even when a DNN page has IsVisible=false, the DotCMS page must
         // have showOnMenu=true so that it appears in $navtool navigation.
