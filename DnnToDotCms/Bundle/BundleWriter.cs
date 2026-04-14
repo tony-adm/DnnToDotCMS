@@ -284,9 +284,10 @@ public static class BundleWriter
                 if (!string.IsNullOrEmpty(hc.IconFile))
                     imageUrl = "/" + hc.IconFile.TrimStart('/');
 
-                // Rewrite DNN portal-relative paths in HTML content bodies
-                // (e.g. /portals/SecurityStateBankOklahoma/Images/logo.png)
-                // to site-root-relative paths (e.g. /Images/logo.png).
+                // Rewrite DNN portal-relative paths in HTML content bodies.
+                // RewritePortalThemeUrls handles three categories: Skins/ and
+                // Containers/ paths → /application/themes/{theme}/, then
+                // remaining /Portals/{name}/ paths → / (site root).
                 string body = RewritePortalThemeUrls(hc.HtmlBody);
                 string contentXml = BuildContentXml(
                     identifier, inode, hc.Title, body,
@@ -4015,19 +4016,32 @@ public static class BundleWriter
 
     /// <summary>
     /// Regex matching general DNN portal-relative content paths such as
-    /// <c>/Portals/SecurityStateBankOklahoma/Images/logo.png</c>.  These
-    /// are portal files that have been placed at the site root in DotCMS
-    /// (e.g. <c>/Images/logo.png</c>).  Must run after the Skins/ and
-    /// Containers/ rewrites so those more-specific patterns are handled first.
+    /// <c>/Portals/SecurityStateBankOklahoma/Images/logo.png</c> or
+    /// <c>/portals/MyPortal/PDF/doc.pdf</c>.  These are portal files that
+    /// have been placed at the site root in DotCMS (e.g. <c>/Images/logo.png</c>).
+    /// The pattern <c>/Portals/{one-or-more-non-slash-chars}/</c> is intentionally
+    /// broad to catch all portal-prefixed paths.  It must run <b>after</b> the
+    /// more-specific <see cref="PortalSkinUrlRegex"/> and
+    /// <see cref="PortalContainerUrlRegex"/> rewrites in
+    /// <see cref="RewritePortalThemeUrls"/> so that Skins/ and Containers/
+    /// sub-paths are redirected to <c>/application/themes/</c> rather than
+    /// being stripped to the site root.
     /// </summary>
     private static readonly Regex PortalContentUrlRegex = new(
         @"/Portals/[^/]+/",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     /// <summary>
-    /// Rewrites DNN <c>/Portals/{PortalName}/Containers/{ThemeName}/</c>
-    /// and <c>/Portals/{PortalName}/Skins/{ThemeName}/</c> paths in HTML to
-    /// their DotCMS equivalents under <c>/application/themes/</c>.
+    /// Rewrites DNN <c>/Portals/{PortalName}/</c> paths in HTML to their
+    /// DotCMS equivalents.  Three categories are handled in order:
+    /// <list type="number">
+    ///   <item><c>/Portals/{name}/Containers/{theme}/</c> →
+    ///         <c>/application/themes/{theme}/Containers/</c></item>
+    ///   <item><c>/Portals/{name}/Skins/{theme}/</c> →
+    ///         <c>/application/themes/{theme}/</c></item>
+    ///   <item>All remaining <c>/Portals/{name}/</c> → <c>/</c>
+    ///         (general portal content like images, PDFs, etc.)</item>
+    /// </list>
     /// When <paramref name="themeName"/> is provided it overrides the theme
     /// name captured from the URL (which may differ in casing from the
     /// actual theme folder in the bundle).
