@@ -1387,7 +1387,7 @@ public class BundleWriterTests
             ascx, "ctr1", themeName: "fbot");
 
         Assert.Contains(@"src=""/application/themes/fbot/js/custom.js""", body);
-        Assert.Contains(@"src=""/application/themes/fbot//modal/modal.js""", body);
+        Assert.Contains(@"src=""/application/themes/fbot/modal/modal.js""", body);
         Assert.DoesNotContain("SkinPath", body);
     }
 
@@ -1403,7 +1403,7 @@ public class BundleWriterTests
         var (body, _, _) = BundleWriter.ConvertAscxToTemplateHtml(
             ascx, "ctr1", themeName: "fbot");
 
-        Assert.Contains(@"src=""/application/themes/fbot//modal/modal.css""", body);
+        Assert.Contains(@"src=""/application/themes/fbot/modal/modal.css""", body);
         Assert.DoesNotContain("SkinPath", body);
     }
 

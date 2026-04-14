@@ -284,8 +284,12 @@ public static class BundleWriter
                 if (!string.IsNullOrEmpty(hc.IconFile))
                     imageUrl = "/" + hc.IconFile.TrimStart('/');
 
+                // Rewrite DNN portal-relative paths in HTML content bodies
+                // (e.g. /portals/SecurityStateBankOklahoma/Images/logo.png)
+                // to site-root-relative paths (e.g. /Images/logo.png).
+                string body = RewritePortalThemeUrls(hc.HtmlBody);
                 string contentXml = BuildContentXml(
-                    identifier, inode, hc.Title, hc.HtmlBody,
+                    identifier, inode, hc.Title, body,
                     contentHostId, htmlContentTypeId, htmlContentTypeVariable,
                     imageUrl);
                 WriteTextEntry(
@@ -3299,11 +3303,13 @@ public static class BundleWriter
         new(@"<dnn:DnnJsInclude\s[^>]*FilePath=""([^""]+)""[^>]*/?>",
             RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
 
-    // Matches <%= SkinPath %> ASP.NET expressions (with optional surrounding whitespace).
-    // DNN skins use this expression in <script src> and <link> tags to reference
-    // files relative to the skin folder.
+    // Matches <%= SkinPath %> ASP.NET expressions (with optional surrounding whitespace)
+    // followed by an optional "/" separator.  DNN skins use this expression in
+    // <script src> and <link> tags to reference files relative to the skin folder.
+    // Consuming the optional trailing "/" prevents double-slash paths when the
+    // replacement already ends with "/".
     private static readonly Regex SkinPathExpressionRegex =
-        new(@"<%=\s*SkinPath\s*%>", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        new(@"<%=\s*SkinPath\s*%>/?", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     // Matches <%@ Register ... %> directives in DNN ASCX files.
     private static readonly Regex RegisterDirectiveRegex =
@@ -3433,6 +3439,8 @@ public static class BundleWriter
         // CodeBlockRegex strips all <% ... %> blocks.  DNN skins use this
         // ASP.NET expression in <script src> and <link> tags to reference
         // files relative to the skin folder (e.g. custom.js, modal.js).
+        // The regex also matches an optional "/" after the expression
+        // so the replacement never produces a double-slash path.
         if (!string.IsNullOrWhiteSpace(themeName))
             html = SkinPathExpressionRegex.Replace(html, $"/application/themes/{themeName}/");
 
@@ -3467,11 +3475,11 @@ public static class BundleWriter
             string themeBase = $"/application/themes/{themeName}/";
             html = DnnCssIncludeRegex.Replace(html, m =>
             {
-                cssTags.Add($@"<link rel=""stylesheet"" href=""{themeBase}{m.Groups[1].Value}"" />");
+                cssTags.Add($@"<link rel=""stylesheet"" href=""{themeBase}{m.Groups[1].Value.TrimStart('/')}"" />");
                 return string.Empty;
             });
             html = DnnJsIncludeRegex.Replace(html,
-                m => $@"<script src=""{themeBase}{m.Groups[1].Value}""></script>");
+                m => $@"<script src=""{themeBase}{m.Groups[1].Value.TrimStart('/')}""></script>");
         }
 
         // Replace DNN server-side pane divs (runat="server") with #parseContainer
@@ -4006,6 +4014,17 @@ public static class BundleWriter
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     /// <summary>
+    /// Regex matching general DNN portal-relative content paths such as
+    /// <c>/Portals/SecurityStateBankOklahoma/Images/logo.png</c>.  These
+    /// are portal files that have been placed at the site root in DotCMS
+    /// (e.g. <c>/Images/logo.png</c>).  Must run after the Skins/ and
+    /// Containers/ rewrites so those more-specific patterns are handled first.
+    /// </summary>
+    private static readonly Regex PortalContentUrlRegex = new(
+        @"/Portals/[^/]+/",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>
     /// Rewrites DNN <c>/Portals/{PortalName}/Containers/{ThemeName}/</c>
     /// and <c>/Portals/{PortalName}/Skins/{ThemeName}/</c> paths in HTML to
     /// their DotCMS equivalents under <c>/application/themes/</c>.
@@ -4029,6 +4048,11 @@ public static class BundleWriter
             html = PortalContainerUrlRegex.Replace(html, "/application/themes/$1/Containers/");
             html = PortalSkinUrlRegex.Replace(html, "/application/themes/$1/");
         }
+
+        // Rewrite remaining /Portals/{PortalName}/ references (images, PDFs,
+        // etc.) to the DotCMS site root.  These portal files are imported
+        // under / so the portal prefix must be stripped.
+        html = PortalContentUrlRegex.Replace(html, "/");
 
         return html;
     }
